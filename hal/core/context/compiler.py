@@ -196,7 +196,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
             parts.append(
                 "# Skills\n\n"
                 "The following skills extend your capabilities. "
-                "To use a skill, read its SKILL.md file using the read_file tool.\n"
+                "To use a skill, read its SKILL.md file using the fs tool (action: read).\n"
                 'Skills with available="false" need dependencies installed first '
                 "- you can try installing them with apt/brew.\n\n"
                 f"{skills_summary}"
