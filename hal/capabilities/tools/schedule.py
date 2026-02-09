@@ -2,9 +2,9 @@
 
 from typing import Any
 
-from hal.agent.tools.base import Tool
-from hal.cron.service import CronService
-from hal.cron.types import CronSchedule
+from hal.capabilities.tools.base import Tool
+from hal.capabilities.scheduling.cron_service import CronService
+from hal.capabilities.scheduling.types import CronSchedule
 
 
 class CronTool(Tool):

@@ -7,8 +7,8 @@ from typing import Any
 import litellm
 from litellm import acompletion
 
-from hal.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from hal.providers.registry import find_by_model, find_gateway
+from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from hal.infra.providers.registry import find_by_model, find_gateway
 
 
 class LiteLLMProvider(LLMProvider):

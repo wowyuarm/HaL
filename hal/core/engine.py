@@ -9,16 +9,16 @@ from loguru import logger
 
 from hal.bus.events import InboundMessage, OutboundMessage
 from hal.bus.queue import MessageBus
-from hal.providers.base import LLMProvider
-from hal.agent.context import ContextBuilder
-from hal.agent.tools.registry import ToolRegistry
-from hal.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
-from hal.agent.tools.shell import ExecTool
-from hal.agent.tools.web import WebSearchTool, WebFetchTool
-from hal.agent.tools.message import MessageTool
-from hal.agent.tools.spawn import SpawnTool
-from hal.agent.tools.cron import CronTool
-from hal.agent.subagent import SubagentManager
+from hal.infra.providers.base import LLMProvider
+from hal.core.context.compiler import ContextBuilder
+from hal.capabilities.tools.registry import ToolRegistry
+from hal.capabilities.tools.fs import ReadFileTool, WriteFileTool, EditFileTool, ListDirTool
+from hal.capabilities.tools.exec import ExecTool
+from hal.capabilities.tools.web import WebSearchTool, WebFetchTool
+from hal.capabilities.tools.message import MessageTool
+from hal.capabilities.tools.spawn import SpawnTool
+from hal.capabilities.tools.schedule import CronTool
+from hal.core.subagent import SubagentManager
 from hal.session.manager import SessionManager
 
 
@@ -47,8 +47,8 @@ class AgentLoop:
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
     ):
-        from hal.config.schema import ExecToolConfig
-        from hal.cron.service import CronService
+        from hal.infra.config.schema import ExecToolConfig
+        from hal.capabilities.scheduling.cron_service import CronService
         self.bus = bus
         self.provider = provider
         self.workspace = workspace

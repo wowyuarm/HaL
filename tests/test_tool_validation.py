@@ -1,7 +1,7 @@
 from typing import Any
 
-from hal.agent.tools.base import Tool
-from hal.agent.tools.registry import ToolRegistry
+from hal.capabilities.tools.base import Tool
+from hal.capabilities.tools.registry import ToolRegistry
 
 
 class SampleTool(Tool):

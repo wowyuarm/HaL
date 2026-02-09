@@ -2,10 +2,10 @@
 
 from typing import Any, TYPE_CHECKING
 
-from hal.agent.tools.base import Tool
+from hal.capabilities.tools.base import Tool
 
 if TYPE_CHECKING:
-    from hal.agent.subagent import SubagentManager
+    from hal.core.subagent import SubagentManager
 
 
 class SpawnTool(Tool):

@@ -9,7 +9,7 @@ from typing import Any, Callable, Coroutine
 
 from loguru import logger
 
-from hal.cron.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
+from hal.capabilities.scheduling.types import CronJob, CronJobState, CronPayload, CronSchedule, CronStore
 
 
 def _now_ms() -> int:

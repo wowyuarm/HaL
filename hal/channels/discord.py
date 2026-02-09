@@ -12,7 +12,7 @@ from loguru import logger
 from hal.bus.events import OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.channels.base import BaseChannel
-from hal.config.schema import DiscordConfig
+from hal.infra.config.schema import DiscordConfig
 
 
 DISCORD_API_BASE = "https://discord.com/api/v10"

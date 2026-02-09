@@ -127,7 +127,7 @@ class Config(BaseSettings):
     
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        from hal.providers.registry import PROVIDERS
+        from hal.infra.providers.registry import PROVIDERS
         model_lower = (model or self.agents.defaults.model).lower()
 
         # Match by keyword (order follows PROVIDERS registry)
@@ -150,7 +150,7 @@ class Config(BaseSettings):
     
     def get_api_base(self, model: str | None = None) -> str | None:
         """Get API base URL for the given model. Applies default URLs for known gateways."""
-        from hal.providers.registry import PROVIDERS
+        from hal.infra.providers.registry import PROVIDERS
         p = self.get_provider(model)
         if p and p.api_base:
             return p.api_base

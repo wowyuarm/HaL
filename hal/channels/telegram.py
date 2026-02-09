@@ -13,7 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from hal.bus.events import OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.channels.base import BaseChannel
-from hal.config.schema import TelegramConfig
+from hal.infra.config.schema import TelegramConfig
 
 if TYPE_CHECKING:
     from hal.session.manager import SessionManager
@@ -323,7 +323,7 @@ class TelegramChannel(BaseChannel):
                 
                 # Handle voice transcription
                 if media_type == "voice" or media_type == "audio":
-                    from hal.providers.transcription import GroqTranscriptionProvider
+                    from hal.infra.providers.transcription import GroqTranscriptionProvider
                     transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
                     transcription = await transcriber.transcribe(file_path)
                     if transcription:

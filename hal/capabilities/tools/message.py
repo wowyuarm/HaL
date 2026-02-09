@@ -2,7 +2,7 @@
 
 from typing import Any, Callable, Awaitable
 
-from hal.agent.tools.base import Tool
+from hal.capabilities.tools.base import Tool
 from hal.bus.events import OutboundMessage
 
 

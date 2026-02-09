@@ -10,7 +10,7 @@ from loguru import logger
 from hal.bus.events import OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.channels.base import BaseChannel
-from hal.config.schema import Config
+from hal.infra.config.schema import Config
 
 if TYPE_CHECKING:
     from hal.session.manager import SessionManager

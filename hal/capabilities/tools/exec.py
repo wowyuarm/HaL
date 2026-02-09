@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hal.agent.tools.base import Tool
+from hal.capabilities.tools.base import Tool
 
 
 class ExecTool(Tool):

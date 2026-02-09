@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hal.config.schema import Config
+from hal.infra.config.schema import Config
 
 
 def get_config_path() -> Path:

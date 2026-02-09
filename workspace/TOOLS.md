@@ -145,6 +145,6 @@ write_file(
 ## Adding Custom Tools
 
 To add custom tools:
-1. Create a class that extends `Tool` in `hal/agent/tools/`
+1. Create a class that extends `Tool` in `hal/capabilities/tools/`
 2. Implement `name`, `description`, `parameters`, and `execute`
 3. Register it in `AgentLoop._register_default_tools()`

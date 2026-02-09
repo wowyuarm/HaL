@@ -6,8 +6,8 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from hal.agent.memory import MemoryStore
-from hal.agent.skills import SkillsLoader
+from hal.core.memory.store import MemoryStore
+from hal.capabilities.skills.loader import SkillsLoader
 
 
 class ContextBuilder:

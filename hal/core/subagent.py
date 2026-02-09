@@ -10,11 +10,11 @@ from loguru import logger
 
 from hal.bus.events import InboundMessage
 from hal.bus.queue import MessageBus
-from hal.providers.base import LLMProvider
-from hal.agent.tools.registry import ToolRegistry
-from hal.agent.tools.filesystem import ReadFileTool, WriteFileTool, ListDirTool
-from hal.agent.tools.shell import ExecTool
-from hal.agent.tools.web import WebSearchTool, WebFetchTool
+from hal.infra.providers.base import LLMProvider
+from hal.capabilities.tools.registry import ToolRegistry
+from hal.capabilities.tools.fs import ReadFileTool, WriteFileTool, ListDirTool
+from hal.capabilities.tools.exec import ExecTool
+from hal.capabilities.tools.web import WebSearchTool, WebFetchTool
 
 
 class SubagentManager:
@@ -36,7 +36,7 @@ class SubagentManager:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
-        from hal.config.schema import ExecToolConfig
+        from hal.infra.config.schema import ExecToolConfig
         self.provider = provider
         self.workspace = workspace
         self.bus = bus

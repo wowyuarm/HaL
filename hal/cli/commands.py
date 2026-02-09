@@ -42,8 +42,8 @@ def main(
 @app.command()
 def onboard():
     """Initialize HaL configuration and workspace."""
-    from hal.config.loader import get_config_path, save_config
-    from hal.config.schema import Config
+    from hal.infra.config.loader import get_config_path, save_config
+    from hal.infra.config.schema import Config
     from hal.utils.helpers import get_workspace_path
     
     config_path = get_config_path()
@@ -190,7 +190,7 @@ def migrate():
 
 def _make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
-    from hal.providers.litellm_provider import LiteLLMProvider
+    from hal.infra.providers.litellm_provider import LiteLLMProvider
     p = config.get_provider()
     model = config.agents.defaults.model
     if not (p and p.api_key) and not model.startswith("bedrock/"):
@@ -216,14 +216,14 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Start the HaL gateway."""
-    from hal.config.loader import load_config, get_data_dir
+    from hal.infra.config.loader import load_config, get_data_dir
     from hal.bus.queue import MessageBus
-    from hal.agent.loop import AgentLoop
+    from hal.core.engine import AgentLoop
     from hal.channels.manager import ChannelManager
     from hal.session.manager import SessionManager
-    from hal.cron.service import CronService
-    from hal.cron.types import CronJob
-    from hal.heartbeat.service import HeartbeatService
+    from hal.capabilities.scheduling.cron_service import CronService
+    from hal.capabilities.scheduling.types import CronJob
+    from hal.capabilities.scheduling.heartbeat import HeartbeatService
     
     if verbose:
         import logging
@@ -330,9 +330,9 @@ def agent(
     session_id: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
 ):
     """Interact with the agent directly."""
-    from hal.config.loader import load_config
+    from hal.infra.config.loader import load_config
     from hal.bus.queue import MessageBus
-    from hal.agent.loop import AgentLoop
+    from hal.core.engine import AgentLoop
     
     config = load_config()
     
@@ -387,7 +387,7 @@ app.add_typer(channels_app, name="channels")
 @channels_app.command("status")
 def channels_status():
     """Show channel status."""
-    from hal.config.loader import load_config
+    from hal.infra.config.loader import load_config
 
     config = load_config()
 
@@ -512,8 +512,8 @@ def cron_list(
     all: bool = typer.Option(False, "--all", "-a", help="Include disabled jobs"),
 ):
     """List scheduled jobs."""
-    from hal.config.loader import get_data_dir
-    from hal.cron.service import CronService
+    from hal.infra.config.loader import get_data_dir
+    from hal.capabilities.scheduling.cron_service import CronService
     
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
@@ -566,9 +566,9 @@ def cron_add(
     channel: str = typer.Option(None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"),
 ):
     """Add a scheduled job."""
-    from hal.config.loader import get_data_dir
-    from hal.cron.service import CronService
-    from hal.cron.types import CronSchedule
+    from hal.infra.config.loader import get_data_dir
+    from hal.capabilities.scheduling.cron_service import CronService
+    from hal.capabilities.scheduling.types import CronSchedule
     
     # Determine schedule type
     if every:
@@ -603,8 +603,8 @@ def cron_remove(
     job_id: str = typer.Argument(..., help="Job ID to remove"),
 ):
     """Remove a scheduled job."""
-    from hal.config.loader import get_data_dir
-    from hal.cron.service import CronService
+    from hal.infra.config.loader import get_data_dir
+    from hal.capabilities.scheduling.cron_service import CronService
     
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
@@ -621,8 +621,8 @@ def cron_enable(
     disable: bool = typer.Option(False, "--disable", help="Disable instead of enable"),
 ):
     """Enable or disable a job."""
-    from hal.config.loader import get_data_dir
-    from hal.cron.service import CronService
+    from hal.infra.config.loader import get_data_dir
+    from hal.capabilities.scheduling.cron_service import CronService
     
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
@@ -641,8 +641,8 @@ def cron_run(
     force: bool = typer.Option(False, "--force", "-f", help="Run even if disabled"),
 ):
     """Manually run a job."""
-    from hal.config.loader import get_data_dir
-    from hal.cron.service import CronService
+    from hal.infra.config.loader import get_data_dir
+    from hal.capabilities.scheduling.cron_service import CronService
     
     store_path = get_data_dir() / "cron" / "jobs.json"
     service = CronService(store_path)
@@ -664,7 +664,7 @@ def cron_run(
 @app.command()
 def status():
     """Show HaL status."""
-    from hal.config.loader import load_config, get_config_path
+    from hal.infra.config.loader import load_config, get_config_path
 
     config_path = get_config_path()
     config = load_config()
@@ -676,7 +676,7 @@ def status():
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
     if config_path.exists():
-        from hal.providers.registry import PROVIDERS
+        from hal.infra.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
         
