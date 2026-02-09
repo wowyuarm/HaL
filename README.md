@@ -281,7 +281,7 @@ That's it. Environment variables, model prefixing, config matching, and `hal sta
 | `hal status` | Show status |
 | `hal channels login` | Link WhatsApp (scan QR) |
 | `hal channels status` | Show channel status |
-| `hal migrate` | Migrate from `~/.nanobot/` to `~/.hal/` |
+
 
 <details>
 <summary><b>Scheduled Tasks (Cron)</b></summary>

@@ -5,7 +5,7 @@ Implements a 5-layer context system optimized for prompt cache hits:
     Layer 0 — Identity (stable, rarely changes)
     Layer 1 — Personality (per-agent instance)
     Layer 2 — Capabilities (tools, skills)
-    Layer 3 — Memory (dynamic per request)
+    Layer 3 — Situation (dynamic per request: time, mode, memory)
     Layer 4 — Conversation (current session + message)
 """
 
@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hal.capabilities.skills.loader import SkillsLoader
-from hal.core.memory.store import MemoryStore
 
 if TYPE_CHECKING:
     from hal.core.memory.manager import MemoryManager
@@ -33,6 +32,26 @@ class ExecutionMode(str, Enum):
     OPERATOR = "operator"  # Scheduled monitoring / cron
 
 
+# ------------------------------------------------------------------
+# Mode-specific behavioral directives
+# ------------------------------------------------------------------
+
+_MODE_DIRECTIVES: dict[ExecutionMode, str] = {
+    ExecutionMode.COLLAB: """\
+## Mode: Collaborative
+Real-time conversation. Be responsive and concise. \
+Use 'spawn' for tasks that need many steps.""",
+    ExecutionMode.ASYNC: """\
+## Mode: Background Task
+You are a subagent executing a specific task. \
+Stay focused, be thorough, and report your findings clearly.""",
+    ExecutionMode.OPERATOR: """\
+## Mode: Operator
+Running autonomously via scheduled trigger. \
+Only report when there is something actionable. High signal-to-noise.""",
+}
+
+
 class ContextCompiler:
     """
     Assembles layered context for LLM calls.
@@ -43,7 +62,9 @@ class ContextCompiler:
     Backward compatible: exposes the same API as the old ContextBuilder.
     """
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"]
+    # Bootstrap files loaded into Layer 1 (personality/instructions).
+    # TOOLS.md provides usage guidance (not definitions — those come from function calling).
+    BOOTSTRAP_FILES = ["SOUL.md", "USER.md", "AGENTS.md", "TOOLS.md", "IDENTITY.md"]
 
     def __init__(
         self,
@@ -51,13 +72,11 @@ class ContextCompiler:
         memory_manager: "MemoryManager | None" = None,
     ):
         self.workspace = workspace
-        # Legacy memory store (for backward compatibility)
-        self._legacy_memory = MemoryStore(workspace)
         self._memory_manager = memory_manager
         self.skills = SkillsLoader(workspace)
 
     # ------------------------------------------------------------------
-    # Public API (backward compatible with ContextBuilder)
+    # Public API
     # ------------------------------------------------------------------
 
     def build_system_prompt(
@@ -68,27 +87,27 @@ class ContextCompiler:
         """Build the system prompt from layered context.
 
         Layers 0-2 are assembled here (stable prefix).
-        Layer 3 (memory) is appended dynamically.
+        Layer 3 (situation) is appended dynamically.
         """
         parts: list[str] = []
 
-        # Layer 0 — Identity
+        # Layer 0 — Identity (stable across all requests)
         parts.append(self._build_identity())
 
-        # Layer 1 — Personality (bootstrap files: SOUL.md, USER.md, etc.)
+        # Layer 1 — Personality (per-agent: SOUL.md, USER.md, AGENTS.md)
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
 
-        # Layer 2 — Capabilities (tools + skills)
+        # Layer 2 — Capabilities (skills; tools are in function calling schema)
         capabilities = self._build_capabilities()
         if capabilities:
             parts.append(capabilities)
 
-        # Layer 3 — Memory (dynamic)
-        memory_ctx = self._build_memory_context(mode)
-        if memory_ctx:
-            parts.append(f"# Memory\n\n{memory_ctx}")
+        # Layer 3 — Situation (dynamic: time, mode, memory)
+        situation = self._build_situation(mode)
+        if situation:
+            parts.append(situation)
 
         return "\n\n---\n\n".join(parts)
 
@@ -113,7 +132,7 @@ class ContextCompiler:
         # Layers 0-3: system prompt
         system_prompt = self.build_system_prompt(skill_names, mode)
         if channel and chat_id:
-            system_prompt += f"\n\n## Current Session\nChannel: {channel}\nChat ID: {chat_id}"
+            system_prompt += f"\n\nChannel: {channel} | Chat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
 
         # Layer 4: conversation history
@@ -130,10 +149,10 @@ class ContextCompiler:
     # ------------------------------------------------------------------
 
     def _build_identity(self) -> str:
-        """Layer 0 — Core identity. Stable across requests."""
-        from datetime import datetime
+        """Layer 0 — Core identity. Truly stable across requests.
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        No time, no per-request state. Only who I am, how I think, how I act.
+        """
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = (
@@ -141,33 +160,22 @@ class ContextCompiler:
             f"{platform.machine()}, Python {platform.python_version()}"
         )
 
-        return f"""# HaL 🔴
+        return f"""# HaL
 
-You are HaL, a reliable and precise digital butler. You have access to tools that allow you to:
-- Read, write, and edit files
-- Execute shell commands
-- Search the web and fetch web pages
-- Send messages to users on chat channels
-- Spawn subagents for complex background tasks
+You are HaL, a digital butler — reliable, precise, and independent.
 
-## Current Time
-{now}
+## Principles
+- Understand intent before acting; ask when ambiguous.
+- Prefer simplicity. Act directly for simple tasks; think through complex ones.
+- Use tools purposefully. Reply with text for normal conversation.
+- Use 'message' only for cross-channel delivery (e.g., cron → Telegram).
+- Record lasting knowledge to memory/MEMORY.md.
 
-## Runtime
-{runtime}
-
-## Workspace
-Your workspace is at: {workspace_path}
-- Memory files: {workspace_path}/memory/MEMORY.md
-- Daily notes: {workspace_path}/memory/YYYY-MM-DD.md
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-
-IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
-Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
-For normal conversation, just respond with text - do not call the message tool.
-
-Always be helpful, accurate, and concise. When using tools, explain what you're doing.
-When remembering something, write to {workspace_path}/memory/MEMORY.md"""
+## Environment
+Platform: {runtime}
+Workspace: {workspace_path}
+Memory: {workspace_path}/memory/MEMORY.md
+Skills: {workspace_path}/skills/*/SKILL.md"""
 
     def _load_bootstrap_files(self) -> str:
         """Layer 1 — Personality and user profile from workspace markdown files."""
@@ -180,7 +188,7 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
         return "\n\n".join(parts) if parts else ""
 
     def _build_capabilities(self) -> str:
-        """Layer 2 — Available tools and skills."""
+        """Layer 2 — Skills (tools are already in function calling schema)."""
         parts: list[str] = []
 
         # Always-loaded skills
@@ -197,22 +205,46 @@ When remembering something, write to {workspace_path}/memory/MEMORY.md"""
                 "# Skills\n\n"
                 "The following skills extend your capabilities. "
                 "To use a skill, read its SKILL.md file using the fs tool (action: read).\n"
-                'Skills with available="false" need dependencies installed first '
-                "- you can try installing them with apt/brew.\n\n"
+                'Skills with available="false" need dependencies installed first.\n\n'
                 f"{skills_summary}"
             )
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def _build_memory_context(self, mode: ExecutionMode) -> str:
-        """Layer 3 — Memory injection (dynamic per request)."""
+    def _build_situation(self, mode: ExecutionMode) -> str:
+        """Layer 3 — Situation: time, mode directive, memory. Dynamic per request."""
+        from datetime import datetime
+
+        parts: list[str] = []
+
+        # Current time (moved here from Layer 0 to keep identity stable)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        parts.append(f"# Situation\n\nCurrent time: {now}")
+
+        # Mode-specific behavioral directive
+        directive = _MODE_DIRECTIVES.get(mode)
+        if directive:
+            parts.append(directive)
+
+        # Memory context
+        memory_ctx = self._get_memory_context()
+        if memory_ctx:
+            parts.append(f"## Memory\n\n{memory_ctx}")
+
+        return "\n\n".join(parts)
+
+    def _get_memory_context(self) -> str:
+        """Assemble memory context from MemoryManager or legacy store."""
         if self._memory_manager:
             return self._memory_manager.get_context()
-        # Fallback to legacy MemoryStore
-        return self._legacy_memory.get_memory_context()
+        # Legacy fallback (deprecated — will be removed)
+        from hal.core.memory.store import MemoryStore
+
+        legacy = MemoryStore(self.workspace)
+        return legacy.get_memory_context()
 
     # ------------------------------------------------------------------
-    # Message helpers (unchanged API)
+    # Message helpers
     # ------------------------------------------------------------------
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:

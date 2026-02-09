@@ -142,48 +142,6 @@ This file stores important information that should persist across sessions.
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
 
-@app.command()
-def migrate():
-    """Migrate configuration from ~/.nanobot/ to ~/.hal/."""
-    import shutil
-
-    old_dir = Path.home() / ".nanobot"
-    new_dir = Path.home() / ".hal"
-
-    if not old_dir.exists():
-        console.print("[yellow]No ~/.nanobot/ directory found. Nothing to migrate.[/yellow]")
-        raise typer.Exit()
-
-    if new_dir.exists():
-        console.print("[yellow]~/.hal/ already exists.[/yellow]")
-        if not typer.confirm("Overwrite with ~/.nanobot/ contents?"):
-            raise typer.Exit()
-        shutil.rmtree(new_dir)
-
-    shutil.copytree(old_dir, new_dir)
-
-    # Update workspace path in config if it points to old location
-    config_path = new_dir / "config.json"
-    if config_path.exists():
-        import json
-
-        try:
-            data = json.loads(config_path.read_text())
-            # Update workspace path reference
-            agents = data.get("agents", {})
-            defaults = agents.get("defaults", {})
-            workspace = defaults.get("workspace", "")
-            if ".nanobot" in workspace:
-                defaults["workspace"] = workspace.replace(".nanobot", ".hal")
-                config_path.write_text(json.dumps(data, indent=2))
-                console.print("[green]✓[/green] Updated workspace path in config")
-        except (json.JSONDecodeError, Exception) as e:
-            console.print(f"[yellow]Warning: Could not update config: {e}[/yellow]")
-
-    console.print("[green]✓[/green] Migrated ~/.nanobot/ → ~/.hal/")
-    console.print("[dim]You can safely remove ~/.nanobot/ after verifying the migration.[/dim]")
-
-
 def _make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
     from hal.infra.providers.litellm_provider import LiteLLMProvider

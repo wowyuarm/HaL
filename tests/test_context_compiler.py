@@ -66,8 +66,8 @@ class TestInit:
             cc = ContextCompiler(workspace)
         assert cc.workspace == workspace
 
-    def test_legacy_memory_created(self, compiler: ContextCompiler) -> None:
-        assert compiler._legacy_memory is not None
+    def test_no_legacy_memory_attribute(self, compiler: ContextCompiler) -> None:
+        assert not hasattr(compiler, "_legacy_memory")
 
     def test_memory_manager_defaults_to_none(self, compiler: ContextCompiler) -> None:
         assert compiler._memory_manager is None
