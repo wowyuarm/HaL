@@ -35,17 +35,42 @@ Channels (Telegram/Discord/etc) → MessageBus (async queue) → AgentEngine →
 
 ### Agent Engine (`hal/core/engine.py`)
 
-The central engine. For each inbound message it:
-1. Builds a system prompt via `ContextCompiler` (assembles workspace files: AGENTS.md, SOUL.md, USER.md, TOOLS.md, IDENTITY.md, plus memory and skills)
+The central engine (renamed from `AgentLoop`; alias kept for compatibility). Supports 3 execution modes:
+- **COLLAB** — Real-time user conversation (low latency, interactive)
+- **ASYNC** — Background long-running tasks (shared memory with origin)
+- **OPERATOR** — Scheduled monitoring via cron/heartbeat (high signal-to-noise)
+
+For each inbound message it:
+1. Builds a system prompt via `ContextCompiler` (5-layer context system)
 2. Calls the LLM with conversation history + tool definitions
 3. Executes any tool calls, appends results, and loops (max 20 iterations)
 4. Sends the final response back through the bus
+
+### Context Compiler (`hal/core/context/compiler.py`)
+
+Assembles the system prompt through a 5-layer architecture. Layers 0–2 form a stable prefix (maximizes prompt cache hits); Layers 3–4 are dynamic per request.
+
+| Layer | Name         | Content                                          |
+|-------|--------------|--------------------------------------------------|
+| 0     | Identity     | Stable agent identity (rarely changes)           |
+| 1     | Personality  | Per-agent instance (SOUL.md, USER.md, etc.)      |
+| 2     | Capabilities | Tools + skills definitions                       |
+| 3     | Memory       | Dynamic memory (episodic + long-term, per request)|
+| 4     | Conversation | Current session history + inbound message        |
+
+### Memory System (`hal/core/memory/`)
+
+Three-tier memory architecture, coordinated by `MemoryManager`:
+- **EpisodicMemory** (`episodic.py`) — Short-term event traces stored as JSONL
+- **LongTermMemory** (`long_term.py`) — Persistent knowledge stored in MEMORY.md
+- **WorkingMemory** (`working.py`) — Current session state (transient)
 
 ### Tool System (`hal/capabilities/tools/`)
 
 - All tools extend the abstract `Tool` class (`base.py`), defining `name`, `description`, `parameters` (JSON Schema), and `execute()`
 - `ToolRegistry` manages registration and dispatch with built-in parameter validation
 - Tools are registered in `AgentEngine._register_default_tools()`
+- **FsTool** (`fs.py`) — Unified filesystem tool that replaces the former 4 individual tools (`read_file`, `write_file`, `edit_file`, `list_dir`) with a single multi-action tool
 - When `restrict_to_workspace=true`, file/shell tools are sandboxed to the workspace directory
 
 ### Provider Registry (`hal/infra/providers/registry.py`)
@@ -72,13 +97,12 @@ Pydantic models. Config lives at `~/.hal/config.json`. Key paths:
 
 ### Other Key Components
 
-- **Subagent** (`core/subagent.py`) — `spawn` tool creates background agents with isolated context
-- **Context Compiler** (`core/context/compiler.py`) — Assembles system prompt from workspace markdown files + memory + skills
-- **Memory Store** (`core/memory/store.py`) — Persistent storage for agent memory and session context
-- **Session Manager** (`session/manager.py`) — Per-channel conversation history, persisted as JSON
-- **Skills Loader** (`capabilities/skills/loader.py`) — Loads and manages callable skills from workspace
-- **Scheduling** (`capabilities/scheduling/`) — Scheduled tasks (cron) and heartbeat service
+- **Subagent Manager** (`core/subagent.py`) — `spawn` tool creates background agents with isolated context
+- **Skills Loader** (`capabilities/skills/`) — Loads and manages callable skills from workspace
+- **Scheduling** (`capabilities/scheduling/`) — Cron service and heartbeat monitor
 - **Heartbeat** (`capabilities/scheduling/heartbeat.py`) — Checks `HEARTBEAT.md` every 30 min for pending tasks
+- **Session Manager** (`session/manager.py`) — Per-channel conversation history, persisted as JSON
+- **Message Bus** (`bus/`) — Async queue-based routing between channels and engine
 
 ## Code Conventions
 
@@ -91,42 +115,49 @@ Pydantic models. Config lives at `~/.hal/config.json`. Key paths:
 
 ```
 hal/
-├── core/               # 🧠 Core engine (agent loop, context, memory)
-│   ├── engine.py       # AgentEngine — central message processing loop
-│   ├── subagent.py     # Subagent spawning with isolated context
+├── core/               # Core engine, context, memory
+│   ├── engine.py       # AgentEngine — central execution engine (3 modes)
+│   ├── subagent.py     # SubagentManager — spawning with isolated context
 │   ├── context/        # Context compilation
-│   │   └── compiler.py # ContextCompiler — assembles system prompt
-│   └── memory/         # Persistent memory store
-│       └── store.py    # MemoryStore — conversation & agent state
-├── capabilities/       # 🛠️ Tools, skills, and scheduling
-│   ├── tools/          # Tool implementations (file, shell, web, etc.)
+│   │   └── compiler.py # ContextCompiler — 5-layer system prompt assembly
+│   └── memory/         # Three-tier memory system
+│       ├── manager.py  # MemoryManager — coordinates all memory tiers
+│       ├── episodic.py # EpisodicMemory — JSONL event traces
+│       ├── long_term.py # LongTermMemory — persistent MEMORY.md
+│       └── working.py  # WorkingMemory — transient session state
+├── capabilities/       # Tools, skills, and scheduling
+│   ├── tools/          # Tool implementations
 │   │   ├── base.py     # Abstract Tool class
 │   │   ├── registry.py # ToolRegistry — dispatch & validation
-│   │   └── [tool files]
+│   │   ├── fs.py       # FsTool — unified file operations (read/write/edit/list)
+│   │   ├── exec.py     # ExecTool — shell execution
+│   │   ├── web.py      # WebSearchTool, WebFetchTool
+│   │   ├── spawn.py    # SpawnTool — subagent creation
+│   │   ├── schedule.py # CronTool — task scheduling
+│   │   └── message.py  # MessageTool — cross-channel messaging
 │   ├── skills/         # Callable skills from workspace
-│   │   └── loader.py   # SkillsLoader
 │   └── scheduling/     # Scheduled tasks and heartbeat
-│       ├── cron.py     # Cron service via croniter
-│       └── heartbeat.py # Heartbeat monitor for HEARTBEAT.md
-├── channels/           # 📱 Chat integrations
+│       ├── cron_service.py # Cron service via croniter
+│       └── heartbeat.py    # Heartbeat monitor for HEARTBEAT.md
+├── channels/           # Chat integrations
 │   ├── base.py         # Abstract Channel class
 │   ├── telegram.py     # Telegram integration
 │   ├── discord.py      # Discord integration
 │   └── [other channels]
-├── bus/                # 🚌 Async message routing
-│   ├── message.py      # InboundMessage, OutboundMessage
-│   └── broker.py       # MessageBus — async queue & dispatch
-├── infra/              # ⚙️ Providers, config, logging
-│   ├── providers/       # LLM provider integrations
+├── bus/                # Async message routing
+│   ├── events.py       # InboundMessage, OutboundMessage
+│   └── queue.py        # MessageBus — async queue & dispatch
+├── infra/              # Providers, config, logging
+│   ├── providers/      # LLM provider integrations
 │   │   ├── registry.py # ProviderSpec — declarative metadata
 │   │   ├── litellm_provider.py # Unified LLM client
 │   │   └── [provider files]
 │   └── config/         # Configuration management
 │       └── schema.py   # Pydantic config models
-├── session/            # 💬 Conversation sessions
+├── session/            # Conversation sessions
 │   └── manager.py      # SessionManager — per-channel history
-├── cli/                # 🖥️ CLI commands
+├── cli/                # CLI commands
 │   └── commands.py     # CLI entry points (onboard, agent, gateway)
-└── utils/              # 🔧 Helpers
+└── utils/              # Helpers
     └── [utility modules]
 ```

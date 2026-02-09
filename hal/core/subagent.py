@@ -13,7 +13,7 @@ from loguru import logger
 from hal.bus.events import InboundMessage
 from hal.bus.queue import MessageBus
 from hal.capabilities.tools.exec import ExecTool
-from hal.capabilities.tools.fs import ListDirTool, ReadFileTool, WriteFileTool
+from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
 from hal.infra.providers.base import LLMProvider
@@ -103,9 +103,7 @@ class SubagentManager:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir = self.workspace if self.restrict_to_workspace else None
-            tools.register(ReadFileTool(allowed_dir=allowed_dir))
-            tools.register(WriteFileTool(allowed_dir=allowed_dir))
-            tools.register(ListDirTool(allowed_dir=allowed_dir))
+            tools.register(FsTool(allowed_dir=allowed_dir))
             tools.register(
                 ExecTool(
                     working_dir=str(self.workspace),

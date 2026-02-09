@@ -1,24 +1,26 @@
-"""Agent loop: the core processing engine."""
+"""AgentEngine — unified execution engine for all interaction modes."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from hal.bus.events import InboundMessage, OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.capabilities.tools.exec import ExecTool
-from hal.capabilities.tools.fs import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.message import MessageTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.capabilities.tools.schedule import CronTool
 from hal.capabilities.tools.spawn import SpawnTool
 from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
-from hal.core.context.compiler import ContextBuilder
+from hal.core.context.compiler import ContextCompiler, ExecutionMode
+from hal.core.memory.manager import MemoryManager
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider
 from hal.session.manager import SessionManager
@@ -28,16 +30,16 @@ if TYPE_CHECKING:
     from hal.infra.config.schema import ExecToolConfig
 
 
-class AgentLoop:
+class AgentEngine:
     """
-    The agent loop is the core processing engine.
+    Unified execution engine for all interaction modes.
 
-    It:
-    1. Receives messages from the bus
-    2. Builds context with history, memory, skills
-    3. Calls the LLM
-    4. Executes tool calls
-    5. Sends responses back
+    Supports three execution modes:
+    - COLLAB: Real-time user conversation (low latency)
+    - ASYNC: Background long-running tasks (shared memory with origin)
+    - OPERATOR: Scheduled monitoring (high signal-to-noise)
+
+    After each interaction, episodes are recorded via MemoryManager.
     """
 
     def __init__(
@@ -52,6 +54,7 @@ class AgentLoop:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
+        memory_manager: MemoryManager | None = None,
     ):
         from hal.infra.config.schema import ExecToolConfig
 
@@ -65,7 +68,8 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
-        self.context = ContextBuilder(workspace)
+        self.memory = memory_manager or MemoryManager(workspace)
+        self.context = ContextCompiler(workspace, memory_manager=self.memory)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -83,14 +87,9 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        # File tools (restrict to workspace if configured)
         allowed_dir = self.workspace if self.restrict_to_workspace else None
-        self.tools.register(ReadFileTool(allowed_dir=allowed_dir))
-        self.tools.register(WriteFileTool(allowed_dir=allowed_dir))
-        self.tools.register(EditFileTool(allowed_dir=allowed_dir))
-        self.tools.register(ListDirTool(allowed_dir=allowed_dir))
+        self.tools.register(FsTool(allowed_dir=allowed_dir))
 
-        # Shell tool
         self.tools.register(
             ExecTool(
                 working_dir=str(self.workspace),
@@ -99,40 +98,36 @@ class AgentLoop:
             )
         )
 
-        # Web tools
         self.tools.register(WebSearchTool(api_key=self.web_search_api_key))
         self.tools.register(WebFetchTool())
 
-        # Message tool
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
 
-        # Spawn tool (for subagents)
         spawn_tool = SpawnTool(manager=self.subagents)
         self.tools.register(spawn_tool)
 
-        # Cron tool (for scheduling)
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
     async def run(self) -> None:
-        """Run the agent loop, processing messages from the bus."""
+        """Run the engine, processing messages from the bus."""
         self._running = True
-        logger.info("Agent loop started")
+        logger.info("Agent engine started")
 
         while self._running:
             try:
-                # Wait for next message
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
-
-                # Process it
                 try:
-                    response = await self._process_message(msg)
+                    response = await self._dispatch(msg)
                     if response:
                         await self.bus.publish_outbound(response)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-                    # Send error response
                     await self.bus.publish_outbound(
                         OutboundMessage(
                             channel=msg.channel,
@@ -144,75 +139,191 @@ class AgentLoop:
                 continue
 
     def stop(self) -> None:
-        """Stop the agent loop."""
+        """Stop the engine."""
         self._running = False
-        logger.info("Agent loop stopping")
+        logger.info("Agent engine stopping")
 
-    async def _process_message(self, msg: InboundMessage) -> OutboundMessage | None:
-        """
-        Process a single inbound message.
-
-        Args:
-            msg: The inbound message to process.
-
-        Returns:
-            The response message, or None if no response needed.
-        """
-        # Handle system messages (subagent announces)
-        # The chat_id contains the original "channel:chat_id" to route back to
+    async def _dispatch(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Route a message to the appropriate execution mode."""
         if msg.channel == "system":
             return await self._process_system_message(msg)
+        return await self.process_collab(msg)
+
+    # ------------------------------------------------------------------
+    # Execution modes
+    # ------------------------------------------------------------------
+
+    async def process_collab(self, msg: InboundMessage) -> OutboundMessage | None:
+        """
+        COLLAB mode: real-time user conversation.
+
+        Low latency, standard tool loop, records episode after completion.
+        """
+        start_time = time.monotonic()
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info(f"Processing message from {msg.channel}:{msg.sender_id}: {preview}")
+        logger.info(f"[collab] {msg.channel}:{msg.sender_id}: {preview}")
 
-        # Get or create session
         session = self.sessions.get_or_create(msg.session_key)
+        self._update_tool_contexts(msg.channel, msg.chat_id)
 
-        # Update tool contexts
-        message_tool = self.tools.get("message")
-        if isinstance(message_tool, MessageTool):
-            message_tool.set_context(msg.channel, msg.chat_id)
-
-        spawn_tool = self.tools.get("spawn")
-        if isinstance(spawn_tool, SpawnTool):
-            spawn_tool.set_context(msg.channel, msg.chat_id)
-
-        cron_tool = self.tools.get("cron")
-        if isinstance(cron_tool, CronTool):
-            cron_tool.set_context(msg.channel, msg.chat_id)
-
-        # Build initial messages (use get_history for LLM-formatted messages)
         messages = self.context.build_messages(
             history=session.get_history(),
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            mode=ExecutionMode.COLLAB,
         )
 
-        # Agent loop
-        iteration = 0
-        final_content = None
+        final_content, tools_used = await self._execute_loop(messages, self.max_iterations)
 
-        while iteration < self.max_iterations:
+        if final_content is None:
+            final_content = "I've completed processing but have no response to give."
+
+        # Save to session
+        session.add_message("user", msg.content)
+        session.add_message("assistant", final_content)
+        self.sessions.save(session)
+
+        # Record episode
+        duration = time.monotonic() - start_time
+        self.memory.record_interaction(
+            channel=msg.channel,
+            user_request=msg.content,
+            agent_response=final_content,
+            tools_used=tools_used,
+            duration_seconds=duration,
+        )
+
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info(f"[collab] response: {preview}")
+
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
+
+    async def process_operator(
+        self,
+        prompt: str,
+        channel: str = "cli",
+        chat_id: str = "direct",
+        session_key: str | None = None,
+    ) -> str:
+        """
+        OPERATOR mode: scheduled monitoring.
+
+        Used by cron jobs and heartbeat. Higher signal-to-noise — only
+        produces output when there's something actionable.
+        """
+        start_time = time.monotonic()
+        s_key = session_key or f"{channel}:{chat_id}"
+
+        logger.info(f"[operator] {s_key}: {prompt[:60]}...")
+
+        session = self.sessions.get_or_create(s_key)
+        self._update_tool_contexts(channel, chat_id)
+
+        messages = self.context.build_messages(
+            history=session.get_history(),
+            current_message=prompt,
+            channel=channel,
+            chat_id=chat_id,
+            mode=ExecutionMode.OPERATOR,
+        )
+
+        # Operator mode uses fewer iterations
+        max_iter = min(self.max_iterations, 10)
+        final_content, tools_used = await self._execute_loop(messages, max_iter)
+
+        if final_content is None:
+            final_content = "Monitoring complete. Nothing to report."
+
+        session.add_message("user", prompt)
+        session.add_message("assistant", final_content)
+        self.sessions.save(session)
+
+        duration = time.monotonic() - start_time
+        self.memory.record_interaction(
+            channel="operator",
+            user_request=prompt,
+            agent_response=final_content,
+            tools_used=tools_used,
+            duration_seconds=duration,
+        )
+
+        return final_content
+
+    # ------------------------------------------------------------------
+    # System message handling (subagent announces)
+    # ------------------------------------------------------------------
+
+    async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Process a system message (e.g., subagent result announce)."""
+        logger.info(f"[system] from {msg.sender_id}")
+
+        if ":" in msg.chat_id:
+            parts = msg.chat_id.split(":", 1)
+            origin_channel, origin_chat_id = parts[0], parts[1]
+        else:
+            origin_channel, origin_chat_id = "cli", msg.chat_id
+
+        session_key = f"{origin_channel}:{origin_chat_id}"
+        session = self.sessions.get_or_create(session_key)
+        self._update_tool_contexts(origin_channel, origin_chat_id)
+
+        messages = self.context.build_messages(
+            history=session.get_history(),
+            current_message=msg.content,
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+        )
+
+        final_content, _ = await self._execute_loop(messages, self.max_iterations)
+
+        if final_content is None:
+            final_content = "Background task completed."
+
+        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
+        session.add_message("assistant", final_content)
+        self.sessions.save(session)
+
+        return OutboundMessage(
+            channel=origin_channel, chat_id=origin_chat_id, content=final_content
+        )
+
+    # ------------------------------------------------------------------
+    # Core tool loop (shared by all modes)
+    # ------------------------------------------------------------------
+
+    async def _execute_loop(
+        self,
+        messages: list[dict[str, Any]],
+        max_iterations: int,
+    ) -> tuple[str | None, list[str]]:
+        """
+        Run the LLM tool-calling loop.
+
+        Returns:
+            Tuple of (final_content, tools_used).
+        """
+        iteration = 0
+        final_content: str | None = None
+        tools_used: list[str] = []
+
+        while iteration < max_iterations:
             iteration += 1
 
-            # Call LLM
             response = await self.provider.chat(
                 messages=messages, tools=self.tools.get_definitions(), model=self.model
             )
 
-            # Handle tool calls
             if response.has_tool_calls:
-                # Add assistant message with tool calls
                 tool_call_dicts = [
                     {
                         "id": tc.id,
                         "type": "function",
                         "function": {
                             "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),  # Must be JSON string
+                            "arguments": json.dumps(tc.arguments),
                         },
                     }
                     for tc in response.tool_calls
@@ -221,7 +332,6 @@ class AgentLoop:
                     messages, response.content, tool_call_dicts
                 )
 
-                # Execute tools
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
@@ -229,115 +339,31 @@ class AgentLoop:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+                    if tool_call.name not in tools_used:
+                        tools_used.append(tool_call.name)
             else:
-                # No tool calls, we're done
                 final_content = response.content
                 break
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+        return final_content, tools_used
 
-        # Log response preview
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info(f"Response to {msg.channel}:{msg.sender_id}: {preview}")
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        # Save to session
-        session.add_message("user", msg.content)
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
-
-        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
-
-    async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
-        """
-        Process a system message (e.g., subagent announce).
-
-        The chat_id field contains "original_channel:original_chat_id" to route
-        the response back to the correct destination.
-        """
-        logger.info(f"Processing system message from {msg.sender_id}")
-
-        # Parse origin from chat_id (format: "channel:chat_id")
-        if ":" in msg.chat_id:
-            parts = msg.chat_id.split(":", 1)
-            origin_channel = parts[0]
-            origin_chat_id = parts[1]
-        else:
-            # Fallback
-            origin_channel = "cli"
-            origin_chat_id = msg.chat_id
-
-        # Use the origin session for context
-        session_key = f"{origin_channel}:{origin_chat_id}"
-        session = self.sessions.get_or_create(session_key)
-
-        # Update tool contexts
+    def _update_tool_contexts(self, channel: str, chat_id: str) -> None:
+        """Update context-dependent tools with current channel/chat info."""
         message_tool = self.tools.get("message")
         if isinstance(message_tool, MessageTool):
-            message_tool.set_context(origin_channel, origin_chat_id)
+            message_tool.set_context(channel, chat_id)
 
         spawn_tool = self.tools.get("spawn")
         if isinstance(spawn_tool, SpawnTool):
-            spawn_tool.set_context(origin_channel, origin_chat_id)
+            spawn_tool.set_context(channel, chat_id)
 
         cron_tool = self.tools.get("cron")
         if isinstance(cron_tool, CronTool):
-            cron_tool.set_context(origin_channel, origin_chat_id)
-
-        # Build messages with the announce content
-        messages = self.context.build_messages(
-            history=session.get_history(),
-            current_message=msg.content,
-            channel=origin_channel,
-            chat_id=origin_chat_id,
-        )
-
-        # Agent loop (limited for announce handling)
-        iteration = 0
-        final_content = None
-
-        while iteration < self.max_iterations:
-            iteration += 1
-
-            response = await self.provider.chat(
-                messages=messages, tools=self.tools.get_definitions(), model=self.model
-            )
-
-            if response.has_tool_calls:
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
-                )
-
-                for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
-            else:
-                final_content = response.content
-                break
-
-        if final_content is None:
-            final_content = "Background task completed."
-
-        # Save to session (mark as system message in history)
-        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
-
-        return OutboundMessage(
-            channel=origin_channel, chat_id=origin_chat_id, content=final_content
-        )
+            cron_tool.set_context(channel, chat_id)
 
     async def process_direct(
         self,
@@ -349,16 +375,19 @@ class AgentLoop:
         """
         Process a message directly (for CLI or cron usage).
 
-        Args:
-            content: The message content.
-            session_key: Session identifier.
-            channel: Source channel (for context).
-            chat_id: Source chat ID (for context).
-
-        Returns:
-            The agent's response.
+        Routes to the appropriate execution mode based on context:
+        - CLI/direct messages → COLLAB
+        - Cron/heartbeat → OPERATOR
         """
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        if session_key.startswith("cron:") or session_key == "heartbeat":
+            return await self.process_operator(
+                prompt=content, channel=channel, chat_id=chat_id, session_key=session_key
+            )
 
-        response = await self._process_message(msg)
+        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        response = await self.process_collab(msg)
         return response.content if response else ""
+
+
+# Backward compatibility alias
+AgentLoop = AgentEngine
