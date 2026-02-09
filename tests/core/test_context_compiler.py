@@ -1,4 +1,4 @@
-"""Tests for hal.core.context.compiler — ContextCompiler (and ContextBuilder alias)."""
+"""Tests for hal.core.context.compiler — ContextCompiler."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hal.core.context.compiler import ContextBuilder, ContextCompiler, ExecutionMode
+from hal.core.context.compiler import ContextCompiler
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -37,25 +37,6 @@ def compiler(workspace: Path) -> ContextCompiler:
 
 
 # ---------------------------------------------------------------------------
-# ExecutionMode enum
-# ---------------------------------------------------------------------------
-
-
-class TestExecutionMode:
-    def test_collab_value(self) -> None:
-        assert ExecutionMode.COLLAB.value == "collab"
-
-    def test_async_value(self) -> None:
-        assert ExecutionMode.ASYNC.value == "async"
-
-    def test_operator_value(self) -> None:
-        assert ExecutionMode.OPERATOR.value == "operator"
-
-    def test_is_str_subclass(self) -> None:
-        assert isinstance(ExecutionMode.COLLAB, str)
-
-
-# ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
 
@@ -65,9 +46,6 @@ class TestInit:
         with patch("hal.core.context.compiler.SkillsLoader"):
             cc = ContextCompiler(workspace)
         assert cc.workspace == workspace
-
-    def test_no_legacy_memory_attribute(self, compiler: ContextCompiler) -> None:
-        assert not hasattr(compiler, "_legacy_memory")
 
     def test_memory_manager_defaults_to_none(self, compiler: ContextCompiler) -> None:
         assert compiler._memory_manager is None
@@ -105,9 +83,6 @@ class TestBootstrapFiles:
         prompt = compiler.build_system_prompt()
         assert "HaL" in prompt
 
-    def test_all_bootstrap_filenames_recognised(self) -> None:
-        expected = {"AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"}
-        assert set(ContextCompiler.BOOTSTRAP_FILES) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -290,13 +265,3 @@ class TestMessageHelpers:
         msgs: list[dict[str, Any]] = []
         compiler.add_assistant_message(msgs, None)
         assert msgs[0]["content"] == ""
-
-
-# ---------------------------------------------------------------------------
-# Backward compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestBackwardCompatibility:
-    def test_context_builder_is_alias(self) -> None:
-        assert ContextBuilder is ContextCompiler

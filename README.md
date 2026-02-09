@@ -57,7 +57,7 @@ hal onboard
 **3. Chat**
 
 ```bash
-hal agent -m "What is 2+2?"
+hal agent -m "Hello, World!"
 ```
 
 ## 🖥️ Local Models (vLLM)
