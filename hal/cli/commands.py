@@ -75,14 +75,8 @@ def _create_workspace_templates(workspace: Path):
     templates = {
         "AGENTS.md": """# Agent Instructions
 
-You are a helpful AI assistant. Be concise, accurate, and friendly.
-
-## Guidelines
-
-- Always explain what you're doing before taking actions
-- Ask for clarification when the request is ambiguous
-- Use tools to help accomplish tasks
-- Remember important information in your memory files
+Add operational instructions for your HaL agent here.
+See workspace/TOOLS.md for tool usage examples.
 """,
         "SOUL.md": """# Soul
 
