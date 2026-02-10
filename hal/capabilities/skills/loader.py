@@ -1,6 +1,5 @@
 """Skills loader for agent capabilities."""
 
-import json
 import os
 import re
 import shutil
@@ -57,7 +56,11 @@ class SkillsLoader:
 
         # Filter by requirements
         if filter_unavailable:
-            return [s for s in skills if self._check_requirements(self._get_skill_meta(s["name"]))]
+            return [
+                s
+                for s in skills
+                if self._check_requirements(self.get_skill_metadata(s["name"]) or {})
+            ]
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -124,8 +127,8 @@ class SkillsLoader:
             name = escape_xml(s["name"])
             path = s["path"]
             desc = escape_xml(self._get_skill_description(s["name"]))
-            skill_meta = self._get_skill_meta(s["name"])
-            available = self._check_requirements(skill_meta)
+            meta = self.get_skill_metadata(s["name"]) or {}
+            available = self._check_requirements(meta)
 
             lines.append(f'  <skill available="{str(available).lower()}">')
             lines.append(f"    <name>{name}</name>")
@@ -134,7 +137,7 @@ class SkillsLoader:
 
             # Show missing requirements for unavailable skills
             if not available:
-                missing = self._get_missing_requirements(skill_meta)
+                missing = self._get_missing_requirements(meta)
                 if missing:
                     lines.append(f"    <requires>{escape_xml(missing)}</requires>")
 
@@ -143,14 +146,14 @@ class SkillsLoader:
 
         return "\n".join(lines)
 
-    def _get_missing_requirements(self, skill_meta: dict) -> str:
+    def _get_missing_requirements(self, meta: dict) -> str:
         """Get a description of missing requirements."""
         missing = []
-        requires = skill_meta.get("requires", {})
-        for b in requires.get("bins", []):
+        reqs = self._get_requirements(meta)
+        for b in reqs["bins"]:
             if not shutil.which(b):
                 missing.append(f"CLI: {b}")
-        for env in requires.get("env", []):
+        for env in reqs["env"]:
             if not os.environ.get(env):
                 missing.append(f"ENV: {env}")
         return ", ".join(missing)
@@ -170,37 +173,40 @@ class SkillsLoader:
                 return content[match.end() :].strip()
         return content
 
-    def _parse_hal_metadata(self, raw: str) -> dict:
-        """Parse HaL metadata JSON from frontmatter."""
-        try:
-            data = json.loads(raw)
-            return data.get("hal", {}) if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, TypeError):
-            return {}
-
-    def _check_requirements(self, skill_meta: dict) -> bool:
+    def _check_requirements(self, meta: dict) -> bool:
         """Check if skill requirements are met (bins, env vars)."""
-        requires = skill_meta.get("requires", {})
-        for b in requires.get("bins", []):
+        for b in self._parse_list(meta.get("requires_bins", "")):
             if not shutil.which(b):
                 return False
-        for env in requires.get("env", []):
+        for env in self._parse_list(meta.get("requires_env", "")):
             if not os.environ.get(env):
                 return False
         return True
 
-    def _get_skill_meta(self, name: str) -> dict:
-        """Get HaL metadata for a skill (cached in frontmatter)."""
-        meta = self.get_skill_metadata(name) or {}
-        return self._parse_hal_metadata(meta.get("metadata", ""))
+    def _get_requirements(self, meta: dict) -> dict:
+        """Extract requirements from frontmatter fields."""
+        return {
+            "bins": self._parse_list(meta.get("requires_bins", "")),
+            "env": self._parse_list(meta.get("requires_env", "")),
+        }
+
+    @staticmethod
+    def _parse_list(value: str) -> list[str]:
+        """Parse a YAML-style list string like '["a", "b"]' into a Python list."""
+        if not value:
+            return []
+        # Strip brackets and quotes, split by comma
+        stripped = value.strip().strip("[]")
+        if not stripped:
+            return []
+        return [item.strip().strip("\"'") for item in stripped.split(",") if item.strip()]
 
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
         result = []
         for s in self.list_skills(filter_unavailable=True):
             meta = self.get_skill_metadata(s["name"]) or {}
-            skill_meta = self._parse_hal_metadata(meta.get("metadata", ""))
-            if skill_meta.get("always") or meta.get("always"):
+            if meta.get("always", "").lower() in ("true", "1", "yes"):
                 result.append(s["name"])
         return result
 

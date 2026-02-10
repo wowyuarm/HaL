@@ -1,7 +1,7 @@
 ---
 name: tmux
 description: Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output.
-metadata: {"hal":{"emoji":"🧵","os":["darwin","linux"],"requires":{"bins":["tmux"]}}}
+requires_bins: ["tmux"]
 ---
 
 # tmux Skill

@@ -1,4 +1,4 @@
-"""Context compiler for assembling layered agent prompts.
+"""Context builder for assembling layered agent prompts.
 
 Implements a 5-layer context system optimized for prompt cache hits:
 
@@ -52,14 +52,12 @@ Only report when there is something actionable. High signal-to-noise.""",
 }
 
 
-class ContextCompiler:
+class ContextBuilder:
     """
     Assembles layered context for LLM calls.
 
     Layers 0-2 form a stable prefix (maximizes prompt cache hits).
     Layers 3-4 are dynamic per request.
-
-    Backward compatible: exposes the same API as the old ContextBuilder.
     """
 
     # Bootstrap files loaded into Layer 1 (personality/instructions).
@@ -300,7 +298,3 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
             msg["tool_calls"] = tool_calls
         messages.append(msg)
         return messages
-
-
-# Backward compatibility alias
-ContextBuilder = ContextCompiler

@@ -29,7 +29,7 @@ def test_list_skills_workspace_priority_and_dedup(tmp_path: Path) -> None:
         """---
 name: weather
 description: builtin weather
-metadata: {\"hal\":{\"requires\":{\"bins\":[\"curl\"]}}}
+requires_bins: ["curl"]
 ---""",
         "builtin body",
     )
@@ -41,7 +41,6 @@ metadata: {\"hal\":{\"requires\":{\"bins\":[\"curl\"]}}}
         """---
 name: weather
 description: workspace weather
-metadata: {\"hal\":{\"requires\":{\"bins\":[]}}}
 ---""",
         "workspace body",
     )
@@ -52,7 +51,7 @@ metadata: {\"hal\":{\"requires\":{\"bins\":[]}}}
         """---
 name: github
 description: GitHub skill
-metadata: {\"hal\":{\"requires\":{\"bins\":[\"gh\"]}}}
+requires_bins: ["gh"]
 ---""",
     )
 
@@ -69,7 +68,9 @@ metadata: {\"hal\":{\"requires\":{\"bins\":[\"gh\"]}}}
     assert "ws/skills/weather/SKILL.md" in weather["path"].replace("\\", "/")
 
 
-def test_list_skills_filters_unavailable_by_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_list_skills_filters_unavailable_by_requirements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     builtin = tmp_path / "builtin"
@@ -81,7 +82,7 @@ def test_list_skills_filters_unavailable_by_requirements(tmp_path: Path, monkeyp
         """---
 name: needcurl
 description: Needs curl
-metadata: {\"hal\":{\"requires\":{\"bins\":[\"curl\"]}}}
+requires_bins: ["curl"]
 ---""",
     )
 
@@ -96,7 +97,9 @@ metadata: {\"hal\":{\"requires\":{\"bins\":[\"curl\"]}}}
     assert [s["name"] for s in skills] == ["needcurl"]
 
 
-def test_build_skills_summary_includes_requires_and_escapes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_skills_summary_includes_requires_and_escapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     builtin = tmp_path / "builtin"
@@ -108,7 +111,8 @@ def test_build_skills_summary_includes_requires_and_escapes(tmp_path: Path, monk
         """---
 name: xml&skill
 description: Use <x> & y
-metadata: {\"hal\":{\"requires\":{\"bins\":[\"curl\"],\"env\":[\"FOO\"]}}}
+requires_bins: ["curl"]
+requires_env: ["FOO"]
 ---""",
     )
 
@@ -119,7 +123,7 @@ metadata: {\"hal\":{\"requires\":{\"bins\":[\"curl\"],\"env\":[\"FOO\"]}}}
 
     summary = loader.build_skills_summary()
     assert "<skills>" in summary
-    assert "available=\"false\"" in summary
+    assert 'available="false"' in summary
 
     # Escaping
     assert "xml&amp;skill" in summary
@@ -142,7 +146,6 @@ def test_load_skills_for_context_strips_frontmatter(tmp_path: Path) -> None:
         """---
 name: demo
 description: demo
-metadata: {\"hal\":{}} 
 ---""",
         "# Demo\n\nHello\n",
     )
@@ -155,7 +158,9 @@ metadata: {\"hal\":{}}
     assert "Hello" in content
 
 
-def test_get_always_skills_respects_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_always_skills_respects_requirements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     builtin = tmp_path / "builtin"
@@ -167,7 +172,8 @@ def test_get_always_skills_respects_requirements(tmp_path: Path, monkeypatch: py
         """---
 name: always_env
 description: needs env
-metadata: {\"hal\":{\"always\":true,\"requires\":{\"env\":[\"FOO\"]}}}
+always: true
+requires_env: ["FOO"]
 ---""",
     )
 
@@ -180,35 +186,17 @@ metadata: {\"hal\":{\"always\":true,\"requires\":{\"env\":[\"FOO\"]}}}
     assert loader.get_always_skills() == ["always_env"]
 
 
-def test_invalid_metadata_json_is_ignored(tmp_path: Path) -> None:
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    builtin = tmp_path / "builtin"
-    builtin.mkdir()
-
-    _write_skill(
-        builtin,
-        "badmeta",
-        """---
-name: badmeta
-description: bad metadata
-metadata: not-json
----""",
-    )
-
-    loader = SkillsLoader(workspace=ws, builtin_skills_dir=builtin)
-    # Should not crash; metadata treated as empty.
-    meta = loader.get_skill_metadata("badmeta")
-    assert meta is not None
-    assert meta.get("metadata") == "not-json"
-
-    # With no requirements, this should be considered available.
-    skills = loader.list_skills(filter_unavailable=True)
-    assert [s["name"] for s in skills] == ["badmeta"]
-
-
 def test_get_skill_metadata_missing_returns_none(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
     loader = SkillsLoader(workspace=ws, builtin_skills_dir=None)
     assert loader.get_skill_metadata("nope") is None
+
+
+def test_parse_list_handles_edge_cases() -> None:
+    """Test _parse_list with various inputs."""
+    assert SkillsLoader._parse_list("") == []
+    assert SkillsLoader._parse_list("[]") == []
+    assert SkillsLoader._parse_list('["gh"]') == ["gh"]
+    assert SkillsLoader._parse_list('["a", "b"]') == ["a", "b"]
+    assert SkillsLoader._parse_list("not-a-list") == ["not-a-list"]

@@ -19,7 +19,7 @@ from hal.capabilities.tools.registry import ToolRegistry
 from hal.capabilities.tools.schedule import CronTool
 from hal.capabilities.tools.spawn import SpawnTool
 from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
-from hal.core.context.compiler import ContextCompiler, ExecutionMode
+from hal.core.context.builder import ContextBuilder, ExecutionMode
 from hal.core.memory.manager import MemoryManager
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider
@@ -69,7 +69,7 @@ class AgentEngine:
         self.restrict_to_workspace = restrict_to_workspace
 
         self.memory = memory_manager or MemoryManager(workspace)
-        self.context = ContextCompiler(workspace, memory_manager=self.memory)
+        self.context = ContextBuilder(workspace, memory_manager=self.memory)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(

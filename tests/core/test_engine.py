@@ -58,17 +58,17 @@ def mock_session_manager(workspace):
 def engine(bus, mock_provider, workspace, mock_session_manager):
     """Build an AgentEngine with all heavy dependencies mocked."""
     with (
-        patch("hal.core.engine.ContextCompiler") as mock_ctx,
+        patch("hal.core.engine.ContextBuilder") as mock_ctx,
         patch("hal.core.engine.MemoryManager") as mock_mem,
         patch("hal.core.engine.SubagentManager"),
     ):
-        # ContextCompiler.build_messages returns minimal message list
-        compiler_instance = mock_ctx.return_value
-        compiler_instance.build_messages.return_value = [
+        # ContextBuilder.build_messages returns minimal message list
+        builder_instance = mock_ctx.return_value
+        builder_instance.build_messages.return_value = [
             {"role": "system", "content": "You are a test agent."},
         ]
-        compiler_instance.add_assistant_message.side_effect = lambda msgs, content, tc: msgs
-        compiler_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
+        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc: msgs
+        builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
 
         # MemoryManager stub
         mem_instance = mock_mem.return_value
@@ -89,16 +89,16 @@ def engine_with_cron(bus, mock_provider, workspace, mock_session_manager):
     """AgentEngine with a cron_service provided (registers CronTool)."""
     cron = MagicMock()
     with (
-        patch("hal.core.engine.ContextCompiler") as mock_ctx,
+        patch("hal.core.engine.ContextBuilder") as mock_ctx,
         patch("hal.core.engine.MemoryManager") as mock_mem,
         patch("hal.core.engine.SubagentManager"),
     ):
-        compiler_instance = mock_ctx.return_value
-        compiler_instance.build_messages.return_value = [
+        builder_instance = mock_ctx.return_value
+        builder_instance.build_messages.return_value = [
             {"role": "system", "content": "You are a test agent."},
         ]
-        compiler_instance.add_assistant_message.side_effect = lambda msgs, content, tc: msgs
-        compiler_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
+        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc: msgs
+        builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
 
         mem_instance = mock_mem.return_value
         mem_instance.record_interaction = MagicMock()

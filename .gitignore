@@ -20,3 +20,4 @@ poetry.lock
 .pytest_cache/
 .vscode/
 .claude/
+scripts/

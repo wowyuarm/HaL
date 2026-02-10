@@ -41,12 +41,12 @@ The central engine (renamed from `AgentLoop`; alias kept for compatibility). Sup
 - **OPERATOR** — Scheduled monitoring via cron/heartbeat (high signal-to-noise)
 
 For each inbound message it:
-1. Builds a system prompt via `ContextCompiler` (5-layer context system)
+1. Builds a system prompt via `ContextBuilder` (5-layer context system)
 2. Calls the LLM with conversation history + tool definitions
 3. Executes any tool calls, appends results, and loops (max 20 iterations)
 4. Sends the final response back through the bus
 
-### Context Compiler (`hal/core/context/compiler.py`)
+### Context Builder (`hal/core/context/builder.py`)
 
 Assembles the system prompt through a 5-layer architecture. Layers 0–2 form a stable prefix (maximizes prompt cache hits); Layers 3–4 are dynamic per request.
 
@@ -118,8 +118,8 @@ hal/
 ├── core/               # Core engine, context, memory
 │   ├── engine.py       # AgentEngine — central execution engine (3 modes)
 │   ├── subagent.py     # SubagentManager — spawning with isolated context
-│   ├── context/        # Context compilation
-│   │   └── compiler.py # ContextCompiler — 5-layer system prompt assembly
+│   ├── context/        # Context building
+│   │   └── builder.py  # ContextBuilder — 5-layer system prompt assembly
 │   └── memory/         # Three-tier memory system
 │       ├── manager.py  # MemoryManager — coordinates all memory tiers
 │       ├── episodic.py # EpisodicMemory — JSONL event traces
