@@ -28,7 +28,7 @@ class ExecutionMode(str, Enum):
     """Agent execution mode — determines context assembly strategy."""
 
     COLLAB = "collab"  # Real-time collaborative (user message → response)
-    ASYNC = "async"  # Background long-running task
+    ASYNC = "async"  # Background tasks
     OPERATOR = "operator"  # Scheduled monitoring / cron
 
 
@@ -40,11 +40,11 @@ _MODE_DIRECTIVES: dict[ExecutionMode, str] = {
     ExecutionMode.COLLAB: """\
 ## Mode: Collaborative
 Real-time conversation. Be responsive and concise. \
-Use 'spawn' for tasks that need many steps.""",
+Use 'spawn' to delegate tasks that need independent work.""",
     ExecutionMode.ASYNC: """\
-## Mode: Background Task
-You are a subagent executing a specific task. \
-Stay focused, be thorough, and report your findings clearly.""",
+## Mode: Focused Task
+You are executing a specific task. Stay focused — complete the assigned task only. \
+Be thorough in execution and concise in your final report.""",
     ExecutionMode.OPERATOR: """\
 ## Mode: Operator
 Running autonomously via scheduled trigger. \

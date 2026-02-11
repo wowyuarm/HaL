@@ -1,4 +1,4 @@
-"""Spawn tool for creating background subagents."""
+"""Spawn tool for delegating tasks to subagents."""
 
 from typing import TYPE_CHECKING, Any
 
@@ -10,10 +10,12 @@ if TYPE_CHECKING:
 
 class SpawnTool(Tool):
     """
-    Tool to spawn a subagent for background task execution.
+    Tool to delegate a task to a subagent.
 
-    The subagent runs asynchronously and announces its result back
-    to the main agent when complete.
+    By default the subagent runs synchronously — the main agent's loop
+    awaits completion and receives the result as a normal tool_result.
+    Set ``background=true`` for long-running tasks where the main agent
+    should respond to the user immediately.
     """
 
     def __init__(self, manager: "SubagentManager"):
@@ -22,7 +24,7 @@ class SpawnTool(Tool):
         self._origin_chat_id = "direct"
 
     def set_context(self, channel: str, chat_id: str) -> None:
-        """Set the origin context for subagent announcements."""
+        """Set the origin context for background subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
 
@@ -33,9 +35,10 @@ class SpawnTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a subagent to handle a task in the background. "
-            "Use this for complex or time-consuming tasks that can run independently. "
-            "The subagent will complete the task and report back when done."
+            "Delegate a task to a subagent. The subagent has its own tools "
+            "(file, exec, web) and will complete the task independently. "
+            "By default it runs synchronously and returns the result directly. "
+            "Set background=true for long-running tasks."
         )
 
     @property
@@ -51,15 +54,31 @@ class SpawnTool(Tool):
                     "type": "string",
                     "description": "Optional short label for the task (for display)",
                 },
+                "background": {
+                    "type": "boolean",
+                    "description": (
+                        "Run in background (fire-and-forget). "
+                        "Default false — waits and returns result directly."
+                    ),
+                    "default": False,
+                },
             },
             "required": ["task"],
         }
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
-        """Spawn a subagent to execute the given task."""
-        return await self._manager.spawn(
-            task=task,
-            label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-        )
+    async def execute(
+        self,
+        task: str,
+        label: str | None = None,
+        background: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        """Delegate a task to a subagent."""
+        if background:
+            return await self._manager.spawn_background(
+                task=task,
+                label=label,
+                origin_channel=self._origin_channel,
+                origin_chat_id=self._origin_chat_id,
+            )
+        return await self._manager.run(task=task, label=label)

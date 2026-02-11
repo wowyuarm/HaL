@@ -43,13 +43,18 @@ Send a message to a specific chat channel. Only use for cross-channel delivery (
 message(content="Hello!", channel="telegram", chat_id="12345")
 ```
 
-## spawn — Background Task
+## spawn — Subagent Delegation
 
-Spawn a subagent for complex or long-running tasks.
+Delegate a task to a subagent with its own tools (fs, exec, web). The result
+returns directly so you can continue reasoning with it.
 
 ```
 spawn(task="Research topic X and summarize", label="research")
+spawn(task="Long analysis", label="analysis", background=true)
 ```
+
+- Default (sync): awaits completion, result returned directly
+- `background=true`: fire-and-forget, result announced later via system message
 
 ## Cron — Scheduled Tasks
 
