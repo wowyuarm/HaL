@@ -10,6 +10,23 @@ Get USER_ID and CHANNEL from the current session context (e.g., `8281248569` and
 
 **Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
 
+### Progress Reporting During Long Operations
+
+When executing a series of tool calls or long-running tasks, **use the `message` tool to keep the user informed during the process**:
+
+1. **Before starting** a potentially lengthy operation (e.g., multiple file edits, complex analysis, spawn tasks), send a brief status:
+   ```
+   message(content="Starting analysis of the codebase, this may take a moment...")
+   ```
+
+2. **During execution**, provide periodic updates:
+   - After completing significant milestones
+   - When encountering unexpected delays
+   - When switching between major phases of work
+   - When waiting for subagent results that may take time
+
+**Why this matters**: Users can't see your internal tool execution. Without progress updates during long operations, they might think you're stuck or unresponsive. Brief messages during execution build trust and allow them to adjust priorities mid-task.
+
 ## Subagent Delegation
 
 Use `spawn` to delegate tasks that need independent work (research, file analysis, etc.).
@@ -43,3 +60,12 @@ If the user sends additional messages while you are still executing tools, those
 ```
 
 When the user asks for a recurring task, update `HEARTBEAT.md` instead of creating a one-time cron job.
+
+## Tool Execution vs. Code Display
+
+**Important**: When showing examples of commands to execute, you must use the actual tool calls (`exec`, `spawn`, etc.), not just display code blocks.
+
+- **Wrong**: Showing `gh repo view` in a code block — this is just text display, not execution.
+- **Right**: Using `exec(command="gh repo view")` — this actually runs the command.
+
+**Rule**: If you intend to execute something, use the appropriate tool. If you're just showing an example for the user to run themselves, make that clear in your explanation.
