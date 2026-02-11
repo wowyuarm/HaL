@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -237,7 +236,9 @@ class TestStop:
 
 class TestDispatch:
     async def test_system_channel_routes_to_process_system_message(self, engine):
-        msg = InboundMessage(channel="system", sender_id="sub", chat_id="cli:direct", content="done")
+        msg = InboundMessage(
+            channel="system", sender_id="sub", chat_id="cli:direct", content="done"
+        )
         engine._process_system_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
         await engine._dispatch(msg)
@@ -253,7 +254,7 @@ class TestDispatch:
 
 class TestProcessCollab:
     async def test_defaults_final_content_when_execute_loop_returns_none(self, engine):
-        engine._execute_loop = AsyncMock(return_value=(None, ["fs"]))  # type: ignore[method-assign]
+        engine._execute_loop = AsyncMock(return_value=(None, ["fs"], []))  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
         out = await engine.process_collab(msg)
@@ -270,7 +271,7 @@ class TestProcessCollab:
 
 class TestProcessOperator:
     async def test_operator_uses_max_10_iterations_and_default_message(self, engine):
-        engine._execute_loop = AsyncMock(return_value=(None, ["web_search"]))  # type: ignore[method-assign]
+        engine._execute_loop = AsyncMock(return_value=(None, ["web_search"], []))  # type: ignore[method-assign]
 
         result = await engine.process_operator(
             prompt="check",
@@ -286,7 +287,7 @@ class TestProcessOperator:
 
 class TestProcessSystemMessage:
     async def test_colon_chat_id_routes_back_to_origin_channel(self, engine):
-        engine._execute_loop = AsyncMock(return_value=(None, []))  # type: ignore[method-assign]
+        engine._execute_loop = AsyncMock(return_value=(None, [], []))  # type: ignore[method-assign]
 
         msg = InboundMessage(
             channel="system",
@@ -305,7 +306,7 @@ class TestProcessSystemMessage:
         engine.sessions.save.assert_called_once()
 
     async def test_no_colon_defaults_to_cli_origin(self, engine):
-        engine._execute_loop = AsyncMock(return_value=("ok", []))  # type: ignore[method-assign]
+        engine._execute_loop = AsyncMock(return_value=("ok", [], []))  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="system", sender_id="sub", chat_id="direct", content="hi")
         out = await engine._process_system_message(msg)
@@ -331,16 +332,79 @@ class TestExecuteLoop:
             LLMResponse(content="final", tool_calls=[]),
         ]
 
-        final, tools_used = await engine._execute_loop(
+        final, tools_used, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=3,
         )
 
         assert final == "final"
         assert tools_used == ["web_search", "fs"]
+        assert injected == []
         assert engine.tools.execute.await_count == 3
         engine.context.add_assistant_message.assert_called_once()
         assert engine.context.add_tool_result.call_count == 3
+
+
+class TestMidLoopInjection:
+    async def test_pending_messages_injected_into_loop(self, engine, bus, mock_provider):
+        """Messages arriving mid-execution are injected as user messages."""
+        # First call triggers tool use, second call returns final
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        async def chat_side_effect(messages, tools, model):
+            # On first call, enqueue a pending message to simulate user sending mid-loop
+            if mock_provider.chat.await_count == 1:
+                pending = InboundMessage(
+                    channel="telegram", sender_id="alice", chat_id="c1", content="also check X"
+                )
+                await bus.publish_inbound(pending)
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            return LLMResponse(content="final", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        final, tools_used, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_key="telegram:c1",
+        )
+
+        assert final == "final"
+        assert len(injected) == 1
+        assert injected[0].content == "also check X"
+        # Verify the prefix in messages sent to LLM on the second call
+        second_call_msgs = mock_provider.chat.await_args_list[1].kwargs["messages"]
+        injected_user_msgs = [
+            m
+            for m in second_call_msgs
+            if m.get("role") == "user" and "[User follow-up" in m.get("content", "")
+        ]
+        assert len(injected_user_msgs) == 1
+
+    async def test_non_matching_session_messages_are_requeued(self, engine, bus, mock_provider):
+        """Messages for other sessions stay in the queue."""
+        other_msg = InboundMessage(
+            channel="discord", sender_id="bob", chat_id="d1", content="unrelated"
+        )
+        await bus.publish_inbound(other_msg)
+
+        final, _, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=1,
+            session_key="telegram:c1",
+        )
+
+        assert injected == []
+        assert bus.inbound.qsize() == 1
+        requeued = bus.inbound.get_nowait()
+        assert requeued.content == "unrelated"
+
+    def test_drain_empty_queue_returns_empty(self, engine):
+        result = engine._drain_pending_for_session("telegram:c1")
+        assert result == []
 
 
 class TestRunLoop:

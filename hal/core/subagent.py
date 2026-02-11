@@ -119,7 +119,7 @@ class SubagentManager:
             {"role": "user", "content": task},
         ]
 
-        max_iterations = 15
+        max_iterations = 25
         iteration = 0
         final_result: str | None = None
 
@@ -154,7 +154,12 @@ class SubagentManager:
 
                 for tool_call in response.tool_calls:
                     logger.debug(f"Subagent [{task_id}] executing: {tool_call.name}")
-                    result = await tools.execute(tool_call.name, tool_call.arguments)
+
+                results = await asyncio.gather(
+                    *(tools.execute(tc.name, tc.arguments) for tc in response.tool_calls)
+                )
+
+                for tool_call, result in zip(response.tool_calls, results):
                     messages.append(
                         {
                             "role": "tool",
@@ -168,7 +173,21 @@ class SubagentManager:
                 break
 
         if final_result is None:
-            final_result = "Task completed but no final response was generated."
+            # Loop exhausted while still making tool calls.
+            # Make one final LLM call without tools to force a summary.
+            logger.warning(f"Subagent [{task_id}] hit max iterations, forcing summary")
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "You have reached the maximum number of tool iterations. "
+                        "Do NOT call any more tools. Summarize your progress and "
+                        "findings so far in a final response."
+                    ),
+                }
+            )
+            response = await self.provider.chat(messages=messages, tools=[], model=self.model)
+            final_result = response.content or "Task completed but no summary was generated."
 
         logger.info(f"Subagent [{task_id}] completed")
         return final_result

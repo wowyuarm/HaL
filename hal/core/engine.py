@@ -176,13 +176,17 @@ class AgentEngine:
             mode=ExecutionMode.COLLAB,
         )
 
-        final_content, tools_used = await self._execute_loop(messages, self.max_iterations)
+        final_content, tools_used, injected = await self._execute_loop(
+            messages, self.max_iterations, session_key=msg.session_key
+        )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        # Save to session
+        # Save to session (include any mid-loop injected messages)
         session.add_message("user", msg.content)
+        for injected_msg in injected:
+            session.add_message("user", injected_msg.content)
         session.add_message("assistant", final_content)
         self.sessions.save(session)
 
@@ -232,7 +236,9 @@ class AgentEngine:
 
         # Operator mode uses fewer iterations
         max_iter = min(self.max_iterations, 10)
-        final_content, tools_used = await self._execute_loop(messages, max_iter)
+        final_content, tools_used, _ = await self._execute_loop(
+            messages, max_iter, session_key=s_key
+        )
 
         if final_content is None:
             final_content = "Monitoring complete. Nothing to report."
@@ -277,7 +283,9 @@ class AgentEngine:
             chat_id=origin_chat_id,
         )
 
-        final_content, _ = await self._execute_loop(messages, self.max_iterations)
+        final_content, _, _ = await self._execute_loop(
+            messages, self.max_iterations, session_key=session_key
+        )
 
         if final_content is None:
             final_content = "Background task completed."
@@ -291,6 +299,34 @@ class AgentEngine:
         )
 
     # ------------------------------------------------------------------
+    # Mid-loop message injection
+    # ------------------------------------------------------------------
+
+    def _drain_pending_for_session(self, session_key: str) -> list[InboundMessage]:
+        """Non-blocking drain of inbound queue for messages matching session_key.
+
+        Non-matching messages are re-queued in their original order.
+        Safe because the engine processes one dispatch at a time.
+        """
+        matching: list[InboundMessage] = []
+        others: list[InboundMessage] = []
+
+        while not self.bus.inbound.empty():
+            try:
+                msg = self.bus.inbound.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if msg.session_key == session_key:
+                matching.append(msg)
+            else:
+                others.append(msg)
+
+        for msg in others:
+            self.bus.inbound.put_nowait(msg)
+
+        return matching
+
+    # ------------------------------------------------------------------
     # Core tool loop (shared by all modes)
     # ------------------------------------------------------------------
 
@@ -298,19 +334,34 @@ class AgentEngine:
         self,
         messages: list[dict[str, Any]],
         max_iterations: int,
-    ) -> tuple[str | None, list[str]]:
+        session_key: str | None = None,
+    ) -> tuple[str | None, list[str], list[InboundMessage]]:
         """
         Run the LLM tool-calling loop.
 
+        If *session_key* is provided, new inbound messages for the same session
+        are drained from the bus between iterations and injected as user
+        messages — the LLM sees them on the next turn without interrupting
+        the current execution.
+
         Returns:
-            Tuple of (final_content, tools_used).
+            Tuple of (final_content, tools_used, injected_messages).
         """
         iteration = 0
         final_content: str | None = None
         tools_used: list[str] = []
+        injected: list[InboundMessage] = []
 
         while iteration < max_iterations:
             iteration += 1
+
+            # Inject any messages that arrived mid-execution
+            if session_key:
+                for pending in self._drain_pending_for_session(session_key):
+                    prefixed = f"[User follow-up while you are working] {pending.content}"
+                    messages.append({"role": "user", "content": prefixed})
+                    injected.append(pending)
+                    logger.info(f"[inject] mid-loop message from {pending.sender_id}")
 
             response = await self.provider.chat(
                 messages=messages, tools=self.tools.get_definitions(), model=self.model
@@ -335,17 +386,22 @@ class AgentEngine:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    if tool_call.name not in tools_used:
+                        tools_used.append(tool_call.name)
+
+                results = await asyncio.gather(
+                    *(self.tools.execute(tc.name, tc.arguments) for tc in response.tool_calls)
+                )
+
+                for tool_call, result in zip(response.tool_calls, results):
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
-                    if tool_call.name not in tools_used:
-                        tools_used.append(tool_call.name)
             else:
                 final_content = response.content
                 break
 
-        return final_content, tools_used
+        return final_content, tools_used, injected
 
     # ------------------------------------------------------------------
     # Helpers

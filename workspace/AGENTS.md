@@ -16,6 +16,22 @@ Use `spawn` to delegate tasks that need independent work (research, file analysi
 - The result comes back directly — you can continue reasoning with it.
 - When a spawn task may take a while, **briefly tell the user** you're working on it before calling spawn, so they know to wait.
 - Set `background=true` only for genuinely long-running tasks where the user shouldn't have to wait.
+- Subagents have up to 25 tool iterations. If they exhaust this limit, they will produce a progress summary rather than silently stopping — use it to decide whether to spawn a follow-up.
+
+## Parallel Tool Execution
+
+When you issue multiple tool calls in a single response, they run **concurrently** — not one after another. This applies to both your own tool calls and subagent tool calls.
+
+- **Do**: return multiple independent calls together (e.g., two `spawn` tasks, or reading several files at once) for faster execution.
+- **Don't**: return calls with order dependencies in the same response (e.g., write a file then exec it). Split them across turns instead — the first call's result will be available before you issue the second.
+
+## Mid-conversation Follow-ups
+
+If the user sends additional messages while you are still executing tools, those messages are **injected into your current context** at the next iteration — you will see them naturally as new user messages.
+
+- You do **not** need to finish your current task first and handle them as a separate conversation.
+- When you see a follow-up, integrate it: adjust your plan, expand scope, or acknowledge it in your final response.
+- This only applies to messages from the **same session** (same channel + chat). Other sessions are unaffected.
 
 ## Heartbeat Tasks
 
