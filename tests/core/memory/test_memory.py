@@ -1,139 +1,92 @@
-"""Tests for the HaL memory system (episodic, long-term, manager)."""
+"""Tests for the HaL memory system (daily log, long-term, manager)."""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from hal.core.memory.episodic import Episode, EpisodicMemory, InteractionTurn, MemoryTrace
+from hal.core.memory.daily_log import DailyLog
 from hal.core.memory.long_term import LongTermMemory
 from hal.core.memory.manager import MemoryManager
 
 # ---------------------------------------------------------------------------
-# EpisodicMemory
+# DailyLog
 # ---------------------------------------------------------------------------
 
 
-class TestEpisodicMemory:
-    """Tests for EpisodicMemory — JSONL-backed interaction records."""
+class TestDailyLog:
+    """Tests for DailyLog — daily JSONL conversation storage."""
 
-    def test_record_creates_episode_with_correct_id_format(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        ep = mem.record(channel="cli", headline="hello world")
+    def test_append_creates_entry(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        entry = log.append(channel="cli", chat_id="direct", role="user", content="hello")
 
-        # ID must match EP-YYYYMMDD-NNNN
-        assert re.fullmatch(r"EP-\d{8}-\d{4}", ep.id)
-        # First episode: counter = 1
-        assert ep.id.endswith("-0001")
+        assert entry.channel == "cli"
+        assert entry.chat_id == "direct"
+        assert entry.role == "user"
+        assert entry.content == "hello"
 
-    def test_record_populates_all_fields(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        turns = [InteractionTurn(role="user", content="hi")]
-        ep = mem.record(
-            channel="telegram",
-            headline="greeting",
-            user_request="hi",
-            agent_response="hello",
-            tools_used=["web_search"],
-            tags=["test"],
-            turns=turns,
-            duration_seconds=1.5,
-            summary="user said hi",
+    def test_get_recent_conversation_returns_messages(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="hi")
+        log.append(channel="cli", chat_id="d", role="assistant", content="hello")
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        assert len(history) == 2
+        assert history[0] == {"role": "user", "content": "hi"}
+        assert history[1] == {"role": "assistant", "content": "hello"}
+
+    def test_get_recent_conversation_filters_by_channel(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="cli msg")
+        log.append(channel="telegram", chat_id="d", role="user", content="tg msg")
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        assert len(history) == 1
+        assert history[0]["content"] == "cli msg"
+
+    def test_get_recent_conversation_respects_reset(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="old msg")
+        log.mark_reset(channel="cli", chat_id="d")
+        log.append(channel="cli", chat_id="d", role="user", content="new msg")
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        assert len(history) == 1
+        assert history[0]["content"] == "new msg"
+
+    def test_get_recent_conversation_excludes_tools_by_default(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="run")
+        log.append(channel="cli", chat_id="d", role="tool", content="result", tool_name="fs")
+        log.append(channel="cli", chat_id="d", role="assistant", content="done")
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        assert len(history) == 2
+
+        history_with_tools = log.get_recent_conversation(
+            channel="cli", chat_id="d", include_tools=True
         )
+        assert len(history_with_tools) == 3
 
-        assert ep.channel == "telegram"
-        assert ep.headline == "greeting"
-        assert ep.user_request == "hi"
-        assert ep.agent_response == "hello"
-        assert ep.tools_used == ["web_search"]
-        assert ep.tags == ["test"]
-        assert ep.turns == turns
-        assert ep.duration_seconds == 1.5
-        assert ep.summary == "user said hi"
-        assert ep.timestamp > 0
-
-    def test_record_defaults_summary_to_headline(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        ep = mem.record(channel="cli", headline="testing defaults")
-        assert ep.summary == "testing defaults"
-
-    def test_get_recent_returns_correct_number(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
+    def test_get_recent_conversation_respects_max_messages(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
         for i in range(10):
-            mem.record(channel="cli", headline=f"ep-{i}")
+            log.append(channel="cli", chat_id="d", role="user", content=f"msg-{i}")
 
-        recent = mem.get_recent(limit=3)
-        assert len(recent) == 3
-        # Should be the last 3 episodes
-        assert recent[0].headline == "ep-7"
-        assert recent[2].headline == "ep-9"
+        history = log.get_recent_conversation(channel="cli", chat_id="d", max_messages=3)
+        assert len(history) == 3
+        # Should be the most recent 3
+        assert history[0]["content"] == "msg-7"
 
-    def test_get_recent_returns_all_when_fewer_than_limit(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        mem.record(channel="cli", headline="only one")
+    def test_get_stats(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="hi")
+        log.append(channel="cli", chat_id="d", role="assistant", content="hello")
 
-        recent = mem.get_recent(limit=10)
-        assert len(recent) == 1
-
-    def test_get_recent_empty(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        assert mem.get_recent() == []
-
-    def test_to_trace_creates_memory_trace(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        ep = mem.record(
-            channel="cli",
-            headline="trace test",
-            summary="detailed summary",
-            tools_used=["shell"],
-            tags=["tag1"],
-        )
-        trace = mem.to_trace(ep)
-
-        assert isinstance(trace, MemoryTrace)
-        assert trace.episode_id == ep.id
-        assert trace.timestamp == ep.timestamp
-        assert trace.headline == "trace test"
-        assert trace.summary == "detailed summary"
-        assert trace.tools_used == ["shell"]
-        assert trace.tags == ["tag1"]
-
-    def test_persistence_across_object_recreation(self, tmp_path: Path):
-        data_dir = tmp_path / "ep"
-
-        # Record with first instance
-        mem1 = EpisodicMemory(data_dir)
-        mem1.record(channel="cli", headline="first")
-        mem1.record(channel="cli", headline="second")
-
-        # Recreate — data should survive
-        mem2 = EpisodicMemory(data_dir)
-        recent = mem2.get_recent()
-        assert len(recent) == 2
-        assert recent[0].headline == "first"
-        assert recent[1].headline == "second"
-
-    def test_counter_increments_across_recordings(self, tmp_path: Path):
-        mem = EpisodicMemory(tmp_path / "ep")
-        ep1 = mem.record(channel="cli", headline="a")
-        ep2 = mem.record(channel="cli", headline="b")
-        ep3 = mem.record(channel="cli", headline="c")
-
-        assert ep1.id.endswith("-0001")
-        assert ep2.id.endswith("-0002")
-        assert ep3.id.endswith("-0003")
-
-    def test_counter_resumes_after_recreation(self, tmp_path: Path):
-        data_dir = tmp_path / "ep"
-
-        mem1 = EpisodicMemory(data_dir)
-        mem1.record(channel="cli", headline="a")
-        mem1.record(channel="cli", headline="b")
-
-        mem2 = EpisodicMemory(data_dir)
-        ep3 = mem2.record(channel="cli", headline="c")
-        # Counter should resume from 2 existing episodes, next is 3
-        assert ep3.id.endswith("-0003")
+        stats = log.get_stats()
+        assert stats["total_entries"] == 2
+        assert stats["by_role"]["user"] == 1
+        assert stats["by_role"]["assistant"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +147,6 @@ class TestLongTermMemory:
 
         assert "New alpha content." in result
         assert "Old alpha content." not in result
-        # Beta section should be preserved
         assert "Old beta content." in result
 
     def test_update_section_appends_when_not_found(self, tmp_path: Path):
@@ -207,7 +159,6 @@ class TestLongTermMemory:
 
         assert "## NewSection" in result
         assert "Brand new content." in result
-        # Original content preserved
         assert "## Existing" in result
         assert "Some content." in result
 
@@ -220,37 +171,6 @@ class TestLongTermMemory:
 class TestMemoryManager:
     """Tests for MemoryManager — coordinator of all memory subsystems."""
 
-    def test_record_interaction_creates_episode(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        ep = mgr.record_interaction(
-            channel="cli",
-            user_request="What is 2+2?",
-            agent_response="4",
-            tools_used=["calculator"],
-        )
-
-        assert isinstance(ep, Episode)
-        assert ep.channel == "cli"
-        assert ep.user_request == "What is 2+2?"
-        assert ep.agent_response == "4"
-        assert ep.tools_used == ["calculator"]
-
-    def test_record_interaction_auto_headline_from_request(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        ep = mgr.record_interaction(channel="cli", user_request="Short request")
-        assert ep.headline == "Short request"
-
-    def test_record_interaction_truncates_long_headline(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        long_request = "x" * 100
-        ep = mgr.record_interaction(channel="cli", user_request=long_request)
-        assert ep.headline == "x" * 80 + "..."
-
-    def test_record_interaction_default_headline(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        ep = mgr.record_interaction(channel="cron")
-        assert ep.headline == "Background task"
-
     def test_get_context_includes_long_term_memory(self, tmp_path: Path):
         mgr = MemoryManager(workspace=tmp_path)
         mgr.long_term.update("## Knowledge\nImportant fact.\n")
@@ -259,89 +179,50 @@ class TestMemoryManager:
         assert "Long-term Memory" in ctx
         assert "Important fact." in ctx
 
-    def test_get_context_includes_recent_episodes(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        mgr.record_interaction(channel="cli", user_request="test query")
-
-        ctx = mgr.get_context()
-        assert "Recent Interactions" in ctx
-        assert "test query" in ctx
-
     def test_get_context_empty_when_no_data(self, tmp_path: Path):
         mgr = MemoryManager(workspace=tmp_path)
         ctx = mgr.get_context()
         assert ctx == ""
 
-    def test_format_episodes_all_detailed_when_5_or_fewer(self, tmp_path: Path):
+    def test_record_conversation_creates_entry(self, tmp_path: Path):
         mgr = MemoryManager(workspace=tmp_path)
-        episodes = []
-        for i in range(4):
-            ep = mgr.record_interaction(channel="cli", user_request=f"req-{i}")
-            episodes.append(ep)
-
-        formatted = mgr._format_episodes(episodes)
-
-        # Should have "### Recent" but NOT "### Earlier"
-        assert "### Recent" in formatted
-        assert "### Earlier" not in formatted
-        # All episodes present as detailed (bold timestamp format)
-        for i in range(4):
-            assert f"req-{i}" in formatted
-
-    def test_format_episodes_split_when_more_than_5(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        episodes = []
-        for i in range(8):
-            ep = mgr.record_interaction(
-                channel="cli",
-                user_request=f"req-{i}",
-            )
-            episodes.append(ep)
-
-        formatted = mgr._format_episodes(episodes)
-
-        # Should have both sections
-        assert "### Earlier" in formatted
-        assert "### Recent" in formatted
-        # Last 5 are detailed (bold), older 3 are traces (dash-prefixed)
-        for i in range(3):
-            assert f"req-{i}" in formatted
-        for i in range(3, 8):
-            assert f"req-{i}" in formatted
-
-    def test_format_episodes_traces_use_dash_prefix(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        episodes = []
-        for i in range(7):
-            ep = mgr.record_interaction(channel="cli", user_request=f"item-{i}")
-            episodes.append(ep)
-
-        formatted = mgr._format_episodes(episodes)
-
-        # Older episodes (indices 0, 1) should be trace lines starting with "- `"
-        lines = formatted.split("\n")
-        trace_lines = [ln for ln in lines if ln.startswith("- `")]
-        assert len(trace_lines) == 2  # 7 - 5 = 2 older episodes
-
-    def test_format_episodes_detailed_show_summary(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        ep = mgr.episodic.record(
-            channel="cli",
-            headline="short headline",
-            summary="a longer summary that differs from headline",
+        entry = mgr.record_conversation(
+            channel="cli", chat_id="direct", role="user", content="hello"
         )
+        assert entry.content == "hello"
 
-        formatted = mgr._format_episodes([ep])
-        assert "a longer summary that differs from headline" in formatted
+    def test_get_conversation_history(self, tmp_path: Path):
+        mgr = MemoryManager(workspace=tmp_path)
+        mgr.record_conversation(channel="cli", chat_id="d", role="user", content="hi")
+        mgr.record_conversation(channel="cli", chat_id="d", role="assistant", content="hello")
 
-    def test_manager_uses_data_dir_for_episodes(self, tmp_path: Path):
+        history = mgr.get_conversation_history(channel="cli", chat_id="d")
+        assert len(history) == 2
+
+    def test_clear_conversation_history(self, tmp_path: Path):
+        mgr = MemoryManager(workspace=tmp_path)
+        mgr.record_conversation(channel="cli", chat_id="d", role="user", content="old")
+        mgr.clear_conversation_history(channel="cli", chat_id="d")
+        mgr.record_conversation(channel="cli", chat_id="d", role="user", content="new")
+
+        history = mgr.get_conversation_history(channel="cli", chat_id="d")
+        assert len(history) == 1
+        assert history[0]["content"] == "new"
+
+    def test_manager_uses_data_dir_for_logs(self, tmp_path: Path):
         workspace = tmp_path / "workspace"
         data_dir = tmp_path / "data"
         mgr = MemoryManager(workspace=workspace, data_dir=data_dir)
 
-        mgr.record_interaction(channel="cli", user_request="stored elsewhere")
+        mgr.record_conversation(channel="cli", chat_id="d", role="user", content="stored elsewhere")
 
-        # Episodes file should be in data_dir, not workspace
-        ep_file = data_dir / "episodes" / "episodes.jsonl"
-        assert ep_file.exists()
-        assert "stored elsewhere" in ep_file.read_text(encoding="utf-8")
+        # Log files should be in data_dir, not workspace
+        log_files = list((data_dir / "logs").glob("*.jsonl"))
+        assert len(log_files) == 1
+
+    def test_get_conversation_stats(self, tmp_path: Path):
+        mgr = MemoryManager(workspace=tmp_path)
+        mgr.record_conversation(channel="cli", chat_id="d", role="user", content="hi")
+
+        stats = mgr.get_conversation_stats()
+        assert stats["total_entries"] == 1

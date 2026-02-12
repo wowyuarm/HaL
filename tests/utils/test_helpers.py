@@ -37,13 +37,10 @@ def test_get_workspace_path_custom_expands_and_creates(tmp_home: Path) -> None:
     assert ws == (Path(tmp_home) / "custom-ws")
 
 
-def test_get_data_path_and_sessions_path_create_dirs(tmp_home: Path) -> None:
+def test_get_data_path_creates_dir(tmp_home: Path) -> None:
     data = helpers.get_data_path()
     assert data.exists()
-
-    sessions = helpers.get_sessions_path()
-    assert sessions.exists()
-    assert str(sessions).endswith("/.hal/sessions")
+    assert str(data).endswith("/.hal")
 
 
 def test_today_date_and_timestamp_format() -> None:

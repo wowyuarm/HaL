@@ -135,6 +135,13 @@ This file stores important information that should persist across sessions.
 """)
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
+    # Create utility directories
+    for dirname in ("tmp", "scripts"):
+        d = workspace / dirname
+        if not d.exists():
+            d.mkdir(exist_ok=True)
+            console.print(f"  [dim]Created {dirname}/[/dim]")
+
 
 def _make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""

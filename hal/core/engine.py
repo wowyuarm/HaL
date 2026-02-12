@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -156,8 +155,6 @@ class AgentEngine:
 
         Low latency, standard tool loop, records episode after completion.
         """
-        start_time = time.monotonic()
-
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"[collab] {msg.channel}:{msg.sender_id}: {preview}")
 
@@ -167,7 +164,6 @@ class AgentEngine:
             chat_id=msg.chat_id,
             role="user",
             content=msg.content,
-            session_key=msg.session_key,
         )
 
         self._update_tool_contexts(msg.channel, msg.chat_id)
@@ -206,7 +202,6 @@ class AgentEngine:
             chat_id=msg.chat_id,
             role="assistant",
             content=final_content,
-            session_key=msg.session_key,
         )
 
         # Record any mid-loop injected messages
@@ -216,18 +211,7 @@ class AgentEngine:
                 chat_id=msg.chat_id,
                 role="user",
                 content=injected_msg.content,
-                session_key=msg.session_key,
             )
-
-        # Record episode
-        duration = time.monotonic() - start_time
-        self.memory.record_interaction(
-            channel=msg.channel,
-            user_request=msg.content,
-            agent_response=final_content,
-            tools_used=tools_used,
-            duration_seconds=duration,
-        )
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"[collab] response: {preview}")
@@ -247,7 +231,6 @@ class AgentEngine:
         Used by cron jobs and heartbeat. Higher signal-to-noise — only
         produces output when there's something actionable.
         """
-        start_time = time.monotonic()
         s_key = session_key or f"{channel}:{chat_id}"
 
         logger.info(f"[operator] {s_key}: {prompt[:60]}...")
@@ -258,7 +241,6 @@ class AgentEngine:
             chat_id=chat_id,
             role="user",
             content=prompt,
-            session_key=s_key,
         )
 
         self._update_tool_contexts(channel, chat_id)
@@ -298,16 +280,6 @@ class AgentEngine:
             chat_id=chat_id,
             role="assistant",
             content=final_content,
-            session_key=s_key,
-        )
-
-        duration = time.monotonic() - start_time
-        self.memory.record_interaction(
-            channel="operator",
-            user_request=prompt,
-            agent_response=final_content,
-            tools_used=tools_used,
-            duration_seconds=duration,
         )
 
         return final_content
@@ -335,7 +307,6 @@ class AgentEngine:
             chat_id=origin_chat_id,
             role="user",
             content=f"[System: {msg.sender_id}] {msg.content}",
-            session_key=session_key,
         )
 
         # Get conversation history (includes the just-recorded message)
@@ -366,7 +337,6 @@ class AgentEngine:
             chat_id=origin_chat_id,
             role="assistant",
             content=final_content,
-            session_key=session_key,
         )
 
         return OutboundMessage(
@@ -485,7 +455,6 @@ class AgentEngine:
                             content=f"Calling {tool_call.name} with arguments: {json.dumps(tool_call.arguments, ensure_ascii=False)}",
                             tool_name=tool_call.name,
                             tool_result=result,
-                            session_key=session_key,
                         )
             else:
                 final_content = response.content

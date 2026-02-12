@@ -42,18 +42,6 @@ def bus():
 
 
 @pytest.fixture
-def mock_session_manager(workspace):
-    """A mock SessionManager that returns a fresh in-memory session."""
-    from hal.session.manager import Session, SessionManager
-
-    mgr = MagicMock(spec=SessionManager)
-    session = Session(key="cli:direct")
-    mgr.get_or_create.return_value = session
-    mgr.save = MagicMock()
-    return mgr
-
-
-@pytest.fixture
 def engine(bus, mock_provider, workspace):
     """Build an AgentEngine with all heavy dependencies mocked."""
     with (
@@ -71,7 +59,6 @@ def engine(bus, mock_provider, workspace):
 
         # MemoryManager stub
         mem_instance = mock_mem.return_value
-        mem_instance.record_interaction = MagicMock()
 
         eng = AgentEngine(
             bus=bus,
@@ -99,7 +86,6 @@ def engine_with_cron(bus, mock_provider, workspace):
         builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
 
         mem_instance = mock_mem.return_value
-        mem_instance.record_interaction = MagicMock()
 
         eng = AgentEngine(
             bus=bus,
@@ -262,8 +248,6 @@ class TestProcessCollab:
         assert out.chat_id == "c1"
         assert "no response" in out.content.lower()
 
-        engine.memory.record_interaction.assert_called_once()
-
 
 class TestProcessOperator:
     async def test_operator_uses_max_10_iterations_and_default_message(self, engine):
@@ -278,7 +262,6 @@ class TestProcessOperator:
         assert result == "Monitoring complete. Nothing to report."
         # second arg to _execute_loop is max_iter
         assert engine._execute_loop.await_args.args[1] == 10
-        engine.memory.record_interaction.assert_called_once()
 
 
 class TestProcessSystemMessage:

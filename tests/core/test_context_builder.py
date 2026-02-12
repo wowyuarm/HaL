@@ -114,20 +114,6 @@ class TestBuildSystemPrompt:
         assert "Remember: user likes tea." in prompt
         assert "# Memory" in prompt
 
-    def test_falls_back_to_legacy_memory(self, workspace: Path) -> None:
-        # Write a long-term memory file so legacy store returns it
-        (workspace / "memory" / "MEMORY.md").write_text("Legacy memory content", encoding="utf-8")
-
-        with patch("hal.core.context.builder.SkillsLoader") as cls:
-            cls.return_value = MagicMock(
-                get_always_skills=MagicMock(return_value=[]),
-                build_skills_summary=MagicMock(return_value=""),
-            )
-            cc = ContextBuilder(workspace)
-
-        prompt = cc.build_system_prompt()
-        assert "Legacy memory content" in prompt
-
     def test_no_memory_section_when_empty(self, builder: ContextBuilder) -> None:
         prompt = builder.build_system_prompt()
         assert "# Memory" not in prompt

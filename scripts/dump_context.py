@@ -56,14 +56,13 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parent / "context_dump.md"
 # ------------------------------------------------------------------
 
 
-def _load_session_history(session_key: str) -> list[dict]:
-    """Load conversation history from a session file."""
-    from hal.session.manager import SessionManager
-
-    # SessionManager reads from ~/.hal/sessions/
-    sm = SessionManager(workspace=DEFAULT_WORKSPACE)
-    session = sm.get_or_create(session_key)
-    return session.get_history()
+def _load_conversation_history(memory: MemoryManager, session_key: str) -> list[dict]:
+    """Load conversation history from the daily log."""
+    if ":" in session_key:
+        channel, chat_id = session_key.split(":", 1)
+    else:
+        channel, chat_id = "cli", session_key
+    return memory.get_conversation_history(channel=channel, chat_id=chat_id)
 
 
 def _build_tool_registry() -> ToolRegistry:
@@ -102,7 +101,7 @@ def dump_context(
     sections: list[str] = []
 
     # --- Header ---
-    sections.append(f"# Context Dump\n")
+    sections.append("# Context Dump\n")
     sections.append(f"- **Workspace**: `{workspace}`")
     sections.append(f"- **Mode**: `{mode.value}`")
     if session_key:
@@ -117,10 +116,10 @@ def dump_context(
     memory = MemoryManager(workspace)
     builder = ContextBuilder(workspace, memory_manager=memory)
 
-    # Load session history if provided
+    # Load conversation history if provided
     history: list[dict] = []
     if session_key:
-        history = _load_session_history(session_key)
+        history = _load_conversation_history(memory, session_key)
 
     messages = builder.build_messages(
         history=history,
@@ -165,7 +164,9 @@ def dump_context(
             else:
                 sections.append(f"```\n{content}\n```\n")
         elif isinstance(content, list):
-            sections.append("```json\n" + json.dumps(content, indent=2, ensure_ascii=False) + "\n```\n")
+            sections.append(
+                "```json\n" + json.dumps(content, indent=2, ensure_ascii=False) + "\n```\n"
+            )
 
     # --- Tool definitions ---
     if show_tools:
@@ -181,11 +182,14 @@ def dump_context(
 
     system_content = messages[0].get("content", "") if messages else ""
     total_chars = sum(
-        len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
-        for m in messages
+        len(m.get("content", "")) if isinstance(m.get("content"), str) else 0 for m in messages
     )
-    sections.append(f"- System prompt: **{len(system_content)}** chars (~{len(system_content) // 4} tokens)")
-    sections.append(f"- Total message content: **{total_chars}** chars (~{total_chars // 4} tokens)")
+    sections.append(
+        f"- System prompt: **{len(system_content)}** chars (~{len(system_content) // 4} tokens)"
+    )
+    sections.append(
+        f"- Total message content: **{total_chars}** chars (~{total_chars // 4} tokens)"
+    )
     sections.append(f"- Conversation history messages: **{len(history)}**")
 
     # Layer breakdown (heuristic: split by --- dividers in system prompt)
@@ -205,25 +209,29 @@ def main():
         description="Dump the full agent context as markdown for inspection."
     )
     parser.add_argument(
-        "--workspace", "-w",
+        "--workspace",
+        "-w",
         type=Path,
         default=DEFAULT_WORKSPACE,
         help=f"Workspace path (default: {DEFAULT_WORKSPACE})",
     )
     parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["collab", "async", "operator"],
         default="collab",
         help="Execution mode (default: collab)",
     )
     parser.add_argument(
-        "--session", "-s",
+        "--session",
+        "-s",
         type=str,
         default=None,
         help="Session key to load history from (e.g. 'cli:direct', 'telegram:12345')",
     )
     parser.add_argument(
-        "--tools", "-t",
+        "--tools",
+        "-t",
         action="store_true",
         help="Include tool definitions in the dump",
     )
@@ -246,7 +254,8 @@ def main():
         help="Chat ID",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=str,
         default=str(DEFAULT_OUTPUT),
         help=f"Output file path, or '-' for stdout (default: {DEFAULT_OUTPUT})",

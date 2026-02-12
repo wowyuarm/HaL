@@ -32,11 +32,6 @@ def get_workspace_path(workspace: str | None = None) -> Path:
     return ensure_dir(path)
 
 
-def get_sessions_path() -> Path:
-    """Get the sessions storage directory."""
-    return ensure_dir(get_data_path() / "sessions")
-
-
 def get_memory_path(workspace: Path | None = None) -> Path:
     """Get the memory directory within the workspace."""
     ws = workspace or get_workspace_path()

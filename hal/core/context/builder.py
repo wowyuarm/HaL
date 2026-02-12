@@ -232,14 +232,10 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
         return "\n\n".join(parts)
 
     def _get_memory_context(self) -> str:
-        """Assemble memory context from MemoryManager or legacy store."""
+        """Assemble memory context from MemoryManager."""
         if self._memory_manager:
             return self._memory_manager.get_context()
-        # Legacy fallback (deprecated — will be removed)
-        from hal.core.memory.store import MemoryStore
-
-        legacy = MemoryStore(self.workspace)
-        return legacy.get_memory_context()
+        return ""
 
     # ------------------------------------------------------------------
     # Message helpers
