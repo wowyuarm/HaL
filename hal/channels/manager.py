@@ -12,7 +12,7 @@ from hal.channels.base import BaseChannel
 from hal.infra.config.schema import Config
 
 if TYPE_CHECKING:
-    from hal.session.manager import SessionManager
+    from hal.core.memory.manager import MemoryManager
 
 
 class ChannelManager:
@@ -26,11 +26,11 @@ class ChannelManager:
     """
 
     def __init__(
-        self, config: Config, bus: MessageBus, session_manager: "SessionManager | None" = None
+        self, config: Config, bus: MessageBus, memory_manager: "MemoryManager | None" = None
     ):
         self.config = config
         self.bus = bus
-        self.session_manager = session_manager
+        self.memory_manager = memory_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -48,7 +48,7 @@ class ChannelManager:
                     self.config.channels.telegram,
                     self.bus,
                     groq_api_key=self.config.providers.groq.api_key,
-                    session_manager=self.session_manager,
+                    memory_manager=self.memory_manager,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:

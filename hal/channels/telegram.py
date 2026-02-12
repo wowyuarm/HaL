@@ -16,7 +16,7 @@ from hal.channels.base import BaseChannel
 from hal.infra.config.schema import TelegramConfig
 
 if TYPE_CHECKING:
-    from hal.session.manager import SessionManager
+    from hal.core.memory.manager import MemoryManager
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -105,12 +105,12 @@ class TelegramChannel(BaseChannel):
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
-        session_manager: SessionManager | None = None,
+        memory_manager: MemoryManager | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
-        self.session_manager = session_manager
+        self.memory_manager = memory_manager
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -235,17 +235,19 @@ class TelegramChannel(BaseChannel):
         chat_id = str(update.message.chat_id)
         session_key = f"{self.name}:{chat_id}"
 
-        if self.session_manager is None:
-            logger.warning("/reset called but session_manager is not available")
-            await update.message.reply_text("⚠️ Session management is not available.")
+        if self.memory_manager is None:
+            logger.warning("/reset called but memory_manager is not available")
+            await update.message.reply_text("⚠️ Memory management is not available.")
             return
 
-        session = self.session_manager.get_or_create(session_key)
-        msg_count = len(session.messages)
-        session.clear()
-        self.session_manager.save(session)
+        # Mark a reset point in the conversation log
+        self.memory_manager.clear_conversation_history(
+            channel=self.name,
+            chat_id=chat_id,
+            session_key=session_key,
+        )
 
-        logger.info(f"Session reset for {session_key} (cleared {msg_count} messages)")
+        logger.info(f"Conversation reset for {session_key}")
         await update.message.reply_text("🔄 Conversation history cleared. Let's start fresh!")
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -57,6 +57,26 @@ class ConversationLog:
         """Get the log file path for a specific date."""
         return self.data_dir / f"{log_date.isoformat()}.jsonl"
 
+    def mark_reset(self, channel: str, chat_id: str, session_key: str | None = None) -> LogEntry:
+        """
+        Mark a reset point for a conversation. Messages before this point will be ignored.
+
+        Args:
+            channel: Channel name
+            chat_id: Chat identifier
+            session_key: Original session key (for migration)
+
+        Returns:
+            The created reset marker entry
+        """
+        return self.append(
+            channel=channel,
+            chat_id=chat_id,
+            role="system",
+            content="conversation_reset",
+            session_key=session_key,
+        )
+
     def append(
         self,
         channel: str,
@@ -139,15 +159,26 @@ class ConversationLog:
             entry for entry in entries if entry.channel == channel and entry.chat_id == chat_id
         ]
 
-        # Filter out tool messages if requested
-        if not include_tools:
-            filtered = [entry for entry in filtered if entry.role != "tool"]
+        # Process from newest to oldest, stopping at reset markers
+        result: list[LogEntry] = []
+        for entry in reversed(filtered):
+            # Check for reset marker
+            if entry.role == "system" and entry.content == "conversation_reset":
+                break
 
-        # Get most recent messages
-        recent = filtered[-max_messages:] if len(filtered) > max_messages else filtered
+            # Filter out tool messages if requested
+            if not include_tools and entry.role == "tool":
+                continue
+
+            result.append(entry)
+            if len(result) >= max_messages:
+                break
+
+        # Reverse back to chronological order (oldest to newest)
+        result.reverse()
 
         # Convert to LLM format
-        return [{"role": entry.role, "content": entry.content} for entry in recent]
+        return [{"role": entry.role, "content": entry.content} for entry in result]
 
     def get_all_entries(
         self,

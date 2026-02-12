@@ -8,7 +8,9 @@ from hal.infra.providers.transcription import GroqTranscriptionProvider
 
 
 @pytest.mark.asyncio
-async def test_transcribe_returns_empty_when_no_api_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_transcribe_returns_empty_when_no_api_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     p = GroqTranscriptionProvider(api_key=None)
 
@@ -52,7 +54,9 @@ async def test_transcribe_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
             calls["timeout"] = timeout
             return DummyResp()
 
-    monkeypatch.setattr("hal.infra.providers.transcription.httpx.AsyncClient", lambda: DummyClient())
+    monkeypatch.setattr(
+        "hal.infra.providers.transcription.httpx.AsyncClient", lambda: DummyClient()
+    )
 
     p = GroqTranscriptionProvider(api_key="k")
     out = await p.transcribe(f)
@@ -63,7 +67,9 @@ async def test_transcribe_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_transcribe_handles_http_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_transcribe_handles_http_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     f = tmp_path / "a.wav"
     f.write_bytes(b"data")
 
@@ -84,7 +90,9 @@ async def test_transcribe_handles_http_error(monkeypatch: pytest.MonkeyPatch, tm
         async def post(self, url: str, headers=None, files=None, timeout=None):
             return DummyResp()
 
-    monkeypatch.setattr("hal.infra.providers.transcription.httpx.AsyncClient", lambda: DummyClient())
+    monkeypatch.setattr(
+        "hal.infra.providers.transcription.httpx.AsyncClient", lambda: DummyClient()
+    )
 
     p = GroqTranscriptionProvider(api_key="k")
     assert await p.transcribe(f) == ""

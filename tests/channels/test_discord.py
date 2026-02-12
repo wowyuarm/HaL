@@ -47,14 +47,18 @@ class _HTTP:
 
 
 @pytest.mark.asyncio
-async def test_send_retries_on_rate_limit_and_includes_reply_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_send_retries_on_rate_limit_and_includes_reply_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = DiscordConfig(enabled=True, token="t")
     ch = DiscordChannel(cfg, MessageBus())
 
-    ch._http = _HTTP([
-        _Resp(429, {"retry_after": 0.0}),
-        _Resp(200),
-    ])
+    ch._http = _HTTP(
+        [
+            _Resp(429, {"retry_after": 0.0}),
+            _Resp(200),
+        ]
+    )
 
     # Avoid real sleep + typing stop side effects
     monkeypatch.setattr(asyncio, "sleep", AsyncMock())
@@ -71,7 +75,9 @@ async def test_send_retries_on_rate_limit_and_includes_reply_reference(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_handle_message_create_downloads_attachment_and_forwards(tmp_home, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_handle_message_create_downloads_attachment_and_forwards(
+    tmp_home, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cfg = DiscordConfig(enabled=True, token="t")
     ch = DiscordChannel(cfg, MessageBus())
 
@@ -158,7 +164,9 @@ async def test_identify_sends_token_and_intents() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gateway_loop_handles_hello_message_create_and_reconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_gateway_loop_handles_hello_message_create_and_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = DiscordConfig(enabled=True, token="t")
     ch = DiscordChannel(cfg, MessageBus())
 
@@ -166,12 +174,14 @@ async def test_gateway_loop_handles_hello_message_create_and_reconnect(monkeypat
     msg = json.dumps({"op": 0, "t": "MESSAGE_CREATE", "d": {"id": "m"}})
     reconnect = json.dumps({"op": 7})
 
-    ch._ws = _WS([
-        "not json",
-        hello,
-        msg,
-        reconnect,
-    ])  # type: ignore[assignment]
+    ch._ws = _WS(
+        [
+            "not json",
+            hello,
+            msg,
+            reconnect,
+        ]
+    )  # type: ignore[assignment]
 
     ch._start_heartbeat = AsyncMock()  # type: ignore[method-assign]
     ch._identify = AsyncMock()  # type: ignore[method-assign]
@@ -185,7 +195,9 @@ async def test_gateway_loop_handles_hello_message_create_and_reconnect(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_start_heartbeat_sends_once_and_cancels_previous(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_start_heartbeat_sends_once_and_cancels_previous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cfg = DiscordConfig(enabled=True, token="t")
     ch = DiscordChannel(cfg, MessageBus())
 

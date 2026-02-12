@@ -9,7 +9,6 @@ from typer.testing import CliRunner
 
 import hal.cli.commands as commands
 
-
 runner = CliRunner()
 
 
@@ -112,7 +111,7 @@ def test_cron_add_list_run_enable_remove(tmp_home: Path) -> None:
 
     # Re-load store and ensure lastStatus updated
     _, data2 = _read_cron_store(tmp_home)
-    state = (data2["jobs"][0].get("state") or {})
+    state = data2["jobs"][0].get("state") or {}
     assert state.get("lastStatus") in {"ok", "error"}
 
     # Remove
@@ -139,7 +138,9 @@ def test_cron_add_requires_schedule(tmp_home: Path) -> None:
     assert result.exit_code != 0
 
 
-def test_channels_login_exits_when_npm_missing(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_channels_login_exits_when_npm_missing(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(shutil, "which", lambda _: None)
     result = runner.invoke(commands.app, ["channels", "login"])
     assert result.exit_code == 1
@@ -153,7 +154,9 @@ def test_agent_errors_without_api_key(tmp_home: Path) -> None:
     assert "no api key" in result.output.lower()
 
 
-def test_agent_single_message_success_with_patched_loop(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_single_message_success_with_patched_loop(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class DummyLoop:
         def __init__(self, **kwargs):
             self.kwargs = kwargs

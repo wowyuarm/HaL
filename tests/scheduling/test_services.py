@@ -32,13 +32,17 @@ def test_compute_next_run_cron_invalid_returns_none(monkeypatch: pytest.MonkeyPa
     # Force croniter to fail
     import croniter as croniter_mod
 
-    monkeypatch.setattr(croniter_mod, "croniter", lambda *_args, **_kw: (_ for _ in ()).throw(ValueError()))
+    monkeypatch.setattr(
+        croniter_mod, "croniter", lambda *_args, **_kw: (_ for _ in ()).throw(ValueError())
+    )
 
     assert _compute_next_run(CronSchedule(kind="cron", expr="* * * * *"), 0) is None
 
 
 @pytest.mark.asyncio
-async def test_cron_service_execute_job_updates_state_and_next_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cron_service_execute_job_updates_state_and_next_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = tmp_path / "jobs.json"
 
     # Freeze time
@@ -68,7 +72,9 @@ async def test_cron_service_execute_job_updates_state_and_next_run(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_cron_service_execute_job_error_sets_last_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cron_service_execute_job_error_sets_last_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = tmp_path / "jobs.json"
     monkeypatch.setattr("hal.capabilities.scheduling.cron_service.time.time", lambda: 1000.0)
 
@@ -91,7 +97,9 @@ async def test_cron_service_execute_job_error_sets_last_error(tmp_path: Path, mo
 
 
 @pytest.mark.asyncio
-async def test_cron_service_one_shot_jobs_disable_or_delete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cron_service_one_shot_jobs_disable_or_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = tmp_path / "jobs.json"
     monkeypatch.setattr("hal.capabilities.scheduling.cron_service.time.time", lambda: 1000.0)
 
@@ -125,7 +133,9 @@ async def test_cron_service_one_shot_jobs_disable_or_delete(tmp_path: Path, monk
 
 
 @pytest.mark.asyncio
-async def test_cron_service_enable_disable_remove_and_run_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_cron_service_enable_disable_remove_and_run_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = tmp_path / "jobs.json"
     monkeypatch.setattr("hal.capabilities.scheduling.cron_service.time.time", lambda: 1000.0)
 

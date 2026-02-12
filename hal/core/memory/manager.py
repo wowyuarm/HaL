@@ -151,6 +151,29 @@ class MemoryManager:
         """Get statistics about conversation logs."""
         return self.conversation_log.get_stats()
 
+    def clear_conversation_history(
+        self,
+        channel: str,
+        chat_id: str,
+        session_key: str | None = None,
+    ) -> LogEntry:
+        """
+        Clear conversation history for a specific channel/chat by marking a reset point.
+
+        Args:
+            channel: Channel name
+            chat_id: Chat identifier
+            session_key: Original session key (for migration)
+
+        Returns:
+            The reset marker entry
+        """
+        return self.conversation_log.mark_reset(
+            channel=channel,
+            chat_id=chat_id,
+            session_key=session_key,
+        )
+
     def _format_episodes(self, episodes: list[Episode]) -> str:
         """Format episodes with two-tier detail level."""
         lines = ["## Recent Interactions\n"]

@@ -64,7 +64,9 @@ async def test_send_invalid_chat_id_is_ignored() -> None:
         def __init__(self):
             self.sent: list[tuple[int, str, str | None]] = []
 
-        async def send_message(self, chat_id: int, text: str, parse_mode: str | None = None) -> None:
+        async def send_message(
+            self, chat_id: int, text: str, parse_mode: str | None = None
+        ) -> None:
             self.sent.append((chat_id, text, parse_mode))
 
     class DummyApp:
@@ -84,7 +86,9 @@ async def test_send_falls_back_to_plain_text_on_html_error() -> None:
         def __init__(self):
             self.sent: list[tuple[int, str, str | None]] = []
 
-        async def send_message(self, chat_id: int, text: str, parse_mode: str | None = None) -> None:
+        async def send_message(
+            self, chat_id: int, text: str, parse_mode: str | None = None
+        ) -> None:
             # Simulate Telegram rejecting HTML
             if parse_mode == "HTML":
                 raise RuntimeError("bad html")
@@ -167,7 +171,9 @@ class _Update:
 
 
 @pytest.mark.asyncio
-async def test_on_message_text_only_forwards_to_bus(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_on_message_text_only_forwards_to_bus(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
 
     ch._start_typing = MagicMock()  # type: ignore[method-assign]
@@ -188,7 +194,9 @@ async def test_on_message_text_only_forwards_to_bus(tmp_home: Path, monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_on_message_photo_downloads_and_adds_media(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_on_message_photo_downloads_and_adds_media(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class DummyFile:
         async def download_to_drive(self, path: str) -> None:
             Path(path).write_bytes(b"data")
@@ -227,7 +235,9 @@ async def test_on_message_photo_downloads_and_adds_media(tmp_home: Path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_on_message_voice_transcribes_when_available(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_on_message_voice_transcribes_when_available(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     class DummyFile:
         async def download_to_drive(self, path: str) -> None:
             Path(path).write_bytes(b"data")

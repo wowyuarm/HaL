@@ -152,7 +152,7 @@ async def test_web_fetch_json_response(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @property
         def text(self) -> str:
-            return "{\"a\":1}"
+            return '{"a":1}'
 
     class DummyClient:
         async def __aenter__(self):
@@ -164,7 +164,9 @@ async def test_web_fetch_json_response(monkeypatch: pytest.MonkeyPatch) -> None:
         async def get(self, *args, **kwargs):
             return DummyResp()
 
-    monkeypatch.setattr("hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient())
+    monkeypatch.setattr(
+        "hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient()
+    )
 
     tool = WebFetchTool(max_chars=1000)
     out = await tool.execute(url="https://example.com")
@@ -207,7 +209,9 @@ async def test_web_fetch_html_markdown_and_text_modes(monkeypatch: pytest.Monkey
             return DummyResp()
 
     monkeypatch.setattr("readability.Document", DummyDoc)
-    monkeypatch.setattr("hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient())
+    monkeypatch.setattr(
+        "hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient()
+    )
 
     tool = WebFetchTool(max_chars=1000)
 
@@ -245,7 +249,9 @@ async def test_web_fetch_raw_and_truncation(monkeypatch: pytest.MonkeyPatch) -> 
         async def get(self, *args, **kwargs):
             return DummyResp()
 
-    monkeypatch.setattr("hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient())
+    monkeypatch.setattr(
+        "hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient()
+    )
 
     tool = WebFetchTool(max_chars=5)
     out = await tool.execute(url="https://example.com", maxChars=5)
@@ -268,7 +274,9 @@ async def test_web_fetch_handles_http_errors(monkeypatch: pytest.MonkeyPatch) ->
         async def get(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient())
+    monkeypatch.setattr(
+        "hal.capabilities.tools.web.httpx.AsyncClient", lambda **kwargs: DummyClient()
+    )
 
     tool = WebFetchTool()
     out = await tool.execute(url="https://example.com")

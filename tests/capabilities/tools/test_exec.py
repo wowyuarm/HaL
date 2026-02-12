@@ -37,7 +37,9 @@ def test_guard_restrict_to_workspace_blocks_paths_outside_working_dir(tmp_path) 
 
 
 @pytest.mark.asyncio
-async def test_execute_collects_stdout_stderr_and_exit_code(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+async def test_execute_collects_stdout_stderr_and_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
     tool = ExecTool(timeout=1, working_dir=str(tmp_path))
 
     class DummyProc:

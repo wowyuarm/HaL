@@ -80,7 +80,7 @@ def test_channel_manager_initializes_enabled_channels(monkeypatch: pytest.Monkey
     class DummyTelegram(BaseChannel):
         name = "telegram"
 
-        def __init__(self, config, bus, groq_api_key: str = "", session_manager=None):
+        def __init__(self, config, bus, groq_api_key: str = "", memory_manager=None):
             super().__init__(config, bus)
 
         async def start(self) -> None:  # pragma: no cover

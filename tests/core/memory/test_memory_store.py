@@ -13,7 +13,9 @@ def test_read_today_empty_when_missing(tmp_path: Path) -> None:
     assert store.read_today() == ""
 
 
-def test_append_today_creates_file_with_header(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_append_today_creates_file_with_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     # Freeze date
     monkeypatch.setattr("hal.core.memory.store.today_date", lambda: "2020-01-01")
 
@@ -26,7 +28,9 @@ def test_append_today_creates_file_with_header(monkeypatch: pytest.MonkeyPatch, 
     assert "hello" in text
 
 
-def test_append_today_appends_when_file_exists(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_append_today_appends_when_file_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr("hal.core.memory.store.today_date", lambda: "2020-01-01")
 
     store = MemoryStore(tmp_path)
@@ -52,7 +56,9 @@ def test_long_term_read_write_and_context(tmp_path: Path) -> None:
     assert "LT" in ctx
 
 
-def test_get_recent_memories_and_list_files(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_get_recent_memories_and_list_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     store = MemoryStore(tmp_path)
 
     # Create two daily files
@@ -76,7 +82,9 @@ def test_get_recent_memories_and_list_files(monkeypatch: pytest.MonkeyPatch, tmp
     assert [p.name for p in files] == ["2020-01-02.md", "2020-01-01.md"]
 
 
-def test_memory_context_includes_today_section(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_memory_context_includes_today_section(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr("hal.core.memory.store.today_date", lambda: "2020-01-01")
 
     store = MemoryStore(tmp_path)

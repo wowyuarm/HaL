@@ -60,7 +60,8 @@ Assembles the system prompt through a 5-layer architecture. Layers 0–2 form a 
 
 ### Memory System (`hal/core/memory/`)
 
-Three-tier memory architecture, coordinated by `MemoryManager`:
+Unified memory architecture, coordinated by `MemoryManager`:
+- **ConversationLog** (`conversation_log.py`) — Daily JSONL logs of all interactions, replacing the old session/episode system
 - **EpisodicMemory** (`episodic.py`) — Short-term event traces stored as JSONL
 - **LongTermMemory** (`long_term.py`) — Persistent knowledge stored in MEMORY.md
 - **WorkingMemory** (`working.py`) — Current session state (transient)
@@ -154,8 +155,8 @@ hal/
 │   │   └── [provider files]
 │   └── config/         # Configuration management
 │       └── schema.py   # Pydantic config models
-├── session/            # Conversation sessions
-│   └── manager.py      # SessionManager — per-channel history
+├── session/            # [DEPRECATED] Old session system (replaced by conversation_log)
+│   └── manager.py      # SessionManager — legacy per-channel history storage
 ├── cli/                # CLI commands
 │   └── commands.py     # CLI entry points (onboard, agent, gateway)
 └── utils/              # Helpers

@@ -91,4 +91,4 @@ def test_session_save_format_includes_metadata_line(tmp_home: Path) -> None:
 
     msg = json.loads(raw[1])
     assert msg["role"] == "user"
-    assert msg["content"] == "hi" 
+    assert msg["content"] == "hi"

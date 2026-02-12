@@ -23,13 +23,7 @@ def test_parse_md_table_returns_table_element() -> None:
 
 def test_build_card_elements_splits_markdown_and_tables() -> None:
     ch = FeishuChannel(FeishuConfig(enabled=True), MessageBus())
-    content = (
-        "Intro\n\n"
-        "| A | B |\n"
-        "|---|---|\n"
-        "| 1 | 2 |\n"
-        "\nOutro"
-    )
+    content = "Intro\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nOutro"
 
     elements = ch._build_card_elements(content)
     assert len(elements) == 3

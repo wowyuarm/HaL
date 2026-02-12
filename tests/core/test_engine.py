@@ -298,7 +298,6 @@ class TestProcessSystemMessage:
         assert out.chat_id == "chat123"
         assert out.content == "Background task completed."
 
-
     async def test_no_colon_defaults_to_cli_origin(self, engine):
         engine._execute_loop = AsyncMock(return_value=("ok", [], []))  # type: ignore[method-assign]
 

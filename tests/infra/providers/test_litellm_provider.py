@@ -57,7 +57,9 @@ def test_gateway_detection_and_env_setup(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_resolve_model_gateway_prefix_and_strip(monkeypatch: pytest.MonkeyPatch) -> None:
     # aihubmix detected via api_base keyword, strips provider prefix then prefixes openai/
-    p = LiteLLMProvider(api_key="k", api_base="https://aihubmix.com/v1", default_model="anthropic/claude")
+    p = LiteLLMProvider(
+        api_key="k", api_base="https://aihubmix.com/v1", default_model="anthropic/claude"
+    )
 
     assert p._resolve_model("anthropic/claude-3") == "openai/claude-3"
     assert p._resolve_model("openai/gpt-4o") == "openai/gpt-4o"
@@ -100,8 +102,12 @@ def test_parse_response_tool_calls_and_usage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_applies_model_overrides_and_passes_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    p = LiteLLMProvider(api_key=None, api_base="http://localhost:8000/v1", default_model="moonshot/kimi-k2.5")
+async def test_chat_applies_model_overrides_and_passes_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(
+        api_key=None, api_base="http://localhost:8000/v1", default_model="moonshot/kimi-k2.5"
+    )
 
     called = {}
 
