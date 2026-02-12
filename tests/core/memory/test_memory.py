@@ -226,3 +226,105 @@ class TestMemoryManager:
 
         stats = mgr.get_conversation_stats()
         assert stats["total_entries"] == 1
+
+
+# ---------------------------------------------------------------------------
+# DailyLog — entry_type and summary merging
+# ---------------------------------------------------------------------------
+
+
+class TestDailyLogEntryType:
+    """Tests for entry_type field and summary merging logic."""
+
+    def test_append_with_entry_type_summary(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        entry = log.append(
+            channel="cli",
+            chat_id="d",
+            role="assistant",
+            content="summary text",
+            entry_type="summary",
+        )
+        assert entry.entry_type == "summary"
+
+    def test_default_entry_type_is_message(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        entry = log.append(channel="cli", chat_id="d", role="user", content="hi")
+        assert entry.entry_type == "message"
+
+    def test_summary_merged_with_preceding_assistant(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="do something")
+        log.append(channel="cli", chat_id="d", role="assistant", content="Done!")
+        log.append(
+            channel="cli",
+            chat_id="d",
+            role="assistant",
+            content="Modified 3 files.",
+            entry_type="summary",
+        )
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        # Summary should be merged into the assistant message, not a separate entry
+        assert len(history) == 2
+        assert history[1]["role"] == "assistant"
+        assert "Done!" in history[1]["content"]
+        assert "[Task Summary]" in history[1]["content"]
+        assert "Modified 3 files." in history[1]["content"]
+
+    def test_summary_without_preceding_assistant_stays_separate(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="hi")
+        log.append(
+            channel="cli",
+            chat_id="d",
+            role="assistant",
+            content="orphan summary",
+            entry_type="summary",
+        )
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        # No preceding assistant message to merge into, so it stays separate
+        assert len(history) == 2
+
+    def test_summary_entries_included_in_history(self, tmp_path: Path):
+        """Summary entries are not filtered out."""
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="assistant", content="response")
+        log.append(
+            channel="cli",
+            chat_id="d",
+            role="assistant",
+            content="summary",
+            entry_type="summary",
+        )
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        # Merged into one
+        assert len(history) == 1
+        assert "summary" in history[0]["content"]
+
+
+class TestMemoryManagerEntryType:
+    """Tests for entry_type passthrough in MemoryManager."""
+
+    def test_record_conversation_with_entry_type(self, tmp_path: Path):
+        mgr = MemoryManager(workspace=tmp_path)
+        entry = mgr.record_conversation(
+            channel="cli",
+            chat_id="d",
+            role="assistant",
+            content="summary",
+            entry_type="summary",
+        )
+        assert entry.entry_type == "summary"
+
+    def test_record_conversation_default_entry_type(self, tmp_path: Path):
+        mgr = MemoryManager(workspace=tmp_path)
+        entry = mgr.record_conversation(
+            channel="cli",
+            chat_id="d",
+            role="user",
+            content="hello",
+        )
+        assert entry.entry_type == "message"

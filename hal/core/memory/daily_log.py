@@ -23,6 +23,7 @@ class LogEntry(BaseModel):
     content: str
     tool_name: str | None = None  # Only for role="tool"
     tool_result: str | None = None  # Only for role="tool"
+    entry_type: str = "message"  # "message" | "summary"
 
 
 class DailyLog:
@@ -75,6 +76,7 @@ class DailyLog:
         content: str,
         tool_name: str | None = None,
         tool_result: str | None = None,
+        entry_type: str = "message",
     ) -> LogEntry:
         """
         Append a new entry to the daily log.
@@ -86,6 +88,7 @@ class DailyLog:
             content: Message content
             tool_name: Tool name (only for role="tool")
             tool_result: Tool result (only for role="tool")
+            entry_type: Entry type ("message" or "summary")
 
         Returns:
             The created log entry
@@ -98,6 +101,7 @@ class DailyLog:
             content=content,
             tool_name=tool_name,
             tool_result=tool_result,
+            entry_type=entry_type,
         )
 
         log_file = self._get_today_file()
@@ -154,7 +158,22 @@ class DailyLog:
         # Reverse back to chronological order (oldest to newest)
         result.reverse()
 
-        return [{"role": entry.role, "content": entry.content} for entry in result]
+        # Merge summary entries into preceding assistant messages to avoid
+        # consecutive assistant messages in LLM context.
+        merged: list[dict[str, Any]] = []
+        for entry in result:
+            msg = {"role": entry.role, "content": entry.content}
+            if (
+                entry.entry_type == "summary"
+                and entry.role == "assistant"
+                and merged
+                and merged[-1]["role"] == "assistant"
+            ):
+                merged[-1]["content"] += "\n\n---\n[Task Summary]\n" + entry.content
+            else:
+                merged.append(msg)
+
+        return merged
 
     def get_all_entries(
         self,

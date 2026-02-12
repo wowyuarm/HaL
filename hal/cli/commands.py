@@ -206,6 +206,7 @@ def gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        summary_model=config.agents.defaults.summary_model,
     )
 
     # Set cron callback (needs agent)
@@ -302,6 +303,7 @@ def agent(
         web_search_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        summary_model=config.agents.defaults.summary_model,
     )
 
     if message:

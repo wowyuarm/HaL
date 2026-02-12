@@ -63,6 +63,7 @@ class AgentDefaults(BaseModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
+    summary_model: str = "default"  # Model for post-loop summaries; "default" uses main model
 
 
 class AgentsConfig(BaseModel):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,26 @@ from hal.infra.providers.base import LLMProvider
 if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.infra.config.schema import ExecToolConfig
+
+
+SIDE_EFFECT_TOOLS = {"fs", "exec"}
+FS_SIDE_EFFECT_ACTIONS = {"write", "edit"}
+
+
+@dataclass
+class LoopMetadata:
+    """Metadata collected during a tool-calling loop execution."""
+
+    iterations: int = 0
+    tools_used: list[str] = field(default_factory=list)
+    files_modified: list[str] = field(default_factory=list)
+    commands_run: list[str] = field(default_factory=list)
+    has_side_effects: bool = False
+    loop_messages: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def needs_summary(self) -> bool:
+        return self.iterations >= 5 or self.has_side_effects
 
 
 class AgentEngine:
@@ -52,6 +73,7 @@ class AgentEngine:
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
         memory_manager: MemoryManager | None = None,
+        summary_model: str = "default",
     ):
         from hal.infra.config.schema import ExecToolConfig
 
@@ -64,6 +86,8 @@ class AgentEngine:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._summary_model = summary_model
+        self._pending_summaries: dict[str, asyncio.Task] = {}
 
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(workspace, memory_manager=self.memory)
@@ -152,6 +176,13 @@ class AgentEngine:
 
         Low latency, standard tool loop, records episode after completion.
         """
+        # Barrier: wait for any pending summary from a previous interaction
+        if task := self._pending_summaries.pop(msg.session_key, None):
+            try:
+                await asyncio.wait_for(task, timeout=10.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning(f"Summary barrier: {e}")
+
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"[collab] {msg.channel}:{msg.sender_id}: {preview}")
 
@@ -182,7 +213,7 @@ class AgentEngine:
             mode=ExecutionMode.COLLAB,
         )
 
-        final_content, tools_used, injected = await self._execute_loop(
+        final_content, meta, injected = await self._execute_loop(
             messages,
             self.max_iterations,
             session_key=msg.session_key,
@@ -208,6 +239,12 @@ class AgentEngine:
                 chat_id=msg.chat_id,
                 role="user",
                 content=injected_msg.content,
+            )
+
+        # Trigger async summary if qualifying loop
+        if meta.needs_summary:
+            self._pending_summaries[msg.session_key] = asyncio.create_task(
+                self._generate_summary(meta, final_content, msg.channel, msg.chat_id)
             )
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
@@ -260,7 +297,7 @@ class AgentEngine:
 
         # Operator mode uses fewer iterations
         max_iter = min(self.max_iterations, 10)
-        final_content, tools_used, _ = await self._execute_loop(
+        final_content, meta, _ = await self._execute_loop(
             messages,
             max_iter,
             session_key=s_key,
@@ -278,6 +315,10 @@ class AgentEngine:
             role="assistant",
             content=final_content,
         )
+
+        # Trigger async summary if qualifying loop (no barrier needed for operator)
+        if meta.needs_summary:
+            asyncio.create_task(self._generate_summary(meta, final_content, channel, chat_id))
 
         return final_content
 
@@ -320,7 +361,7 @@ class AgentEngine:
         session_key: str | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
-    ) -> tuple[str | None, list[str], list[InboundMessage]]:
+    ) -> tuple[str | None, LoopMetadata, list[InboundMessage]]:
         """
         Run the LLM tool-calling loop.
 
@@ -330,12 +371,13 @@ class AgentEngine:
         the current execution.
 
         Returns:
-            Tuple of (final_content, tools_used, injected_messages).
+            Tuple of (final_content, loop_metadata, injected_messages).
         """
         iteration = 0
         final_content: str | None = None
-        tools_used: list[str] = []
+        meta = LoopMetadata()
         injected: list[InboundMessage] = []
+        start_idx = len(messages)
 
         while iteration < max_iterations:
             iteration += 1
@@ -371,8 +413,22 @@ class AgentEngine:
                 for tool_call in response.tool_calls:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
-                    if tool_call.name not in tools_used:
-                        tools_used.append(tool_call.name)
+                    if tool_call.name not in meta.tools_used:
+                        meta.tools_used.append(tool_call.name)
+
+                    # Track side effects
+                    if tool_call.name == "fs":
+                        action = tool_call.arguments.get("action", "")
+                        if action in FS_SIDE_EFFECT_ACTIONS:
+                            meta.has_side_effects = True
+                            path = tool_call.arguments.get("path", "")
+                            if path and path not in meta.files_modified:
+                                meta.files_modified.append(path)
+                    elif tool_call.name == "exec":
+                        meta.has_side_effects = True
+                        cmd = tool_call.arguments.get("command", "")
+                        if cmd:
+                            meta.commands_run.append(cmd[:200])
 
                 results = await asyncio.gather(
                     *(self.tools.execute(tc.name, tc.arguments) for tc in response.tool_calls)
@@ -413,7 +469,70 @@ class AgentEngine:
                 final_content = response.content
                 break
 
-        return final_content, tools_used, injected
+        meta.iterations = iteration
+        meta.loop_messages = messages[start_idx:]
+
+        return final_content, meta, injected
+
+    # ------------------------------------------------------------------
+    # Post-loop summary
+    # ------------------------------------------------------------------
+
+    async def _generate_summary(
+        self,
+        meta: LoopMetadata,
+        final_content: str,
+        channel: str,
+        chat_id: str,
+    ) -> None:
+        """Generate a concise summary of a tool-heavy loop and persist it."""
+        try:
+            # Build a compact representation of what happened
+            parts = [
+                "Summarize what was done in this tool-calling session concisely (2-4 sentences)."
+            ]
+            parts.append(f"\nIterations: {meta.iterations}")
+            parts.append(f"Tools used: {', '.join(meta.tools_used)}")
+            if meta.files_modified:
+                parts.append(f"Files modified: {', '.join(meta.files_modified)}")
+            if meta.commands_run:
+                parts.append(f"Commands run: {', '.join(meta.commands_run)}")
+            parts.append(f"\nFinal response to user:\n{final_content[:500]}")
+
+            # Include a condensed version of loop messages (skip system prompt)
+            compact_msgs = []
+            for msg in meta.loop_messages:
+                role = msg.get("role", "")
+                content = str(msg.get("content", ""))[:300]
+                compact_msgs.append(f"[{role}] {content}")
+            if compact_msgs:
+                parts.append("\nLoop messages (truncated):\n" + "\n".join(compact_msgs[:20]))
+
+            prompt = "\n".join(parts)
+
+            response = await self.provider.chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a concise summarizer. Output only the summary.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                tools=[],
+                model=self.model if self._summary_model == "default" else self._summary_model,
+            )
+
+            if response.content:
+                self.memory.record_conversation(
+                    channel=channel,
+                    chat_id=chat_id,
+                    role="assistant",
+                    content=response.content,
+                    entry_type="summary",
+                )
+                logger.info(f"[summary] recorded for {channel}:{chat_id}")
+        except Exception as e:
+            logger.warning(f"Failed to generate loop summary: {e}")
 
     # ------------------------------------------------------------------
     # Helpers

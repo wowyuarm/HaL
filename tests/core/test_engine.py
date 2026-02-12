@@ -9,7 +9,7 @@ import pytest
 
 from hal.bus.events import InboundMessage, OutboundMessage
 from hal.bus.queue import MessageBus
-from hal.core.engine import AgentEngine
+from hal.core.engine import AgentEngine, LoopMetadata
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 # ------------------------------------------------------------------
@@ -231,7 +231,7 @@ class TestDispatch:
 
 class TestProcessCollab:
     async def test_defaults_final_content_when_execute_loop_returns_none(self, engine):
-        engine._execute_loop = AsyncMock(return_value=(None, ["fs"], []))  # type: ignore[method-assign]
+        engine._execute_loop = AsyncMock(return_value=(None, LoopMetadata(tools_used=["fs"]), []))  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
         out = await engine.process_collab(msg)
@@ -244,7 +244,9 @@ class TestProcessCollab:
 
 class TestProcessOperator:
     async def test_operator_uses_max_10_iterations_and_default_message(self, engine):
-        engine._execute_loop = AsyncMock(return_value=(None, ["web_search"], []))  # type: ignore[method-assign]
+        engine._execute_loop = AsyncMock(
+            return_value=(None, LoopMetadata(tools_used=["web_search"]), [])
+        )  # type: ignore[method-assign]
 
         result = await engine.process_operator(
             prompt="check",
@@ -272,13 +274,14 @@ class TestExecuteLoop:
             LLMResponse(content="final", tool_calls=[]),
         ]
 
-        final, tools_used, injected = await engine._execute_loop(
+        final, meta, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=3,
         )
 
         assert final == "final"
-        assert tools_used == ["web_search", "fs"]
+        assert meta.tools_used == ["web_search", "fs"]
+        assert meta.iterations == 2
         assert injected == []
         assert engine.tools.execute.await_count == 3
         engine.context.add_assistant_message.assert_called_once()
@@ -306,7 +309,7 @@ class TestMidLoopInjection:
 
         mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
 
-        final, tools_used, injected = await engine._execute_loop(
+        final, meta, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=5,
             session_key="telegram:c1",
@@ -398,3 +401,165 @@ class TestRunLoop:
             await engine.run()
         finally:
             monkeypatch.setattr(asyncio, "wait_for", real_wait_for)
+
+
+# ------------------------------------------------------------------
+# LoopMetadata
+# ------------------------------------------------------------------
+
+
+class TestLoopMetadata:
+    def test_needs_summary_true_when_many_iterations(self):
+        meta = LoopMetadata(iterations=5)
+        assert meta.needs_summary is True
+
+    def test_needs_summary_true_when_has_side_effects(self):
+        meta = LoopMetadata(iterations=1, has_side_effects=True)
+        assert meta.needs_summary is True
+
+    def test_needs_summary_false_when_few_iterations_no_side_effects(self):
+        meta = LoopMetadata(iterations=2, has_side_effects=False)
+        assert meta.needs_summary is False
+
+    def test_needs_summary_boundary_four_iterations(self):
+        meta = LoopMetadata(iterations=4)
+        assert meta.needs_summary is False
+
+
+class TestExecuteLoopMetadata:
+    """Test that _execute_loop tracks files_modified and commands_run."""
+
+    async def test_tracks_fs_write_side_effects(self, engine, mock_provider):
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        tool_calls = [
+            ToolCallRequest(
+                id="t1",
+                name="fs",
+                arguments={"action": "write", "path": "/tmp/a.txt", "content": "x"},
+            ),
+            ToolCallRequest(
+                id="t2",
+                name="fs",
+                arguments={"action": "edit", "path": "/tmp/b.txt", "old": "x", "new": "y"},
+            ),
+        ]
+        mock_provider.chat.side_effect = [
+            LLMResponse(content="writing", tool_calls=tool_calls),
+            LLMResponse(content="done", tool_calls=[]),
+        ]
+
+        _, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=3,
+        )
+
+        assert meta.has_side_effects is True
+        assert "/tmp/a.txt" in meta.files_modified
+        assert "/tmp/b.txt" in meta.files_modified
+
+    async def test_tracks_exec_side_effects(self, engine, mock_provider):
+        engine.tools.execute = AsyncMock(return_value="output")  # type: ignore[method-assign]
+
+        tool_calls = [
+            ToolCallRequest(id="t1", name="exec", arguments={"command": "ls -la"}),
+        ]
+        mock_provider.chat.side_effect = [
+            LLMResponse(content="running", tool_calls=tool_calls),
+            LLMResponse(content="done", tool_calls=[]),
+        ]
+
+        _, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=3,
+        )
+
+        assert meta.has_side_effects is True
+        assert "ls -la" in meta.commands_run
+
+    async def test_no_side_effects_for_read_only_tools(self, engine, mock_provider):
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "read", "path": "/tmp/a.txt"}),
+            ToolCallRequest(id="t2", name="web_search", arguments={"query": "test"}),
+        ]
+        mock_provider.chat.side_effect = [
+            LLMResponse(content="reading", tool_calls=tool_calls),
+            LLMResponse(content="done", tool_calls=[]),
+        ]
+
+        _, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=3,
+        )
+
+        assert meta.has_side_effects is False
+        assert meta.files_modified == []
+        assert meta.commands_run == []
+
+
+class TestSummaryTrigger:
+    """Test that summary is triggered/skipped correctly in process_collab."""
+
+    async def test_summary_not_triggered_when_needs_summary_false(self, engine):
+        """No summary task created when loop doesn't qualify."""
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("response", LoopMetadata(iterations=2, has_side_effects=False), [])
+        )
+
+        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
+        await engine.process_collab(msg)
+
+        assert msg.session_key not in engine._pending_summaries
+
+    async def test_summary_triggered_with_default_model(self, engine):
+        """Summary task created using main model when summary_model is 'default'."""
+        engine._summary_model = "default"
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("response", LoopMetadata(iterations=6, has_side_effects=True), [])
+        )
+        engine._generate_summary = AsyncMock()  # type: ignore[method-assign]
+
+        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
+        await engine.process_collab(msg)
+
+        assert msg.session_key in engine._pending_summaries
+
+    async def test_summary_triggered_when_conditions_met(self, engine):
+        """Summary task created when needs_summary=True and summary_model set."""
+        engine._summary_model = "cheap-model"
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("response", LoopMetadata(iterations=6, has_side_effects=True), [])
+        )
+        engine._generate_summary = AsyncMock()  # type: ignore[method-assign]
+
+        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
+        await engine.process_collab(msg)
+
+        assert msg.session_key in engine._pending_summaries
+
+    async def test_summary_barrier_waits_for_pending_task(self, engine):
+        """process_collab waits for a pending summary before proceeding."""
+        engine._summary_model = "cheap-model"
+        completed = False
+
+        async def fake_summary(*args):
+            nonlocal completed
+            await asyncio.sleep(0.01)
+            completed = True
+
+        # Simulate a pending summary from a previous call
+        task = asyncio.create_task(fake_summary())
+        session_key = "cli:d"
+        engine._pending_summaries[session_key] = task
+
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("response", LoopMetadata(iterations=1), [])
+        )
+
+        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="follow up")
+        await engine.process_collab(msg)
+
+        assert completed is True
+        assert session_key not in engine._pending_summaries
