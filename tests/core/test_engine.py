@@ -54,7 +54,7 @@ def mock_session_manager(workspace):
 
 
 @pytest.fixture
-def engine(bus, mock_provider, workspace, mock_session_manager):
+def engine(bus, mock_provider, workspace):
     """Build an AgentEngine with all heavy dependencies mocked."""
     with (
         patch("hal.core.engine.ContextBuilder") as mock_ctx,
@@ -77,14 +77,13 @@ def engine(bus, mock_provider, workspace, mock_session_manager):
             bus=bus,
             provider=mock_provider,
             workspace=workspace,
-            session_manager=mock_session_manager,
             memory_manager=mem_instance,
         )
         yield eng
 
 
 @pytest.fixture
-def engine_with_cron(bus, mock_provider, workspace, mock_session_manager):
+def engine_with_cron(bus, mock_provider, workspace):
     """AgentEngine with a cron_service provided (registers CronTool)."""
     cron = MagicMock()
     with (
@@ -107,7 +106,6 @@ def engine_with_cron(bus, mock_provider, workspace, mock_session_manager):
             provider=mock_provider,
             workspace=workspace,
             cron_service=cron,
-            session_manager=mock_session_manager,
             memory_manager=mem_instance,
         )
         yield eng
@@ -264,8 +262,6 @@ class TestProcessCollab:
         assert out.chat_id == "c1"
         assert "no response" in out.content.lower()
 
-        engine.sessions.get_or_create.assert_called_once_with("telegram:c1")
-        engine.sessions.save.assert_called_once()
         engine.memory.record_interaction.assert_called_once()
 
 
@@ -302,8 +298,6 @@ class TestProcessSystemMessage:
         assert out.chat_id == "chat123"
         assert out.content == "Background task completed."
 
-        engine.sessions.get_or_create.assert_called_once_with("telegram:chat123")
-        engine.sessions.save.assert_called_once()
 
     async def test_no_colon_defaults_to_cli_origin(self, engine):
         engine._execute_loop = AsyncMock(return_value=("ok", [], []))  # type: ignore[method-assign]

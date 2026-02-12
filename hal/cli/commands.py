@@ -172,7 +172,6 @@ def gateway(
     from hal.channels.manager import ChannelManager
     from hal.core.engine import AgentLoop
     from hal.infra.config.loader import get_data_dir, load_config
-    from hal.session.manager import SessionManager
 
     if verbose:
         import logging
@@ -184,7 +183,7 @@ def gateway(
     config = load_config()
     bus = MessageBus()
     provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
+    session_manager = None
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -201,7 +200,6 @@ def gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
-        session_manager=session_manager,
     )
 
     # Set cron callback (needs agent)

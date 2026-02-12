@@ -53,15 +53,28 @@ class ExecTool(Tool):
                     "type": "string",
                     "description": "Optional working directory for the command",
                 },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Optional timeout in seconds (overrides default)",
+                },
             },
             "required": ["command"],
         }
 
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+        **kwargs: Any,
+    ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
+
+        # Use provided timeout or default
+        actual_timeout = timeout if timeout is not None else self.timeout
 
         try:
             process = await asyncio.create_subprocess_shell(
@@ -72,10 +85,12 @@ class ExecTool(Tool):
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=actual_timeout
+                )
             except asyncio.TimeoutError:
                 process.kill()
-                return f"Error: Command timed out after {self.timeout} seconds"
+                return f"Error: Command timed out after {actual_timeout} seconds"
 
             output_parts = []
 

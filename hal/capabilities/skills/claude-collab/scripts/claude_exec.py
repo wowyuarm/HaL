@@ -57,9 +57,7 @@ def main() -> None:
         default=300,
         help="Timeout in seconds (default: 300)",
     )
-    parser.add_argument(
-        "--json", action="store_true", help="Request JSON output format"
-    )
+    parser.add_argument("--json", action="store_true", help="Request JSON output format")
     args = parser.parse_args()
 
     cmd = build_command(args.question, args.session)

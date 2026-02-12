@@ -123,6 +123,7 @@ class EpisodicMemory:
 
     def _append(self, episode: Episode) -> None:
         """Append an episode to the JSONL file."""
+        self._data_dir.mkdir(parents=True, exist_ok=True)
         with self._episodes_file.open("a", encoding="utf-8") as f:
             f.write(episode.model_dump_json() + "\n")
 

@@ -23,7 +23,6 @@ from hal.core.context.builder import ContextBuilder, ExecutionMode
 from hal.core.memory.manager import MemoryManager
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider
-from hal.session.manager import SessionManager
 
 if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
@@ -53,7 +52,6 @@ class AgentEngine:
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
         restrict_to_workspace: bool = False,
-        session_manager: SessionManager | None = None,
         memory_manager: MemoryManager | None = None,
     ):
         from hal.infra.config.schema import ExecToolConfig
@@ -70,7 +68,6 @@ class AgentEngine:
 
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(workspace, memory_manager=self.memory)
-        self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
             provider=provider,
@@ -164,11 +161,27 @@ class AgentEngine:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info(f"[collab] {msg.channel}:{msg.sender_id}: {preview}")
 
-        session = self.sessions.get_or_create(msg.session_key)
+        # Record user message
+        self.memory.record_conversation(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            role="user",
+            content=msg.content,
+            session_key=msg.session_key,
+        )
+
         self._update_tool_contexts(msg.channel, msg.chat_id)
 
+        # Get conversation history from log
+        history = self.memory.get_conversation_history(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            max_messages=50,
+            include_tools=False,
+        )
+
         messages = self.context.build_messages(
-            history=session.get_history(),
+            history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel,
@@ -177,18 +190,34 @@ class AgentEngine:
         )
 
         final_content, tools_used, injected = await self._execute_loop(
-            messages, self.max_iterations, session_key=msg.session_key
+            messages,
+            self.max_iterations,
+            session_key=msg.session_key,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
         )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        # Save to session (include any mid-loop injected messages)
-        session.add_message("user", msg.content)
+        # Record assistant response
+        self.memory.record_conversation(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            role="assistant",
+            content=final_content,
+            session_key=msg.session_key,
+        )
+
+        # Record any mid-loop injected messages
         for injected_msg in injected:
-            session.add_message("user", injected_msg.content)
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
+            self.memory.record_conversation(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                role="user",
+                content=injected_msg.content,
+                session_key=msg.session_key,
+            )
 
         # Record episode
         duration = time.monotonic() - start_time
@@ -223,11 +252,27 @@ class AgentEngine:
 
         logger.info(f"[operator] {s_key}: {prompt[:60]}...")
 
-        session = self.sessions.get_or_create(s_key)
+        # Record operator prompt
+        self.memory.record_conversation(
+            channel=channel,
+            chat_id=chat_id,
+            role="user",
+            content=prompt,
+            session_key=s_key,
+        )
+
         self._update_tool_contexts(channel, chat_id)
 
+        # Get conversation history from log
+        history = self.memory.get_conversation_history(
+            channel=channel,
+            chat_id=chat_id,
+            max_messages=50,
+            include_tools=False,
+        )
+
         messages = self.context.build_messages(
-            history=session.get_history(),
+            history=history,
             current_message=prompt,
             channel=channel,
             chat_id=chat_id,
@@ -237,15 +282,24 @@ class AgentEngine:
         # Operator mode uses fewer iterations
         max_iter = min(self.max_iterations, 10)
         final_content, tools_used, _ = await self._execute_loop(
-            messages, max_iter, session_key=s_key
+            messages,
+            max_iter,
+            session_key=s_key,
+            channel=channel,
+            chat_id=chat_id,
         )
 
         if final_content is None:
             final_content = "Monitoring complete. Nothing to report."
 
-        session.add_message("user", prompt)
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
+        # Record operator response
+        self.memory.record_conversation(
+            channel=channel,
+            chat_id=chat_id,
+            role="assistant",
+            content=final_content,
+            session_key=s_key,
+        )
 
         duration = time.monotonic() - start_time
         self.memory.record_interaction(
@@ -273,11 +327,27 @@ class AgentEngine:
             origin_channel, origin_chat_id = "cli", msg.chat_id
 
         session_key = f"{origin_channel}:{origin_chat_id}"
-        session = self.sessions.get_or_create(session_key)
         self._update_tool_contexts(origin_channel, origin_chat_id)
 
+        # Record the system message as a user message
+        self.memory.record_conversation(
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+            role="user",
+            content=f"[System: {msg.sender_id}] {msg.content}",
+            session_key=session_key,
+        )
+
+        # Get conversation history (includes the just-recorded message)
+        history = self.memory.get_conversation_history(
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+            max_messages=50,
+            include_tools=False,
+        )
+
         messages = self.context.build_messages(
-            history=session.get_history(),
+            history=history,
             current_message=msg.content,
             channel=origin_channel,
             chat_id=origin_chat_id,
@@ -290,9 +360,14 @@ class AgentEngine:
         if final_content is None:
             final_content = "Background task completed."
 
-        session.add_message("user", f"[System: {msg.sender_id}] {msg.content}")
-        session.add_message("assistant", final_content)
-        self.sessions.save(session)
+        # Record assistant response
+        self.memory.record_conversation(
+            channel=origin_channel,
+            chat_id=origin_chat_id,
+            role="assistant",
+            content=final_content,
+            session_key=session_key,
+        )
 
         return OutboundMessage(
             channel=origin_channel, chat_id=origin_chat_id, content=final_content
@@ -335,6 +410,8 @@ class AgentEngine:
         messages: list[dict[str, Any]],
         max_iterations: int,
         session_key: str | None = None,
+        channel: str | None = None,
+        chat_id: str | None = None,
     ) -> tuple[str | None, list[str], list[InboundMessage]]:
         """
         Run the LLM tool-calling loop.
@@ -397,6 +474,19 @@ class AgentEngine:
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
+
+                    # Record tool call and result
+                    if channel and chat_id:
+                        # Record tool call (as assistant tool message)
+                        self.memory.record_conversation(
+                            channel=channel,
+                            chat_id=chat_id,
+                            role="tool",
+                            content=f"Calling {tool_call.name} with arguments: {json.dumps(tool_call.arguments, ensure_ascii=False)}",
+                            tool_name=tool_call.name,
+                            tool_result=result,
+                            session_key=session_key,
+                        )
             else:
                 final_content = response.content
                 break

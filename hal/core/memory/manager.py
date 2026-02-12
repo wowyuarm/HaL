@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
+from hal.core.memory.conversation_log import ConversationLog, LogEntry
 from hal.core.memory.episodic import Episode, EpisodicMemory, InteractionTurn
 
 
@@ -29,6 +31,10 @@ class MemoryManager:
         # Episodic memory stored in data_dir (outside workspace)
         ep_dir = (data_dir or workspace) / "episodes"
         self.episodic = EpisodicMemory(ep_dir)
+
+        # Conversation log for unified daily storage
+        log_dir = (data_dir or workspace) / "logs"
+        self.conversation_log = ConversationLog(log_dir)
 
     def record_interaction(
         self,
@@ -79,6 +85,71 @@ class MemoryManager:
             sections.append(self._format_episodes(recent))
 
         return "\n\n".join(sections)
+
+    def record_conversation(
+        self,
+        channel: str,
+        chat_id: str,
+        role: str,
+        content: str,
+        tool_name: str | None = None,
+        tool_result: str | None = None,
+        session_key: str | None = None,
+    ) -> LogEntry:
+        """
+        Record a conversation entry in the daily log.
+
+        Args:
+            channel: Channel name (e.g., "telegram", "cli", "cron")
+            chat_id: Chat identifier
+            role: "user", "assistant", or "tool"
+            content: Message content
+            tool_name: Tool name (only for role="tool")
+            tool_result: Tool result (only for role="tool")
+            session_key: Original session key (for migration)
+
+        Returns:
+            The created log entry
+        """
+        return self.conversation_log.append(
+            channel=channel,
+            chat_id=chat_id,
+            role=role,
+            content=content,
+            tool_name=tool_name,
+            tool_result=tool_result,
+            session_key=session_key,
+        )
+
+    def get_conversation_history(
+        self,
+        channel: str,
+        chat_id: str,
+        max_messages: int = 50,
+        include_tools: bool = False,
+    ) -> list[dict[str, Any]]:
+        """
+        Get recent conversation history for a specific channel/chat.
+
+        Args:
+            channel: Channel name
+            chat_id: Chat identifier
+            max_messages: Maximum number of messages to return
+            include_tools: Whether to include tool messages
+
+        Returns:
+            List of messages in LLM format (role, content)
+        """
+        return self.conversation_log.get_recent_conversation(
+            channel=channel,
+            chat_id=chat_id,
+            max_messages=max_messages,
+            include_tools=include_tools,
+        )
+
+    def get_conversation_stats(self) -> dict[str, Any]:
+        """Get statistics about conversation logs."""
+        return self.conversation_log.get_stats()
 
     def _format_episodes(self, episodes: list[Episode]) -> str:
         """Format episodes with two-tier detail level."""
