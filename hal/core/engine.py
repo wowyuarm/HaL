@@ -71,7 +71,6 @@ class AgentEngine:
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
-            bus=bus,
             model=self.model,
             web_search_api_key=web_search_api_key,
             exec_config=self.exec_config,
@@ -141,8 +140,6 @@ class AgentEngine:
 
     async def _dispatch(self, msg: InboundMessage) -> OutboundMessage | None:
         """Route a message to the appropriate execution mode."""
-        if msg.channel == "system":
-            return await self._process_system_message(msg)
         return await self.process_collab(msg)
 
     # ------------------------------------------------------------------
@@ -285,65 +282,6 @@ class AgentEngine:
         return final_content
 
     # ------------------------------------------------------------------
-    # System message handling (subagent announces)
-    # ------------------------------------------------------------------
-
-    async def _process_system_message(self, msg: InboundMessage) -> OutboundMessage | None:
-        """Process a system message (e.g., subagent result announce)."""
-        logger.info(f"[system] from {msg.sender_id}")
-
-        if ":" in msg.chat_id:
-            parts = msg.chat_id.split(":", 1)
-            origin_channel, origin_chat_id = parts[0], parts[1]
-        else:
-            origin_channel, origin_chat_id = "cli", msg.chat_id
-
-        session_key = f"{origin_channel}:{origin_chat_id}"
-        self._update_tool_contexts(origin_channel, origin_chat_id)
-
-        # Record the system message as a user message
-        self.memory.record_conversation(
-            channel=origin_channel,
-            chat_id=origin_chat_id,
-            role="user",
-            content=f"[System: {msg.sender_id}] {msg.content}",
-        )
-
-        # Get conversation history (includes the just-recorded message)
-        history = self.memory.get_conversation_history(
-            channel=origin_channel,
-            chat_id=origin_chat_id,
-            max_messages=50,
-            include_tools=False,
-        )
-
-        messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            channel=origin_channel,
-            chat_id=origin_chat_id,
-        )
-
-        final_content, _, _ = await self._execute_loop(
-            messages, self.max_iterations, session_key=session_key
-        )
-
-        if final_content is None:
-            final_content = "Background task completed."
-
-        # Record assistant response
-        self.memory.record_conversation(
-            channel=origin_channel,
-            chat_id=origin_chat_id,
-            role="assistant",
-            content=final_content,
-        )
-
-        return OutboundMessage(
-            channel=origin_channel, chat_id=origin_chat_id, content=final_content
-        )
-
-    # ------------------------------------------------------------------
     # Mid-loop message injection
     # ------------------------------------------------------------------
 
@@ -457,6 +395,21 @@ class AgentEngine:
                             tool_result=result,
                         )
             else:
+                # Before finalizing, collect any pending background subagent results.
+                # These are injected as ephemeral context (not recorded to history)
+                # so the LLM can produce a unified response.
+                pending = await self.subagents.await_pending()
+                if pending:
+                    # LLM wanted to respond, but subagents are still pending.
+                    # Inject their results and let the LLM incorporate them.
+                    messages = self.context.add_assistant_message(messages, response.content, [])
+                    for label, result in pending:
+                        status = "failed" if result.startswith("Error:") else "completed"
+                        inject = f"[Background subagent '{label}' {status}]\n\nResult:\n{result}"
+                        messages.append({"role": "user", "content": inject})
+                        logger.info(f"[inject] subagent result: {label} ({status})")
+                    continue
+
                 final_content = response.content
                 break
 

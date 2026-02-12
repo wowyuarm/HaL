@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from hal.bus.events import InboundMessage
-from hal.bus.queue import MessageBus
 from hal.capabilities.tools.exec import ExecTool
 from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
@@ -34,16 +32,15 @@ class SubagentManager:
     Two execution modes:
     - **Synchronous** (default): awaits completion, returns result directly
       as a tool_result within the caller's loop. Prompt-cache friendly.
-    - **Background**: fire-and-forget, result announced via the message bus
-      as a new inbound message. Use for long-running tasks where the main
-      agent should respond to the user immediately.
+    - **Background**: runs in parallel, results are collected by the engine's
+      ``_execute_loop`` before it finishes, so the main agent sees all
+      results in the same turn without extra LLM round-trips.
     """
 
     def __init__(
         self,
         provider: LLMProvider,
         workspace: Path,
-        bus: MessageBus,
         model: str | None = None,
         web_search_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
@@ -53,12 +50,12 @@ class SubagentManager:
 
         self.provider = provider
         self.workspace = workspace
-        self.bus = bus
         self.model = model or provider.get_default_model()
         self.web_search_api_key = web_search_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
-        self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        # task_id -> (asyncio.Task, label)
+        self._running_tasks: dict[str, tuple[asyncio.Task[str], str]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -85,26 +82,47 @@ class SubagentManager:
         origin_chat_id: str = "direct",
     ) -> str:
         """
-        Spawn a subagent in the background (fire-and-forget).
+        Spawn a subagent in the background (parallel execution).
 
-        Result will be announced via the message bus when complete.
-        Use this only for long-running tasks where the main agent should
-        respond to the user immediately rather than wait.
+        The result is collected by ``await_pending()`` in the engine's
+        ``_execute_loop`` before the loop finishes, so the main agent
+        sees all background results in the same conversation turn.
         """
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
 
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
-
-        bg_task = asyncio.create_task(self._run_background(task_id, task, display_label, origin))
-        self._running_tasks[task_id] = bg_task
-        bg_task.add_done_callback(lambda _: self._running_tasks.pop(task_id, None))
+        bg_task = asyncio.create_task(self._execute_subagent(task_id, task))
+        self._running_tasks[task_id] = (bg_task, display_label)
 
         logger.info(f"Spawned background subagent [{task_id}]: {display_label}")
         return (
             f"Background subagent [{display_label}] started (id: {task_id}). "
-            f"I'll notify you when it completes."
+            f"Results will be delivered when all background tasks complete."
         )
+
+    async def await_pending(self) -> list[tuple[str, str]]:
+        """
+        Await all pending background subagents and return their results.
+
+        Returns a list of ``(label, result)`` tuples. Clears the pending
+        task set after collection. Safe to call when no tasks are pending
+        (returns empty list).
+        """
+        if not self._running_tasks:
+            return []
+
+        results: list[tuple[str, str]] = []
+        for task_id, (task, label) in list(self._running_tasks.items()):
+            try:
+                result = await task
+                logger.info(f"Subagent [{task_id}] ({label}) completed")
+                results.append((label, result))
+            except Exception as e:
+                logger.error(f"Subagent [{task_id}] ({label}) failed: {e}")
+                results.append((label, f"Error: {e}"))
+
+        self._running_tasks.clear()
+        return results
 
     # ------------------------------------------------------------------
     # Internal execution
@@ -119,7 +137,7 @@ class SubagentManager:
             {"role": "user", "content": task},
         ]
 
-        max_iterations = 25
+        max_iterations = 50
         iteration = 0
         final_result: str | None = None
 
@@ -192,22 +210,6 @@ class SubagentManager:
         logger.info(f"Subagent [{task_id}] completed")
         return final_result
 
-    async def _run_background(
-        self,
-        task_id: str,
-        task: str,
-        label: str,
-        origin: dict[str, str],
-    ) -> None:
-        """Execute a background subagent and announce the result via bus."""
-        try:
-            result = await self._execute_subagent(task_id, task)
-            await self._announce_result(task_id, label, result, origin, "ok")
-        except Exception as e:
-            error_msg = f"Error: {e}"
-            logger.error(f"Subagent [{task_id}] failed: {e}")
-            await self._announce_result(task_id, label, error_msg, origin, "error")
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -227,38 +229,6 @@ class SubagentManager:
         tools.register(WebSearchTool(api_key=self.web_search_api_key))
         tools.register(WebFetchTool())
         return tools
-
-    async def _announce_result(
-        self,
-        task_id: str,
-        label: str,
-        result: str,
-        origin: dict[str, str],
-        status: str,
-    ) -> None:
-        """Announce a background subagent result via the message bus."""
-        status_text = "completed successfully" if status == "ok" else "failed"
-
-        announce_content = f"""[Subagent '{label}' {status_text}]
-
-Result:
-{result}
-
-This is a report from a background subagent you delegated. \
-Review the result and decide your next step: \
-respond to the user, continue your own reasoning, or delegate further work."""
-
-        msg = InboundMessage(
-            channel="system",
-            sender_id="subagent",
-            chat_id=f"{origin['channel']}:{origin['chat_id']}",
-            content=announce_content,
-        )
-
-        await self.bus.publish_inbound(msg)
-        logger.debug(
-            f"Subagent [{task_id}] announced result to {origin['channel']}:{origin['chat_id']}"
-        )
 
     def _build_subagent_prompt(self, task: str) -> str:
         """Build a focused system prompt for the subagent."""

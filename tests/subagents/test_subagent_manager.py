@@ -1,25 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hal.bus.events import InboundMessage
-from hal.bus.queue import MessageBus
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-
-
-async def _wait_running_count(mgr: SubagentManager, expected: int, timeout: float = 2.0) -> None:
-    """Wait for SubagentManager.get_running_count() to reach expected."""
-    start = asyncio.get_running_loop().time()
-    while asyncio.get_running_loop().time() - start < timeout:
-        if mgr.get_running_count() == expected:
-            return
-        await asyncio.sleep(0)
-    assert mgr.get_running_count() == expected
-
 
 # ------------------------------------------------------------------
 # Synchronous run() — default path
@@ -35,7 +21,7 @@ async def test_run_returns_result_directly(tmp_path) -> None:
         return_value=LLMResponse(content="found 3 files", tool_calls=[], finish_reason="stop"),
     )
 
-    mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=MessageBus())
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
     result = await mgr.run(task="list files", label="L")
 
     assert result == "found 3 files"
@@ -64,9 +50,7 @@ async def test_run_executes_tool_calls(tmp_path) -> None:
         ]
     )
 
-    mgr = SubagentManager(
-        provider=provider, workspace=tmp_path, bus=MessageBus(), restrict_to_workspace=True
-    )
+    mgr = SubagentManager(provider=provider, workspace=tmp_path, restrict_to_workspace=True)
     result = await mgr.run(task="list files")
 
     assert result == "done listing"
@@ -80,78 +64,87 @@ async def test_run_error_propagates(tmp_path) -> None:
     provider.get_default_model.return_value = "test-model"
     provider.chat = AsyncMock(side_effect=RuntimeError("boom"))
 
-    mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=MessageBus())
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
     with pytest.raises(RuntimeError, match="boom"):
         await mgr.run(task="x")
 
 
 # ------------------------------------------------------------------
-# Background spawn_background() — fire-and-forget path
+# Background spawn_background() — parallel execution path
 # ------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_spawn_background_announces_result(tmp_path) -> None:
-    """spawn_background() runs in background and announces via bus."""
-    bus = MessageBus()
-
+async def test_spawn_background_returns_started_message(tmp_path) -> None:
+    """spawn_background() returns a status message and tracks the task."""
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test-model"
     provider.chat = AsyncMock(
-        side_effect=[
-            LLMResponse(
-                content="calling tool",
-                tool_calls=[
-                    ToolCallRequest(
-                        id="1",
-                        name="fs",
-                        arguments={"action": "list", "path": str(tmp_path)},
-                    )
-                ],
-                finish_reason="tool_calls",
-            ),
-            LLMResponse(content="done", tool_calls=[], finish_reason="stop"),
-        ]
+        return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop"),
     )
 
-    mgr = SubagentManager(
-        provider=provider, workspace=tmp_path, bus=bus, restrict_to_workspace=True
-    )
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    msg = await mgr.spawn_background(task="list files", label="L")
 
-    msg = await mgr.spawn_background(
-        task="list files", label="L", origin_channel="cli", origin_chat_id="direct"
-    )
     assert "started" in msg
     assert "id:" in msg
+    assert mgr.get_running_count() == 1
 
-    inbound = await asyncio.wait_for(bus.consume_inbound(), timeout=2.0)
-    assert isinstance(inbound, InboundMessage)
-    assert inbound.channel == "system"
-    assert inbound.sender_id == "subagent"
-    assert "Result:" in inbound.content
-    assert "done" in inbound.content
-
-    await _wait_running_count(mgr, 0)
+    # Clean up
+    await mgr.await_pending()
 
 
 @pytest.mark.asyncio
-async def test_spawn_background_error_announces_error(tmp_path) -> None:
-    """spawn_background() catches errors and announces them via bus."""
-    bus = MessageBus()
+async def test_await_pending_collects_results(tmp_path) -> None:
+    """await_pending() waits for all background tasks and returns results."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop"),
+    )
 
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    await mgr.spawn_background(task="task1", label="T1")
+    await mgr.spawn_background(task="task2", label="T2")
+
+    results = await mgr.await_pending()
+    assert len(results) == 2
+    labels = {label for label, _ in results}
+    assert labels == {"T1", "T2"}
+    for _, result in results:
+        assert result == "done"
+
+    assert mgr.get_running_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_await_pending_handles_errors(tmp_path) -> None:
+    """await_pending() catches errors and returns them as error strings."""
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test-model"
     provider.chat = AsyncMock(side_effect=RuntimeError("boom"))
 
-    mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=bus)
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    await mgr.spawn_background(task="x")
 
-    await mgr.spawn_background(task="x", origin_channel="cli", origin_chat_id="direct")
+    results = await mgr.await_pending()
+    assert len(results) == 1
+    label, result = results[0]
+    assert "Error:" in result
+    assert "boom" in result
+    assert mgr.get_running_count() == 0
 
-    inbound = await asyncio.wait_for(bus.consume_inbound(), timeout=2.0)
-    assert "Error: boom" in inbound.content
 
-    await _wait_running_count(mgr, 0)
+@pytest.mark.asyncio
+async def test_await_pending_empty_returns_empty_list(tmp_path) -> None:
+    """await_pending() returns [] when no tasks are pending."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    results = await mgr.await_pending()
+    assert results == []
 
 
 # ------------------------------------------------------------------
@@ -162,7 +155,7 @@ async def test_spawn_background_error_announces_error(tmp_path) -> None:
 def test_build_subagent_prompt_includes_workspace_and_task(tmp_path) -> None:
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
-    mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=MessageBus())
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
     prompt = mgr._build_subagent_prompt("do thing")
     assert "do thing" in prompt
@@ -172,7 +165,7 @@ def test_build_subagent_prompt_includes_workspace_and_task(tmp_path) -> None:
 def test_build_subagent_prompt_includes_mode_directive(tmp_path) -> None:
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
-    mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=MessageBus())
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
     prompt = mgr._build_subagent_prompt("do thing")
     assert "Focused Task" in prompt

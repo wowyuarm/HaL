@@ -66,6 +66,8 @@ def engine(bus, mock_provider, workspace):
             workspace=workspace,
             memory_manager=mem_instance,
         )
+        # Ensure subagents.await_pending() is awaitable and returns no results
+        eng.subagents.await_pending = AsyncMock(return_value=[])
         yield eng
 
 
@@ -219,16 +221,7 @@ class TestStop:
 
 
 class TestDispatch:
-    async def test_system_channel_routes_to_process_system_message(self, engine):
-        msg = InboundMessage(
-            channel="system", sender_id="sub", chat_id="cli:direct", content="done"
-        )
-        engine._process_system_message = AsyncMock(return_value=None)  # type: ignore[method-assign]
-
-        await engine._dispatch(msg)
-        engine._process_system_message.assert_awaited_once_with(msg)
-
-    async def test_non_system_routes_to_process_collab(self, engine):
+    async def test_dispatch_routes_to_process_collab(self, engine):
         msg = InboundMessage(channel="telegram", sender_id="u", chat_id="c", content="hi")
         engine.process_collab = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
@@ -262,35 +255,6 @@ class TestProcessOperator:
         assert result == "Monitoring complete. Nothing to report."
         # second arg to _execute_loop is max_iter
         assert engine._execute_loop.await_args.args[1] == 10
-
-
-class TestProcessSystemMessage:
-    async def test_colon_chat_id_routes_back_to_origin_channel(self, engine):
-        engine._execute_loop = AsyncMock(return_value=(None, [], []))  # type: ignore[method-assign]
-
-        msg = InboundMessage(
-            channel="system",
-            sender_id="subagent",
-            chat_id="telegram:chat123",
-            content="result",
-        )
-        out = await engine._process_system_message(msg)
-
-        assert out is not None
-        assert out.channel == "telegram"
-        assert out.chat_id == "chat123"
-        assert out.content == "Background task completed."
-
-    async def test_no_colon_defaults_to_cli_origin(self, engine):
-        engine._execute_loop = AsyncMock(return_value=("ok", [], []))  # type: ignore[method-assign]
-
-        msg = InboundMessage(channel="system", sender_id="sub", chat_id="direct", content="hi")
-        out = await engine._process_system_message(msg)
-
-        assert out is not None
-        assert out.channel == "cli"
-        assert out.chat_id == "direct"
-        assert out.content == "ok"
 
 
 class TestExecuteLoop:
