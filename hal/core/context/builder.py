@@ -306,10 +306,13 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
         messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
+        reasoning_content: str | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
         msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        if reasoning_content:
+            msg["reasoning_content"] = reasoning_content
         messages.append(msg)
         return messages

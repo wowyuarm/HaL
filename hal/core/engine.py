@@ -428,7 +428,10 @@ class AgentEngine:
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
-                    messages, response.content, tool_call_dicts
+                    messages,
+                    response.content,
+                    tool_call_dicts,
+                    reasoning_content=response.reasoning_content,
                 )
 
                 for tool_call in response.tool_calls:
@@ -495,7 +498,12 @@ class AgentEngine:
                 if pending:
                     # LLM wanted to respond, but subagents are still pending.
                     # Inject their results and let the LLM incorporate them.
-                    messages = self.context.add_assistant_message(messages, response.content, [])
+                    messages = self.context.add_assistant_message(
+                        messages,
+                        response.content,
+                        [],
+                        reasoning_content=response.reasoning_content,
+                    )
                     for label, result in pending:
                         status = "failed" if result.startswith("Error:") else "completed"
                         inject = f"[Background subagent '{label}' {status}]\n\nResult:\n{result}"

@@ -54,7 +54,7 @@ def engine(bus, mock_provider, workspace):
         builder_instance.build_messages.return_value = [
             {"role": "system", "content": "You are a test agent."},
         ]
-        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc: msgs
+        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc, **kw: msgs
         builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
 
         # MemoryManager stub
@@ -84,7 +84,7 @@ def engine_with_cron(bus, mock_provider, workspace):
         builder_instance.build_messages.return_value = [
             {"role": "system", "content": "You are a test agent."},
         ]
-        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc: msgs
+        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc, **kw: msgs
         builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
 
         mem_instance = mock_mem.return_value
