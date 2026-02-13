@@ -251,6 +251,7 @@ def gateway(
         summary_model=config.agents.defaults.summary_model,
         memory_search=memory_search,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
+        history_config=config.agents.defaults.history,
     )
 
     # Set cron callback (needs agent)
@@ -395,6 +396,7 @@ def agent(
         summary_model=config.agents.defaults.summary_model,
         memory_search=ms,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
+        history_config=config.agents.defaults.history,
     )
 
     async def _init_memory_search():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hal.core.memory.daily_log import DailyLog
+from hal.core.memory.daily_log import DailyLog, _truncate_assistant
 from hal.core.memory.long_term import LongTermMemory
 from hal.core.memory.manager import MemoryManager
 
@@ -341,3 +341,83 @@ class TestMemoryManagerEntryType:
             content="hello",
         )
         assert entry.entry_type == "message"
+
+
+# ---------------------------------------------------------------------------
+# Assistant message truncation (in-context learning mitigation)
+# ---------------------------------------------------------------------------
+
+
+class TestAssistantTruncation:
+    """Tests for truncation of older assistant messages."""
+
+    def test_truncate_assistant_short_message_unchanged(self):
+        assert _truncate_assistant("short reply", 200) == "short reply"
+
+    def test_truncate_assistant_long_message_truncated(self):
+        long_msg = "A" * 300
+        result = _truncate_assistant(long_msg, 200)
+        assert len(result) < 300
+        assert result.endswith("[...]")
+        assert result.startswith("A" * 200)
+
+    def test_truncate_assistant_collapses_newlines(self):
+        msg = "line1\nline2\nline3\n" * 50
+        result = _truncate_assistant(msg, 100)
+        assert "\n" not in result
+        assert "[...]" in result
+
+    def test_recent_turns_kept_verbatim(self, tmp_path: Path):
+        """Most recent N assistant messages should not be truncated."""
+        log = DailyLog(tmp_path / "logs")
+        long_content = "X" * 500
+
+        for i in range(5):
+            log.append(channel="cli", chat_id="d", role="user", content=f"q{i}")
+            log.append(channel="cli", chat_id="d", role="assistant", content=long_content)
+
+        history = log.get_recent_conversation(
+            channel="cli", chat_id="d", recent_full_turns=2, assistant_truncate_chars=100
+        )
+
+        assistant_msgs = [m for m in history if m["role"] == "assistant"]
+        assert len(assistant_msgs) == 5
+
+        # Last 2 should be verbatim (full 500 chars)
+        assert len(assistant_msgs[-1]["content"]) == 500
+        assert len(assistant_msgs[-2]["content"]) == 500
+
+        # Older 3 should be truncated
+        for msg in assistant_msgs[:3]:
+            assert len(msg["content"]) < 200
+            assert "[...]" in msg["content"]
+
+    def test_all_recent_no_truncation(self, tmp_path: Path):
+        """When all messages are within recent_full_turns, nothing is truncated."""
+        log = DailyLog(tmp_path / "logs")
+        long_content = "Y" * 500
+
+        log.append(channel="cli", chat_id="d", role="user", content="q1")
+        log.append(channel="cli", chat_id="d", role="assistant", content=long_content)
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d", recent_full_turns=3)
+
+        assert len(history) == 2
+        assert history[1]["content"] == long_content
+
+    def test_user_messages_never_truncated(self, tmp_path: Path):
+        """User messages are always kept in full regardless of position."""
+        log = DailyLog(tmp_path / "logs")
+        long_user = "U" * 500
+
+        for i in range(5):
+            log.append(channel="cli", chat_id="d", role="user", content=long_user)
+            log.append(channel="cli", chat_id="d", role="assistant", content="short")
+
+        history = log.get_recent_conversation(
+            channel="cli", chat_id="d", recent_full_turns=1, assistant_truncate_chars=50
+        )
+
+        user_msgs = [m for m in history if m["role"] == "user"]
+        for msg in user_msgs:
+            assert msg["content"] == long_user

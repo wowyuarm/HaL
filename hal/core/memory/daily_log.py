@@ -116,17 +116,27 @@ class DailyLog:
         chat_id: str,
         max_messages: int = 50,
         include_tools: bool = False,
+        recent_full_turns: int = 3,
+        assistant_truncate_chars: int = 200,
     ) -> list[dict[str, Any]]:
         """
         Get recent conversation history for a specific channel/chat.
 
         Only reads today's file — conversations don't span days.
 
+        To reduce in-context learning contamination (where the model picks up
+        formatting/style from its own earlier outputs), assistant messages beyond
+        the most recent *recent_full_turns* are truncated to a short preview.
+        User messages are always kept in full to preserve intent.
+
         Args:
             channel: Channel name
             chat_id: Chat identifier
             max_messages: Maximum number of messages to return
             include_tools: Whether to include tool messages
+            recent_full_turns: Number of recent assistant messages to keep
+                verbatim. Older assistant messages are truncated.
+            assistant_truncate_chars: Max characters for older assistant messages.
 
         Returns:
             List of messages in LLM format (role, content)
@@ -160,7 +170,21 @@ class DailyLog:
         # Reverse back to chronological order (oldest to newest)
         result.reverse()
 
-        return [{"role": entry.role, "content": entry.content} for entry in result]
+        # Count total assistant messages to determine the verbatim boundary.
+        total_assistant = sum(1 for e in result if e.role == "assistant")
+        verbatim_threshold = total_assistant - recent_full_turns
+
+        messages: list[dict[str, Any]] = []
+        assistant_idx = 0
+        for entry in result:
+            content = entry.content
+            if entry.role == "assistant":
+                assistant_idx += 1
+                if assistant_idx <= verbatim_threshold:
+                    content = _truncate_assistant(content, assistant_truncate_chars)
+            messages.append({"role": entry.role, "content": content})
+
+        return messages
 
     def get_all_entries(
         self,
@@ -242,3 +266,16 @@ class DailyLog:
                     stats["by_role"][entry.role] += 1
 
         return stats
+
+
+def _truncate_assistant(content: str, max_chars: int) -> str:
+    """Truncate an assistant message to a factual preview.
+
+    Strips style/formatting from older assistant outputs so the LLM sees
+    *what was done* without picking up *how it was phrased*.
+    """
+    if len(content) <= max_chars:
+        return content
+    # Take the first max_chars, collapse to single line for compactness
+    preview = content[:max_chars].replace("\n", " ").strip()
+    return preview + " [...]"

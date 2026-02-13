@@ -55,6 +55,20 @@ class ChannelsConfig(BaseModel):
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
 
 
+class HistoryConfig(BaseModel):
+    """Conversation history context configuration.
+
+    Controls how historical messages are prepared before sending to the LLM.
+    Older assistant messages are truncated to reduce in-context learning
+    contamination (where the model picks up formatting/style from its own
+    earlier outputs).
+    """
+
+    max_messages: int = 50  # Max messages loaded from daily log
+    recent_full_turns: int = 3  # Recent assistant messages kept verbatim
+    assistant_truncate_chars: int = 200  # Max chars for older assistant messages
+
+
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
 
@@ -64,6 +78,7 @@ class AgentDefaults(BaseModel):
     temperature: float = 0.7
     max_tool_iterations: int = 20
     summary_model: str = "default"  # Model for post-loop summaries; "default" uses main model
+    history: HistoryConfig = Field(default_factory=HistoryConfig)
 
 
 class AgentsConfig(BaseModel):

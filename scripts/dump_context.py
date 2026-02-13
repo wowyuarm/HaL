@@ -21,6 +21,9 @@ Usage:
     # Specify execution mode
     python scripts/dump_context.py --mode operator
 
+    # Simulate a multi-turn conversation (shows truncation behavior)
+    python scripts/dump_context.py --simulate
+
     # Write output to file (default: scripts/context_dump.md)
     python scripts/dump_context.py -o scripts/context_dump.md
 
@@ -46,9 +49,193 @@ from hal.capabilities.tools.spawn import SpawnTool
 from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
 from hal.core.context.builder import ContextBuilder, ExecutionMode
 from hal.core.memory.manager import MemoryManager
+from hal.infra.config.schema import HistoryConfig
 
 DEFAULT_WORKSPACE = Path.home() / ".hal" / "workspace"
 DEFAULT_OUTPUT = Path(__file__).resolve().parent / "context_dump.md"
+
+
+# ------------------------------------------------------------------
+# Simulated conversation data
+# ------------------------------------------------------------------
+
+SIMULATED_TURNS: list[dict[str, str]] = [
+    {
+        "role": "user",
+        "content": "Help me understand the project structure of this codebase.",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "I've analyzed the project structure. Here's a comprehensive overview:\n\n"
+            "## Architecture\n\n"
+            "The project follows a layered architecture with clear separation of concerns:\n\n"
+            "```\n"
+            "hal/\n"
+            "├── core/           # Core engine, context, memory\n"
+            "├── capabilities/   # Tools, skills, scheduling\n"
+            "├── channels/       # Chat integrations (Telegram, Discord)\n"
+            "├── bus/            # Async message routing\n"
+            "├── infra/          # Providers, config, logging\n"
+            "└── cli/            # CLI commands\n"
+            "```\n\n"
+            "### Key Components\n\n"
+            "1. **AgentEngine** (`core/engine.py`) — Central execution engine supporting "
+            "3 modes: COLLAB, ASYNC, OPERATOR\n"
+            "2. **ContextBuilder** (`core/context/builder.py`) — 5-layer prompt assembly\n"
+            "3. **MemoryManager** (`core/memory/manager.py`) — Coordinates daily log, "
+            "long-term memory, and episodic traces\n"
+            "4. **ToolRegistry** (`capabilities/tools/registry.py`) — Tool dispatch "
+            "with parameter validation\n\n"
+            "The message flow is:\n"
+            "```\n"
+            "Channels → MessageBus → AgentEngine → LLMProvider\n"
+            "                            ↕\n"
+            "                       ToolRegistry\n"
+            "```\n\n"
+            "Would you like me to dive deeper into any specific component?"
+        ),
+    },
+    {
+        "role": "user",
+        "content": "What tests exist? Run them and show me the results.",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "I ran the test suite. Here are the results:\n\n"
+            "```\n"
+            "$ pytest tests/ -q\n"
+            ".................................................................... [100%]\n"
+            "262 passed in 8.25s\n"
+            "```\n\n"
+            "All **262 tests** pass. The test structure mirrors the source layout:\n\n"
+            "| Directory | Tests | Coverage |\n"
+            "|-----------|-------|----------|\n"
+            "| `tests/core/` | 89 | Engine, context, memory |\n"
+            "| `tests/capabilities/` | 112 | Tools, skills, scheduling |\n"
+            "| `tests/channels/` | 34 | Telegram, Discord, WhatsApp |\n"
+            "| `tests/infra/` | 27 | Config, providers |\n\n"
+            "Key test files:\n"
+            "- `test_engine.py` — Engine execution modes and tool loop\n"
+            "- `test_memory.py` — Daily log, long-term memory, manager\n"
+            "- `test_tool_validation.py` — Parameter validation for all tools\n"
+            "- `test_context_builder.py` — 5-layer context assembly\n\n"
+            "No warnings except some deprecation notices from `lark_oapi`."
+        ),
+    },
+    {
+        "role": "user",
+        "content": "Can you add a health check endpoint to the gateway?",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "I've added a `/health` endpoint to the gateway. Here's what I did:\n\n"
+            "**Modified `hal/cli/commands.py`:**\n"
+            "```python\n"
+            "@app.get('/health')\n"
+            "async def health_check():\n"
+            "    return {\n"
+            "        'status': 'ok',\n"
+            "        'version': __version__,\n"
+            "        'uptime': time.time() - start_time,\n"
+            "        'channels': {name: ch.is_connected for name, ch in channels.items()}\n"
+            "    }\n"
+            "```\n\n"
+            "**Added test `tests/test_gateway_health.py`:**\n"
+            "```python\n"
+            "async def test_health_endpoint(client):\n"
+            "    resp = await client.get('/health')\n"
+            "    assert resp.status_code == 200\n"
+            "    data = resp.json()\n"
+            "    assert data['status'] == 'ok'\n"
+            "```\n\n"
+            "The endpoint returns:\n"
+            "- `status` — always 'ok' if reachable\n"
+            "- `version` — current HaL version\n"
+            "- `uptime` — seconds since gateway start\n"
+            "- `channels` — connection status per channel\n\n"
+            "All tests pass including the new one (263 total)."
+        ),
+    },
+    {
+        "role": "user",
+        "content": "Now help me refactor the config schema to support environment-specific overrides.",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "I've implemented environment-specific config overrides. The approach:\n\n"
+            "## Design\n\n"
+            "Config files are loaded in priority order (later overrides earlier):\n"
+            "1. `~/.hal/config.json` — base config\n"
+            "2. `~/.hal/config.{env}.json` — environment overlay (e.g., `config.dev.json`)\n"
+            "3. `HAL_*` environment variables — runtime overrides\n\n"
+            "The `env` is determined by `HAL_ENV` (default: `production`).\n\n"
+            "## Changes\n\n"
+            "**`hal/infra/config/loader.py`:**\n"
+            "```python\n"
+            "def load_config(config_path=None, env=None):\n"
+            "    env = env or os.getenv('HAL_ENV', 'production')\n"
+            "    base = _load_json(config_path or get_config_path())\n"
+            "    overlay_path = get_config_path().with_suffix(f'.{env}.json')\n"
+            "    if overlay_path.exists():\n"
+            "        overlay = _load_json(overlay_path)\n"
+            "        base = deep_merge(base, overlay)\n"
+            "    return Config.model_validate(convert_keys(base))\n"
+            "```\n\n"
+            "**`hal/infra/config/schema.py`:**\n"
+            "- Added `env: str` field to `Config`\n"
+            "- Added `ConfigOverride` model for partial configs\n\n"
+            "**Tests:** Added 5 new tests covering merge behavior, missing overlay, "
+            "env var precedence.\n\n"
+            "```\n"
+            "$ pytest tests/infra/test_config.py -q\n"
+            "12 passed in 0.4s\n"
+            "```"
+        ),
+    },
+    {
+        "role": "user",
+        "content": "Good work. What's the current memory usage pattern?",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "Here's the memory system's current usage pattern:\n\n"
+            "## Storage\n\n"
+            "- **Daily logs**: `~/.hal/data/logs/YYYY-MM-DD.jsonl` — append-only, one file per day\n"
+            "- **Long-term memory**: `~/.hal/workspace/memory/MEMORY.md` — agent-editable markdown\n"
+            "- **Config**: `~/.hal/config.json` — Pydantic-validated JSON\n\n"
+            "## Typical sizes\n\n"
+            "| Component | Size/day | Growth |\n"
+            "|-----------|----------|--------|\n"
+            "| Daily log (active) | 50-200 KB | Linear with conversation |\n"
+            "| MEMORY.md | 2-10 KB | Slow (agent curates) |\n"
+            "| Session data | N/A | Deprecated |\n\n"
+            "## Context window usage\n\n"
+            "Per request, the context consumes roughly:\n"
+            "- System prompt (L0-L2): ~3,000 tokens (stable, cached)\n"
+            "- Situation (L3): ~500-1,500 tokens (memory + time)\n"
+            "- History (L4): ~2,000-8,000 tokens (last 50 messages)\n"
+            "- Current message: variable\n\n"
+            "Total: typically **6,000-13,000 tokens** per request, well within "
+            "most model context windows."
+        ),
+    },
+]
+
+
+def _populate_simulated_history(memory: MemoryManager, channel: str, chat_id: str) -> None:
+    """Write simulated conversation entries to the daily log."""
+    for turn in SIMULATED_TURNS:
+        memory.record_conversation(
+            channel=channel,
+            chat_id=chat_id,
+            role=turn["role"],
+            content=turn["content"],
+        )
 
 
 # ------------------------------------------------------------------
@@ -56,13 +243,25 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parent / "context_dump.md"
 # ------------------------------------------------------------------
 
 
-def _load_conversation_history(memory: MemoryManager, session_key: str) -> list[dict]:
+def _load_conversation_history(
+    memory: MemoryManager,
+    session_key: str,
+    history_config: HistoryConfig | None = None,
+) -> list[dict]:
     """Load conversation history from the daily log."""
     if ":" in session_key:
         channel, chat_id = session_key.split(":", 1)
     else:
         channel, chat_id = "cli", session_key
-    return memory.get_conversation_history(channel=channel, chat_id=chat_id)
+
+    hc = history_config or HistoryConfig()
+    return memory.get_conversation_history(
+        channel=channel,
+        chat_id=chat_id,
+        max_messages=hc.max_messages,
+        recent_full_turns=hc.recent_full_turns,
+        assistant_truncate_chars=hc.assistant_truncate_chars,
+    )
 
 
 def _build_tool_registry() -> ToolRegistry:
@@ -96,9 +295,12 @@ def dump_context(
     simulated_message: str,
     channel: str | None,
     chat_id: str | None,
+    simulate: bool = False,
+    history_config: HistoryConfig | None = None,
 ) -> str:
     """Build and return the full context dump as markdown."""
     sections: list[str] = []
+    hc = history_config or HistoryConfig()
 
     # --- Header ---
     sections.append("# Context Dump\n")
@@ -110,16 +312,33 @@ def dump_context(
         sections.append(f"- **Channel**: `{channel}`")
     if chat_id:
         sections.append(f"- **Chat ID**: `{chat_id}`")
+    sections.append(
+        f"- **History config**: max_messages={hc.max_messages}, "
+        f"recent_full_turns={hc.recent_full_turns}, "
+        f"assistant_truncate_chars={hc.assistant_truncate_chars}"
+    )
+    if simulate:
+        sections.append(f"- **Simulated**: {len(SIMULATED_TURNS)} turns injected")
     sections.append("")
 
     # --- Build context ---
     memory = MemoryManager(workspace)
     builder = ContextBuilder(workspace, memory_manager=memory)
 
+    # Populate simulated data if requested
+    sim_channel = channel or "cli"
+    sim_chat_id = chat_id or "simulate"  # Use distinct chat_id to avoid polluting real sessions
+    if simulate:
+        # Reset first to ensure idempotent output across repeated runs
+        memory.clear_conversation_history(sim_channel, sim_chat_id)
+        _populate_simulated_history(memory, sim_channel, sim_chat_id)
+        if not session_key:
+            session_key = f"{sim_channel}:{sim_chat_id}"
+
     # Load conversation history if provided
     history: list[dict] = []
     if session_key:
-        history = _load_conversation_history(memory, session_key)
+        history = _load_conversation_history(memory, session_key, history_config=hc)
 
     messages = builder.build_messages(
         history=history,
@@ -254,6 +473,23 @@ def main():
         help="Chat ID",
     )
     parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Inject simulated multi-turn conversation to demonstrate truncation",
+    )
+    parser.add_argument(
+        "--recent-full-turns",
+        type=int,
+        default=None,
+        help="Override recent_full_turns from config (number of recent assistant msgs kept verbatim)",
+    )
+    parser.add_argument(
+        "--truncate-chars",
+        type=int,
+        default=None,
+        help="Override assistant_truncate_chars from config",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=str,
@@ -265,6 +501,20 @@ def main():
 
     mode = ExecutionMode(args.mode)
 
+    # Build history config: start from file config, apply CLI overrides
+    hc = HistoryConfig()
+    try:
+        from hal.infra.config.loader import load_config
+
+        file_cfg = load_config()
+        hc = file_cfg.agents.defaults.history
+    except Exception:
+        pass
+    if args.recent_full_turns is not None:
+        hc = hc.model_copy(update={"recent_full_turns": args.recent_full_turns})
+    if args.truncate_chars is not None:
+        hc = hc.model_copy(update={"assistant_truncate_chars": args.truncate_chars})
+
     result = dump_context(
         workspace=args.workspace,
         mode=mode,
@@ -273,6 +523,8 @@ def main():
         simulated_message=args.message,
         channel=args.channel,
         chat_id=args.chat_id,
+        simulate=args.simulate,
+        history_config=hc,
     )
 
     if args.output == "-":

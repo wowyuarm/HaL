@@ -27,7 +27,7 @@ from hal.infra.providers.base import LLMProvider
 if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.core.memory.search import MemorySearch
-    from hal.infra.config.schema import ExecToolConfig
+    from hal.infra.config.schema import ExecToolConfig, HistoryConfig
 
 
 SIDE_EFFECT_TOOLS = {"fs", "exec"}
@@ -77,8 +77,9 @@ class AgentEngine:
         summary_model: str = "default",
         memory_search: "MemorySearch | None" = None,
         auto_inject_top_k: int = 3,
+        history_config: "HistoryConfig | None" = None,
     ):
-        from hal.infra.config.schema import ExecToolConfig
+        from hal.infra.config.schema import ExecToolConfig, HistoryConfig
 
         self.bus = bus
         self.provider = provider
@@ -92,6 +93,7 @@ class AgentEngine:
         self._summary_model = summary_model
         self._memory_search = memory_search
         self._auto_inject_top_k = auto_inject_top_k
+        self._history_config = history_config or HistoryConfig()
         self._pending_summaries: dict[str, asyncio.Task] = {}
 
         self.memory = memory_manager or MemoryManager(workspace)
@@ -207,11 +209,14 @@ class AgentEngine:
         self._update_tool_contexts(msg.channel, msg.chat_id)
 
         # Get conversation history from log
+        hc = self._history_config
         history = self.memory.get_conversation_history(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            max_messages=50,
+            max_messages=hc.max_messages,
             include_tools=False,
+            recent_full_turns=hc.recent_full_turns,
+            assistant_truncate_chars=hc.assistant_truncate_chars,
         )
 
         # Pre-fetch relevant memories via semantic search
@@ -301,11 +306,14 @@ class AgentEngine:
         self._update_tool_contexts(channel, chat_id)
 
         # Get conversation history from log
+        hc = self._history_config
         history = self.memory.get_conversation_history(
             channel=channel,
             chat_id=chat_id,
-            max_messages=50,
+            max_messages=hc.max_messages,
             include_tools=False,
+            recent_full_turns=hc.recent_full_turns,
+            assistant_truncate_chars=hc.assistant_truncate_chars,
         )
 
         messages = self.context.build_messages(

@@ -94,6 +94,8 @@ class MemoryManager:
         chat_id: str,
         max_messages: int = 50,
         include_tools: bool = False,
+        recent_full_turns: int = 3,
+        assistant_truncate_chars: int = 200,
     ) -> list[dict[str, Any]]:
         """
         Get recent conversation history for a specific channel/chat.
@@ -103,6 +105,8 @@ class MemoryManager:
             chat_id: Chat identifier
             max_messages: Maximum number of messages to return
             include_tools: Whether to include tool messages
+            recent_full_turns: Number of recent assistant messages kept verbatim.
+            assistant_truncate_chars: Max chars for older assistant messages.
 
         Returns:
             List of messages in LLM format (role, content)
@@ -112,6 +116,8 @@ class MemoryManager:
             chat_id=chat_id,
             max_messages=max_messages,
             include_tools=include_tools,
+            recent_full_turns=recent_full_turns,
+            assistant_truncate_chars=assistant_truncate_chars,
         )
 
     def get_conversation_stats(self) -> dict[str, Any]:
