@@ -13,13 +13,14 @@ __all__ = [
 
 # Optional: available when memory search deps are installed
 try:
-    from hal.core.memory.chunker import Chunk, MarkdownChunker
+    from hal.core.memory.chunker import Chunk, MarkdownChunker, compute_chunk_id
     from hal.core.memory.exporter import DailyExporter
     from hal.core.memory.search import MemorySearch
     from hal.core.memory.store import SearchResult, VectorStore
 
     __all__ += [
         "Chunk",
+        "compute_chunk_id",
         "DailyExporter",
         "MarkdownChunker",
         "MemorySearch",

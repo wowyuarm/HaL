@@ -12,7 +12,7 @@ from pathlib import Path
 import litellm
 from loguru import logger
 
-from hal.core.memory.chunker import MarkdownChunker
+from hal.core.memory.chunker import MarkdownChunker, compute_chunk_id
 from hal.core.memory.exporter import DailyExporter
 from hal.core.memory.store import SearchResult, VectorStore
 
@@ -67,11 +67,11 @@ class MemorySearch:
         return total
 
     async def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
-        """Semantic search across indexed memories."""
+        """Hybrid search (semantic + keyword) across indexed memories."""
         query_embedding = await self._embed_texts([query])
         if not query_embedding:
             return []
-        return await self._store.search(query_embedding[0], top_k=top_k)
+        return await self._store.search(query_embedding[0], query_text=query, top_k=top_k)
 
     async def export_and_index_yesterday(self) -> int:
         """Convenience: export yesterday's log and index it."""
@@ -84,10 +84,17 @@ class MemorySearch:
         """Export and index all un-exported JSONL log files.
 
         Called on startup to cover days when the server was not running at midnight.
+        Compares exported markdown files against indexed sources to find gaps.
         """
-
-        indexed_sources = await self._store.get_indexed_sources()
         log_dir = self._exporter._log.data_dir
+        if not log_dir.exists():
+            return 0
+
+        # Collect dates that have JSONL but are not yet indexed.
+        # We check by looking at the markdown output dir + the vector store:
+        # a date needs indexing if its markdown file does not exist yet, OR
+        # if it exists but has no chunks in the store.
+        indexed_sources = await self._store.get_indexed_sources()
 
         total = 0
         for jsonl_path in sorted(log_dir.glob("*.jsonl")):
@@ -98,9 +105,11 @@ class MemorySearch:
             # Skip today (still accumulating entries)
             if log_date >= date.today():
                 continue
-            md_name = f"{log_date.isoformat()}.md"
-            if md_name in indexed_sources:
+
+            source_name = f"{log_date.isoformat()}.md"
+            if source_name in indexed_sources:
                 continue
+
             count = await self.index_date(log_date)
             total += count
 
@@ -112,6 +121,10 @@ class MemorySearch:
     # Internal
     # ------------------------------------------------------------------
 
+    def _chunk_id(self, chunk) -> str:
+        """Compute model-aware chunk ID."""
+        return compute_chunk_id(chunk, self._embedding_model)
+
     async def _index_file(self, md_path: Path) -> int:
         """Index a single markdown file with incremental upsert."""
         chunks = self._chunker.chunk_file(md_path, base_path=self._daily_dir)
@@ -119,11 +132,11 @@ class MemorySearch:
             return 0
 
         source = str(md_path.relative_to(self._daily_dir))
-        new_ids = {c.chunk_id for c in chunks}
+        new_ids = {self._chunk_id(c) for c in chunks}
         existing_ids = await self._store.get_chunk_ids_by_source(source)
 
         # Determine what's new / changed / stale
-        to_add = [c for c in chunks if c.chunk_id not in existing_ids]
+        to_add = [c for c in chunks if self._chunk_id(c) not in existing_ids]
         stale_ids = existing_ids - new_ids
 
         # Remove stale chunks
@@ -145,7 +158,7 @@ class MemorySearch:
         # Build upsert data
         data = [
             {
-                "chunk_id": chunk.chunk_id,
+                "chunk_id": self._chunk_id(chunk),
                 "embedding": emb,
                 "content": chunk.content,
                 "source": chunk.source,

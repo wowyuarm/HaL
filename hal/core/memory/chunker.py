@@ -38,6 +38,18 @@ class Chunk:
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+def compute_chunk_id(chunk: Chunk, model: str) -> str:
+    """Compute model-aware chunk ID for Milvus PK.
+
+    Includes the embedding model name so that switching models
+    invalidates old chunks and forces re-embedding.
+    """
+    raw = (
+        f"markdown:{chunk.source}:{chunk.start_line}:{chunk.end_line}:{chunk.content_hash}:{model}"
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 class MarkdownChunker:
     """Split markdown into heading-based chunks.
 

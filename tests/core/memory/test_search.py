@@ -25,12 +25,17 @@ class FakeVectorStore:
             self._data[chunk["chunk_id"]] = chunk
         return len(chunks)
 
-    async def search(self, query_embedding: list[float], top_k: int = 5) -> list[SearchResult]:
+    async def search(
+        self, query_embedding: list[float], *, query_text: str = "", top_k: int = 5
+    ) -> list[SearchResult]:
         # Simple: return all stored chunks ranked by first embedding element similarity
         results = []
         for chunk in self._data.values():
             # Fake score based on dot product of first element
             score = sum(a * b for a, b in zip(query_embedding[:3], chunk["embedding"][:3]))
+            # Boost score if query_text appears in content (simulates BM25)
+            if query_text and query_text.lower() in chunk["content"].lower():
+                score += 0.5
             results.append(
                 SearchResult(
                     content=chunk["content"],
