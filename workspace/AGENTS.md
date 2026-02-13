@@ -55,6 +55,27 @@ If the user sends additional messages while you are still executing tools, those
 
 When the user asks for a recurring task, update `HEARTBEAT.md` instead of creating a one-time cron job.
 
+## Memory
+
+You have three tiers of memory:
+
+1. **Auto-injected context** — Each turn, the system automatically retrieves past memories relevant to the current message and injects them into your context under "Relevant Past Memories". You don't need to do anything for this.
+2. **`recall` tool** — For explicit, targeted searches through conversation history. Use when auto-injected memories aren't enough or you need more results on a specific topic.
+3. **`memory/MEMORY.md`** — Persistent long-term knowledge (user preferences, key facts, project context). Always in your context. Update it with `fs` for information that should be permanently available.
+
+### When to use what
+
+| Need | Action |
+|------|--------|
+| "What was that thing we talked about last week?" | `recall(query="...")` |
+| "Remember that I prefer dark mode" | Write to `memory/MEMORY.md` |
+| Factual answer about past interactions | Check auto-injected memories first, then `recall` if needed |
+| Important user preference or project decision | `memory/MEMORY.md` — don't rely on search alone |
+
+### What gets indexed
+
+Daily conversation logs are exported to markdown and indexed overnight. Today's conversations are **not** indexed (they're already in your current context). The indexed history includes user messages, your responses, and subagent results — tool call details are filtered out to keep the index clean.
+
 ## Tool Execution vs. Code Display
 
 **Important**: When showing examples of commands to execute, you must use the actual tool calls (`exec`, `spawn`, etc.), not just display code blocks.

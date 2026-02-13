@@ -75,6 +75,18 @@ hal cron list
 hal cron remove <job_id>
 ```
 
+## recall — Memory Search
+
+Search past conversations and memories by semantic similarity + keyword matching (hybrid search). Use when you need information from previous interactions that isn't in the current conversation.
+
+```
+recall(query="what did we discuss about Redis caching?", top_k=5)
+```
+
+- Results are ranked by combined semantic relevance and keyword overlap.
+- Each result shows source file, heading, content snippet, and relevance score.
+- The system also **auto-injects** the top few relevant memories into your context each turn — `recall` is for when you need to dig deeper or search more specifically.
+
 ## Heartbeat
 
 `HEARTBEAT.md` is checked every 30 minutes. Edit it with `fs` to manage periodic tasks:
