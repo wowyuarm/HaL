@@ -26,6 +26,7 @@ from hal.infra.providers.base import LLMProvider
 
 if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
+    from hal.core.memory.search import MemorySearch
     from hal.infra.config.schema import ExecToolConfig
 
 
@@ -74,6 +75,8 @@ class AgentEngine:
         restrict_to_workspace: bool = False,
         memory_manager: MemoryManager | None = None,
         summary_model: str = "default",
+        memory_search: "MemorySearch | None" = None,
+        auto_inject_top_k: int = 3,
     ):
         from hal.infra.config.schema import ExecToolConfig
 
@@ -87,6 +90,8 @@ class AgentEngine:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._summary_model = summary_model
+        self._memory_search = memory_search
+        self._auto_inject_top_k = auto_inject_top_k
         self._pending_summaries: dict[str, asyncio.Task] = {}
 
         self.memory = memory_manager or MemoryManager(workspace)
@@ -128,6 +133,11 @@ class AgentEngine:
 
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
+
+        if self._memory_search:
+            from hal.capabilities.tools.recall import RecallTool
+
+            self.tools.register(RecallTool(self._memory_search))
 
     # ------------------------------------------------------------------
     # Main loop
@@ -204,6 +214,16 @@ class AgentEngine:
             include_tools=False,
         )
 
+        # Pre-fetch relevant memories via semantic search
+        search_results = []
+        if self._memory_search:
+            try:
+                search_results = await self._memory_search.search(
+                    msg.content, top_k=self._auto_inject_top_k
+                )
+            except Exception as e:
+                logger.warning(f"Memory search prefetch failed: {e}")
+
         messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -211,6 +231,7 @@ class AgentEngine:
             channel=msg.channel,
             chat_id=msg.chat_id,
             mode=ExecutionMode.COLLAB,
+            memory_search_results=search_results or None,
         )
 
         final_content, meta, injected = await self._execute_loop(

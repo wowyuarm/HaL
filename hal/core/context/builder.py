@@ -81,6 +81,7 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         mode: ExecutionMode = ExecutionMode.COLLAB,
+        memory_search_results: list[Any] | None = None,
     ) -> str:
         """Build the system prompt from layered context.
 
@@ -103,7 +104,7 @@ class ContextBuilder:
             parts.append(capabilities)
 
         # Layer 3 — Situation (dynamic: time, mode, memory)
-        situation = self._build_situation(mode)
+        situation = self._build_situation(mode, memory_search_results)
         if situation:
             parts.append(situation)
 
@@ -118,6 +119,7 @@ class ContextBuilder:
         channel: str | None = None,
         chat_id: str | None = None,
         mode: ExecutionMode = ExecutionMode.COLLAB,
+        memory_search_results: list[Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
 
@@ -128,7 +130,7 @@ class ContextBuilder:
         messages: list[dict[str, Any]] = []
 
         # Layers 0-3: system prompt
-        system_prompt = self.build_system_prompt(skill_names, mode)
+        system_prompt = self.build_system_prompt(skill_names, mode, memory_search_results)
         if channel and chat_id:
             system_prompt += f"\n\nChannel: {channel} | Chat ID: {chat_id}"
         messages.append({"role": "system", "content": system_prompt})
@@ -209,7 +211,11 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def _build_situation(self, mode: ExecutionMode) -> str:
+    def _build_situation(
+        self,
+        mode: ExecutionMode,
+        memory_search_results: list[Any] | None = None,
+    ) -> str:
         """Layer 3 — Situation: time, mode directive, memory. Dynamic per request."""
         from datetime import datetime
 
@@ -228,6 +234,19 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
         memory_ctx = self._get_memory_context()
         if memory_ctx:
             parts.append(f"## Memory\n\n{memory_ctx}")
+
+        # Relevant past memories from semantic search
+        if memory_search_results:
+            recall_parts: list[str] = []
+            for r in memory_search_results:
+                header = f"- **{r.source}"
+                if r.heading:
+                    header += f" — {r.heading}"
+                header += f"** (relevance: {r.score:.2f})"
+                recall_parts.append(header)
+                recall_parts.append(f"  {r.content[:500]}")
+            if recall_parts:
+                parts.append("## Relevant Past Memories\n\n" + "\n".join(recall_parts))
 
         return "\n\n".join(parts)
 

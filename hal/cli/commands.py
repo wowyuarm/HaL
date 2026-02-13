@@ -161,6 +161,47 @@ def _make_provider(config):
     )
 
 
+def _make_memory_search(config):
+    """Create MemorySearch instance from config. Returns None if deps missing."""
+    try:
+        from hal.core.memory.chunker import MarkdownChunker
+        from hal.core.memory.exporter import DailyExporter
+        from hal.core.memory.search import MemorySearch
+        from hal.core.memory.store import VectorStore
+        from hal.infra.config.loader import get_data_dir
+    except ImportError as e:
+        console.print(f"[yellow]Memory search unavailable (missing dependency: {e})[/yellow]")
+        return None
+
+    ms_cfg = config.memory_search
+    data_dir = get_data_dir()
+
+    from hal.core.memory.daily_log import DailyLog
+
+    log_dir = data_dir / "logs"
+    daily_log = DailyLog(log_dir)
+    daily_dir = config.workspace_path / "memory" / "daily"
+
+    exporter = DailyExporter(daily_log, daily_dir)
+    chunker = MarkdownChunker(
+        max_size=ms_cfg.max_chunk_size,
+        overlap_lines=ms_cfg.chunk_overlap_lines,
+    )
+    store = VectorStore(
+        uri=ms_cfg.milvus_uri,
+        collection_name=ms_cfg.collection_name,
+        embedding_dim=ms_cfg.embedding_dim,
+    )
+
+    return MemorySearch(
+        exporter=exporter,
+        chunker=chunker,
+        store=store,
+        embedding_model=ms_cfg.embedding_model,
+        daily_dir=daily_dir,
+    )
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -196,6 +237,7 @@ def gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    memory_search = _make_memory_search(config) if config.memory_search.enabled else None
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -207,6 +249,8 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
+        memory_search=memory_search,
+        auto_inject_top_k=config.memory_search.auto_inject_top_k,
     )
 
     # Set cron callback (needs agent)
@@ -260,12 +304,55 @@ def gateway(
 
     async def run():
         try:
+            # Initialize memory search if enabled
+            if memory_search:
+                try:
+                    await memory_search.initialize()
+                    backfill_count = await memory_search.backfill()
+                    status = (
+                        f"initialized ({backfill_count} chunks backfilled)"
+                        if backfill_count
+                        else "initialized"
+                    )
+                    console.print(f"[green]✓[/green] Memory search {status}")
+                except Exception as e:
+                    console.print(f"[yellow]Memory search init failed: {e}[/yellow]")
+
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
+
+            tasks = [
                 agent.run(),
                 channels.start_all(),
-            )
+            ]
+
+            # Schedule daily export at midnight
+            if memory_search:
+
+                async def daily_export():
+                    import datetime as _dt
+
+                    while True:
+                        now = _dt.datetime.now()
+                        next_midnight = now.replace(
+                            hour=0, minute=0, second=0, microsecond=0
+                        ) + _dt.timedelta(days=1)
+                        wait_s = (next_midnight - now).total_seconds()
+                        await asyncio.sleep(wait_s)
+                        try:
+                            count = await memory_search.export_and_index_yesterday()
+                            if count:
+                                from loguru import logger
+
+                                logger.info(f"Daily export: indexed {count} chunks")
+                        except Exception as e:
+                            from loguru import logger
+
+                            logger.warning(f"Daily export failed: {e}")
+
+                tasks.append(daily_export())
+
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
             heartbeat.stop()
@@ -296,6 +383,8 @@ def agent(
     bus = MessageBus()
     provider = _make_provider(config)
 
+    ms = _make_memory_search(config) if config.memory_search.enabled else None
+
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -304,11 +393,22 @@ def agent(
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
+        memory_search=ms,
+        auto_inject_top_k=config.memory_search.auto_inject_top_k,
     )
+
+    async def _init_memory_search():
+        if ms:
+            try:
+                await ms.initialize()
+                await ms.backfill()
+            except Exception as e:
+                console.print(f"[yellow]Memory search init failed: {e}[/yellow]")
 
     if message:
         # Single message mode
         async def run_once():
+            await _init_memory_search()
             response = await agent_loop.process_direct(message, session_id)
             console.print(f"\n{__logo__} {response}")
 
@@ -318,6 +418,7 @@ def agent(
         console.print(f"{__logo__} Interactive mode (Ctrl+C to exit)\n")
 
         async def run_interactive():
+            await _init_memory_search()
             while True:
                 try:
                     user_input = console.input("[bold blue]You:[/bold blue] ")

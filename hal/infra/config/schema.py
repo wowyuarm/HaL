@@ -130,6 +130,19 @@ class ToolsConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
+class MemorySearchConfig(BaseModel):
+    """Semantic memory search configuration."""
+
+    enabled: bool = False
+    embedding_model: str = "openai/text-embedding-3-small"
+    milvus_uri: str = "~/.hal/data/milvus/hal_memory.db"
+    collection_name: str = "hal_memory"
+    embedding_dim: int = 1536
+    auto_inject_top_k: int = 3
+    max_chunk_size: int = 1000
+    chunk_overlap_lines: int = 2
+
+
 class Config(BaseSettings):
     """Root configuration for HaL."""
 
@@ -138,6 +151,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    memory_search: MemorySearchConfig = Field(default_factory=MemorySearchConfig)
 
     @property
     def workspace_path(self) -> Path:

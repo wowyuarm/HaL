@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hal.core.memory.daily_log import DailyLog, LogEntry
+
+if TYPE_CHECKING:
+    from hal.core.memory.search import MemorySearch
+    from hal.core.memory.store import SearchResult
 
 
 class MemoryManager:
@@ -16,9 +20,15 @@ class MemoryManager:
     - Recording conversations (daily log)
     - Reading/writing persistent knowledge (long-term)
     - Assembling memory context for prompt injection
+    - Semantic search over past conversations (optional)
     """
 
-    def __init__(self, workspace: Path, data_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        data_dir: Path | None = None,
+        memory_search: MemorySearch | None = None,
+    ):
         from hal.core.memory.long_term import LongTermMemory
 
         memory_dir = workspace / "memory"
@@ -28,6 +38,8 @@ class MemoryManager:
 
         log_dir = (data_dir or workspace) / "logs"
         self.daily_log = DailyLog(log_dir)
+
+        self._search = memory_search
 
     def get_context(self, budget: int | None = None) -> str:
         """
@@ -125,3 +137,12 @@ class MemoryManager:
             channel=channel,
             chat_id=chat_id,
         )
+
+    async def search_memories(self, query: str, top_k: int = 3) -> list[SearchResult]:
+        """Semantic search over indexed past conversations.
+
+        Returns empty list if memory search is not configured.
+        """
+        if self._search:
+            return await self._search.search(query, top_k=top_k)
+        return []

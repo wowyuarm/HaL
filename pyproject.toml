@@ -40,6 +40,10 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
 ]
+memory = [
+    "pymilvus>=2.5.0",
+    "milvus-lite>=2.5.0",
+]
 
 [project.scripts]
 hal = "hal.cli.commands:app"
