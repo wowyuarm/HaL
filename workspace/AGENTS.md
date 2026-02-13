@@ -10,30 +10,24 @@ Get USER_ID and CHANNEL from the current session context (e.g., `8281248569` and
 
 **Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
 
-### Progress Reporting During Long Operations
-
-When executing a series of tool calls or long-running tasks, **use the `message` tool to keep the user informed during the process**:
-
-1. **Before starting** a potentially lengthy operation (e.g., multiple file edits, complex analysis, spawn tasks), send a brief status:
-   ```
-   message(content="Starting analysis of the codebase, this may take a moment...")
-   ```
-
-2. **During execution**, provide periodic updates:
-   - After completing significant milestones
-   - When encountering unexpected delays
-   - When switching between major phases of work
-   - When waiting for subagent results that may take time
-
-**Why this matters**: Users can't see your internal tool execution. Without progress updates during long operations, they might think you're stuck or unresponsive. Brief messages during execution build trust and allow them to adjust priorities mid-task.
-
 ## Subagent Delegation
 
 Use `spawn` to delegate tasks that need independent work (research, file analysis, etc.).
-- The result comes back directly — you can continue reasoning with it.
+
+### Choosing sync vs. background
+
+| Scenario | Mode | Why |
+|----------|------|-----|
+| Quick lookup, file read, simple analysis (<1 min) | sync (default) | Fast, result flows directly into your reasoning |
+| Research, multi-file refactoring, web crawling (>1 min) | `background=true` | User gets an immediate acknowledgement; results are delivered when done |
+
+**Default to `background=true` for any task that involves web search, multi-step research, or more than a few tool calls.** Sync spawn blocks the entire conversation — the user cannot get any response (including progress updates) until the subagent finishes.
+
+### Guidelines
+- When spawning sync, the system will automatically send progress updates to the user every 30 seconds — you don't need to do this yourself.
 - When a spawn task may take a while, **briefly tell the user** you're working on it before calling spawn, so they know to wait.
-- Set `background=true` only for genuinely long-running tasks where the user shouldn't have to wait.
-- Subagents have up to 25 tool iterations. If they exhaust this limit, they will produce a progress summary rather than silently stopping — use it to decide whether to spawn a follow-up.
+- Always provide a short `label` parameter — it appears in progress messages.
+- Subagents have up to 50 tool iterations. If they exhaust this limit, they will produce a progress summary rather than silently stopping — use it to decide whether to spawn a follow-up.
 
 ## Parallel Tool Execution
 

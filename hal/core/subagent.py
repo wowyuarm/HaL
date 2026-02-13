@@ -56,6 +56,8 @@ class SubagentManager:
         self.restrict_to_workspace = restrict_to_workspace
         # task_id -> (asyncio.Task, label)
         self._running_tasks: dict[str, tuple[asyncio.Task[str], str]] = {}
+        # Track iteration count for the currently executing sync subagent
+        self._current_iteration = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -140,9 +142,11 @@ class SubagentManager:
         max_iterations = 50
         iteration = 0
         final_result: str | None = None
+        self._current_iteration = 0
 
         while iteration < max_iterations:
             iteration += 1
+            self._current_iteration = iteration
 
             response = await self.provider.chat(
                 messages=messages,
@@ -265,3 +269,7 @@ When you have completed the task, provide a clear summary of your findings or ac
     def get_running_count(self) -> int:
         """Return the number of currently running background subagents."""
         return len(self._running_tasks)
+
+    def get_last_iteration(self) -> int:
+        """Return the iteration count of the most recent sync subagent execution."""
+        return self._current_iteration

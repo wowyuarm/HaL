@@ -252,57 +252,70 @@ class TestDailyLogEntryType:
         entry = log.append(channel="cli", chat_id="d", role="user", content="hi")
         assert entry.entry_type == "message"
 
-    def test_summary_merged_with_preceding_assistant(self, tmp_path: Path):
+    def test_injection_entries_persist_in_history(self, tmp_path: Path):
+        """Injection entries (summaries, subagent results) are kept as role:user."""
         log = DailyLog(tmp_path / "logs")
         log.append(channel="cli", chat_id="d", role="user", content="do something")
         log.append(channel="cli", chat_id="d", role="assistant", content="Done!")
         log.append(
             channel="cli",
             chat_id="d",
-            role="assistant",
-            content="Modified 3 files.",
-            entry_type="summary",
+            role="user",
+            content="[System Summary]\nModified 3 files.",
+            entry_type="injection",
         )
 
         history = log.get_recent_conversation(channel="cli", chat_id="d")
-        # Summary should be merged into the assistant message, not a separate entry
-        assert len(history) == 2
-        assert history[1]["role"] == "assistant"
-        assert "Done!" in history[1]["content"]
-        assert "[Task Summary]" in history[1]["content"]
-        assert "Modified 3 files." in history[1]["content"]
+        assert len(history) == 3
+        assert history[2]["role"] == "user"
+        assert "[System Summary]" in history[2]["content"]
+        assert "Modified 3 files." in history[2]["content"]
 
-    def test_summary_without_preceding_assistant_stays_separate(self, tmp_path: Path):
+    def test_injection_not_filtered_by_include_tools_false(self, tmp_path: Path):
+        """Injection entries survive include_tools=False filtering."""
         log = DailyLog(tmp_path / "logs")
         log.append(channel="cli", chat_id="d", role="user", content="hi")
-        log.append(
-            channel="cli",
-            chat_id="d",
-            role="assistant",
-            content="orphan summary",
-            entry_type="summary",
-        )
-
-        history = log.get_recent_conversation(channel="cli", chat_id="d")
-        # No preceding assistant message to merge into, so it stays separate
-        assert len(history) == 2
-
-    def test_summary_entries_included_in_history(self, tmp_path: Path):
-        """Summary entries are not filtered out."""
-        log = DailyLog(tmp_path / "logs")
         log.append(channel="cli", chat_id="d", role="assistant", content="response")
         log.append(
             channel="cli",
             chat_id="d",
-            role="assistant",
-            content="summary",
-            entry_type="summary",
+            role="user",
+            content="[Subagent Result: research]\nFindings here.",
+            entry_type="injection",
         )
 
+        history = log.get_recent_conversation(channel="cli", chat_id="d", include_tools=False)
+        assert len(history) == 3
+        assert history[2]["role"] == "user"
+        assert "[Subagent Result: research]" in history[2]["content"]
+
+    def test_subagent_result_injection_ordering(self, tmp_path: Path):
+        """Injection entries appear in correct chronological order."""
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="research X")
+        log.append(channel="cli", chat_id="d", role="assistant", content="On it.")
+        log.append(
+            channel="cli",
+            chat_id="d",
+            role="user",
+            content="[Subagent Result: X]\nResult of X.",
+            entry_type="injection",
+        )
+        log.append(
+            channel="cli",
+            chat_id="d",
+            role="user",
+            content="[System Summary]\nResearched X.",
+            entry_type="injection",
+        )
+        log.append(channel="cli", chat_id="d", role="user", content="what next?")
+
         history = log.get_recent_conversation(channel="cli", chat_id="d")
-        # Merged into one
-        assert len(history) == 1
-        assert "summary" in history[0]["content"]
+        assert len(history) == 5
+        assert history[0]["content"] == "research X"
+        assert "[Subagent Result: X]" in history[2]["content"]
+        assert "[System Summary]" in history[3]["content"]
+        assert history[4]["content"] == "what next?"
 
 
 class TestMemoryManagerEntryType:

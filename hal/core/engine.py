@@ -123,7 +123,7 @@ class AgentEngine:
         message_tool = MessageTool(send_callback=self.bus.publish_outbound)
         self.tools.register(message_tool)
 
-        spawn_tool = SpawnTool(manager=self.subagents)
+        spawn_tool = SpawnTool(manager=self.subagents, send_callback=self.bus.publish_outbound)
         self.tools.register(spawn_tool)
 
         if self.cron_service:
@@ -450,6 +450,22 @@ class AgentEngine:
                             tool_name=tool_call.name,
                             tool_result=result,
                         )
+
+                        # Persist sync spawn results as user-injection so they
+                        # survive include_tools=False in future history rebuilds.
+                        if tool_call.name == "spawn":
+                            bg = tool_call.arguments.get("background", False)
+                            if not bg:
+                                label = tool_call.arguments.get(
+                                    "label", tool_call.arguments.get("task", "")[:40]
+                                )
+                                self.memory.record_conversation(
+                                    channel=channel,
+                                    chat_id=chat_id,
+                                    role="user",
+                                    content=f"[Subagent Result: {label}]\n\n{result}",
+                                    entry_type="injection",
+                                )
             else:
                 # Before finalizing, collect any pending background subagent results.
                 # These are injected as ephemeral context (not recorded to history)
@@ -464,6 +480,16 @@ class AgentEngine:
                         inject = f"[Background subagent '{label}' {status}]\n\nResult:\n{result}"
                         messages.append({"role": "user", "content": inject})
                         logger.info(f"[inject] subagent result: {label} ({status})")
+
+                        # Persist so future history rebuilds retain the result
+                        if channel and chat_id:
+                            self.memory.record_conversation(
+                                channel=channel,
+                                chat_id=chat_id,
+                                role="user",
+                                content=inject,
+                                entry_type="injection",
+                            )
                     continue
 
                 final_content = response.content
@@ -526,9 +552,9 @@ class AgentEngine:
                 self.memory.record_conversation(
                     channel=channel,
                     chat_id=chat_id,
-                    role="assistant",
-                    content=response.content,
-                    entry_type="summary",
+                    role="user",
+                    content=f"[System Summary]\n{response.content}",
+                    entry_type="injection",
                 )
                 logger.info(f"[summary] recorded for {channel}:{chat_id}")
         except Exception as e:

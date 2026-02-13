@@ -148,7 +148,9 @@ class DailyLog:
             if entry.role == "system" and entry.content == "conversation_reset":
                 break
 
-            if not include_tools and entry.role == "tool":
+            # Always keep injection entries (subagent results, summaries)
+            # even when include_tools=False — they carry essential context.
+            if not include_tools and entry.role == "tool" and entry.entry_type != "injection":
                 continue
 
             result.append(entry)
@@ -158,22 +160,7 @@ class DailyLog:
         # Reverse back to chronological order (oldest to newest)
         result.reverse()
 
-        # Merge summary entries into preceding assistant messages to avoid
-        # consecutive assistant messages in LLM context.
-        merged: list[dict[str, Any]] = []
-        for entry in result:
-            msg = {"role": entry.role, "content": entry.content}
-            if (
-                entry.entry_type == "summary"
-                and entry.role == "assistant"
-                and merged
-                and merged[-1]["role"] == "assistant"
-            ):
-                merged[-1]["content"] += "\n\n---\n[Task Summary]\n" + entry.content
-            else:
-                merged.append(msg)
-
-        return merged
+        return [{"role": entry.role, "content": entry.content} for entry in result]
 
     def get_all_entries(
         self,
