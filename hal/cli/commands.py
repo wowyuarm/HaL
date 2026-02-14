@@ -228,6 +228,7 @@ def _make_memory_search(config):
         store=store,
         embedding_model=ms_cfg.embedding_model,
         daily_dir=daily_dir,
+        embedding_dim=ms_cfg.embedding_dim,
         **_resolve_embedding_provider(config, ms_cfg),
     )
 

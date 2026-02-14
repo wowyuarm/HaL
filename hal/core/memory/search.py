@@ -29,6 +29,7 @@ class MemorySearch:
         daily_dir: Path,
         api_key: str | None = None,
         api_base: str | None = None,
+        embedding_dim: int | None = None,
     ):
         self._exporter = exporter
         self._chunker = chunker
@@ -37,6 +38,7 @@ class MemorySearch:
         self._daily_dir = daily_dir
         self._api_key = api_key
         self._api_base = api_base
+        self._embedding_dim = embedding_dim
 
     async def initialize(self) -> None:
         """Initialize the vector store."""
@@ -179,19 +181,58 @@ class MemorySearch:
         return count
 
     async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Get embeddings for a list of texts via LiteLLM."""
+        """Get embeddings via direct HTTP call or LiteLLM fallback."""
         try:
-            kwargs: dict = {
-                "model": self._embedding_model,
-                "input": texts,
-            }
-            if self._api_key:
-                kwargs["api_key"] = self._api_key
-            if self._api_base:
-                kwargs["api_base"] = self._api_base
-
-            response = await litellm.aembedding(**kwargs)
-            return [item["embedding"] for item in response.data]
+            if self._api_base and self._api_key:
+                return await self._embed_texts_direct(texts)
+            return await self._embed_texts_litellm(texts)
         except Exception as e:
             logger.error(f"Embedding failed: {e}")
             return []
+
+    async def _embed_texts_direct(self, texts: list[str]) -> list[list[float]]:
+        """Call OpenAI-compatible embedding endpoint directly.
+
+        Bypasses LiteLLM's parameter validation which incorrectly blocks
+        the 'dimensions' param for custom OpenAI-compatible providers.
+        """
+        import httpx
+
+        # Strip litellm routing prefix (e.g. "openai/") to get raw model name
+        model = self._embedding_model
+        if "/" in model:
+            parts = model.split("/", 1)
+            # Only strip known litellm prefixes, not model namespace slashes
+            if parts[0] in ("openai", "azure", "bedrock"):
+                model = parts[1]
+
+        body: dict = {"model": model, "input": texts}
+        if self._embedding_dim:
+            body["dimensions"] = self._embedding_dim
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{self._api_base.rstrip('/')}/embeddings",
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return [item["embedding"] for item in data["data"]]
+
+    async def _embed_texts_litellm(self, texts: list[str]) -> list[list[float]]:
+        """Fallback: call embedding via LiteLLM (for standard providers)."""
+        kwargs: dict = {
+            "model": self._embedding_model,
+            "input": texts,
+        }
+        if self._api_key:
+            kwargs["api_key"] = self._api_key
+        if self._embedding_dim:
+            kwargs["dimensions"] = self._embedding_dim
+
+        response = await litellm.aembedding(**kwargs)
+        return [item["embedding"] for item in response.data]
