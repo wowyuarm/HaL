@@ -118,8 +118,21 @@ class VectorStore:
     async def search(
         self, query_embedding: list[float], *, query_text: str = "", top_k: int = 5
     ) -> list[SearchResult]:
-        """Hybrid search: dense cosine + BM25 keyword with RRF reranking."""
-        raw = await asyncio.to_thread(self._hybrid_search_sync, query_embedding, query_text, top_k)
+        """Hybrid search: dense cosine + BM25 keyword with RRF reranking.
+
+        Falls back to dense-only search if BM25 produces invalid values
+        (known Milvus Lite issue with small collections).
+        """
+        try:
+            raw = await asyncio.to_thread(
+                self._hybrid_search_sync, query_embedding, query_text, top_k
+            )
+        except Exception as e:
+            if "NaN" in str(e) or "Inf" in str(e) or "isfinite" in str(e):
+                logger.debug(f"Hybrid search failed ({e}), falling back to dense-only")
+                raw = await asyncio.to_thread(self._dense_search_sync, query_embedding, top_k)
+            else:
+                raise
 
         results: list[SearchResult] = []
         if raw and raw[0]:
@@ -158,6 +171,17 @@ class VectorStore:
             collection_name=self._collection_name,
             reqs=[dense_req, bm25_req],
             ranker=RRFRanker(k=60),
+            limit=top_k,
+            output_fields=_OUTPUT_FIELDS,
+        )
+
+    def _dense_search_sync(self, query_embedding: list[float], top_k: int) -> list:
+        """Dense-only cosine search (fallback when BM25 fails)."""
+        return self._client.search(
+            collection_name=self._collection_name,
+            data=[query_embedding],
+            anns_field="embedding",
+            search_params={"metric_type": "COSINE"},
             limit=top_k,
             output_fields=_OUTPUT_FIELDS,
         )
