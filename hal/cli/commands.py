@@ -161,6 +161,35 @@ def _make_provider(config):
     )
 
 
+def _resolve_embedding_provider(config, ms_cfg) -> dict:
+    """Resolve api_key/api_base for embedding from the named provider."""
+    result: dict = {}
+    name = ms_cfg.embedding_provider
+    if not name:
+        # Fallback: try to auto-detect provider from embedding model name
+        p = config.get_provider(ms_cfg.embedding_model)
+        if p and p.api_key:
+            result["api_key"] = p.api_key
+            base = config.get_api_base(ms_cfg.embedding_model)
+            if base:
+                result["api_base"] = base
+        return result
+
+    p = getattr(config.providers, name, None)
+    if p and p.api_key:
+        result["api_key"] = p.api_key
+        # Use provider's api_base, falling back to registry default
+        if p.api_base:
+            result["api_base"] = p.api_base
+        else:
+            from hal.infra.providers.registry import find_by_name
+
+            spec = find_by_name(name)
+            if spec and spec.default_api_base:
+                result["api_base"] = spec.default_api_base
+    return result
+
+
 def _make_memory_search(config):
     """Create MemorySearch instance from config. Returns None if deps missing."""
     try:
@@ -199,6 +228,7 @@ def _make_memory_search(config):
         store=store,
         embedding_model=ms_cfg.embedding_model,
         daily_dir=daily_dir,
+        **_resolve_embedding_provider(config, ms_cfg),
     )
 
 

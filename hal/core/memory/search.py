@@ -27,12 +27,16 @@ class MemorySearch:
         store: VectorStore,
         embedding_model: str,
         daily_dir: Path,
+        api_key: str | None = None,
+        api_base: str | None = None,
     ):
         self._exporter = exporter
         self._chunker = chunker
         self._store = store
         self._embedding_model = embedding_model
         self._daily_dir = daily_dir
+        self._api_key = api_key
+        self._api_base = api_base
 
     async def initialize(self) -> None:
         """Initialize the vector store."""
@@ -177,10 +181,16 @@ class MemorySearch:
     async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for a list of texts via LiteLLM."""
         try:
-            response = await litellm.aembedding(
-                model=self._embedding_model,
-                input=texts,
-            )
+            kwargs: dict = {
+                "model": self._embedding_model,
+                "input": texts,
+            }
+            if self._api_key:
+                kwargs["api_key"] = self._api_key
+            if self._api_base:
+                kwargs["api_base"] = self._api_base
+
+            response = await litellm.aembedding(**kwargs)
             return [item["embedding"] for item in response.data]
         except Exception as e:
             logger.error(f"Embedding failed: {e}")

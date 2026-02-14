@@ -108,6 +108,7 @@ class ProvidersConfig(BaseModel):
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
+    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
 
 
@@ -150,6 +151,7 @@ class MemorySearchConfig(BaseModel):
 
     enabled: bool = False
     embedding_model: str = "openai/text-embedding-3-small"
+    embedding_provider: str = ""  # Provider name for embedding API (e.g. "siliconflow")
     milvus_uri: str = "~/.hal/data/milvus/hal_memory.db"
     collection_name: str = "hal_memory"
     embedding_dim: int = 1536

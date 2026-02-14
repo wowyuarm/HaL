@@ -204,6 +204,24 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
     ),
+    # SiliconFlow: OpenAI-compatible API hosting Qwen, DeepSeek, etc.
+    # Mainly used for embedding; also supports chat models.
+    ProviderSpec(
+        name="siliconflow",
+        keywords=("siliconflow",),
+        env_key="OPENAI_API_KEY",  # OpenAI-compatible
+        display_name="SiliconFlow",
+        litellm_prefix="openai",  # → openai/{model}
+        skip_prefixes=("openai/",),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="siliconflow",
+        default_api_base="https://api.siliconflow.cn/v1",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
     # Moonshot: Kimi models, needs "moonshot/" prefix.
     # LiteLLM requires MOONSHOT_API_BASE env var to find the endpoint.
     # Kimi K2.5 API enforces temperature >= 1.0.
