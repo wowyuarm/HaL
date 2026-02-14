@@ -197,17 +197,18 @@ def _make_memory_search(config):
         from hal.core.memory.exporter import DailyExporter
         from hal.core.memory.search import MemorySearch
         from hal.core.memory.store import VectorStore
-        from hal.infra.config.loader import get_data_dir
     except ImportError as e:
         console.print(f"[yellow]Memory search unavailable (missing dependency: {e})[/yellow]")
         return None
 
     ms_cfg = config.memory_search
-    data_dir = get_data_dir()
 
     from hal.core.memory.daily_log import DailyLog
 
-    log_dir = data_dir / "logs"
+    # Must match MemoryManager's log_dir: (data_dir or workspace) / "logs".
+    # MemoryManager defaults data_dir=None → uses workspace, so logs live
+    # under workspace/logs, not get_data_dir()/logs.
+    log_dir = config.workspace_path / "logs"
     daily_log = DailyLog(log_dir)
     daily_dir = config.workspace_path / "memory" / "daily"
 
