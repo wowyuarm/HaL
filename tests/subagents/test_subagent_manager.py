@@ -152,20 +152,50 @@ async def test_await_pending_empty_returns_empty_list(tmp_path) -> None:
 # ------------------------------------------------------------------
 
 
-def test_build_subagent_prompt_includes_workspace_and_task(tmp_path) -> None:
+def test_build_system_prompt_includes_workspace(tmp_path) -> None:
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
     mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
-    prompt = mgr._build_subagent_prompt("do thing")
-    assert "do thing" in prompt
+    prompt = mgr._build_system_prompt()
     assert str(tmp_path) in prompt
 
 
-def test_build_subagent_prompt_includes_mode_directive(tmp_path) -> None:
+def test_build_system_prompt_does_not_include_task(tmp_path) -> None:
+    """System prompt should be task-agnostic; task is in user message only."""
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
     mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
-    prompt = mgr._build_subagent_prompt("do thing")
+    prompt = mgr._build_system_prompt()
+    assert "Your Task" not in prompt
+
+
+def test_build_system_prompt_includes_mode_directive(tmp_path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+
+    prompt = mgr._build_system_prompt()
     assert "Focused Task" in prompt
+
+
+def test_build_system_prompt_includes_tool_guide(tmp_path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+
+    prompt = mgr._build_system_prompt()
+    assert "fs(action=" in prompt
+    assert "exec(command=" in prompt
+    assert "web_search(query=" in prompt
+    assert "web_fetch(url=" in prompt
+
+
+def test_build_system_prompt_includes_time(tmp_path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+
+    prompt = mgr._build_system_prompt()
+    assert "Current time:" in prompt

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import platform
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -133,7 +135,7 @@ class SubagentManager:
     async def _execute_subagent(self, task_id: str, task: str) -> str:
         """Run the subagent loop and return the final result string."""
         tools = self._build_tools()
-        system_prompt = self._build_subagent_prompt(task)
+        system_prompt = self._build_system_prompt()
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": task},
@@ -234,37 +236,81 @@ class SubagentManager:
         tools.register(WebFetchTool())
         return tools
 
-    def _build_subagent_prompt(self, task: str) -> str:
-        """Build a focused system prompt for the subagent."""
+    def _build_system_prompt(self) -> str:
+        """Build a focused, task-agnostic system prompt for the subagent.
+
+        The task itself is delivered as the user message, keeping the system
+        prompt stable (and potentially cacheable across subagent invocations).
+
+        Includes:
+        - Role and behavioral rules
+        - Tool usage guide (subset available to subagent)
+        - Long-term memory (MEMORY.md) for user preferences and project context
+        - Environment basics (time, platform, workspace)
+        """
         mode_directive = _MODE_DIRECTIVES[ExecutionMode.ASYNC]
-        return f"""# Subagent
+        workspace_path = str(self.workspace.expanduser().resolve())
 
-{mode_directive}
+        system = platform.system()
+        runtime = (
+            f"{'macOS' if system == 'Darwin' else system} "
+            f"{platform.machine()}, Python {platform.python_version()}"
+        )
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
 
-## Your Task
-{task}
+        parts: list[str] = []
 
+        # Role + mode
+        parts.append(f"""# Subagent
+
+You are a focused task executor working on behalf of the main agent.
+Your result will be reported back — you do not interact with the user directly.
+
+{mode_directive}""")
+
+        # Rules
+        parts.append("""\
 ## Rules
-1. Stay focused - complete only the assigned task, nothing else
-2. Your final response will be reported back to the main agent
-3. Do not initiate conversations or take on side tasks
-4. Be concise but informative in your findings
+- Complete only the assigned task. Do not take on side tasks.
+- Be thorough in execution, concise in your final report.
+- If the task is ambiguous, make reasonable assumptions and state them.""")
 
-## What You Can Do
-- Read and write files in the workspace
-- Execute shell commands
-- Search the web and fetch web pages
-- Complete the task thoroughly
+        # Tool usage guide (only the tools subagent actually has)
+        parts.append(f"""\
+## Tools
 
-## What You Cannot Do
-- Send messages directly to users (no message tool available)
-- Spawn other subagents
-- Access the main agent's conversation history
+### fs — File Operations
+Unified file tool with four actions:
+```
+fs(action="read", path="file.txt")
+fs(action="write", path="file.txt", content="...")
+fs(action="edit", path="file.txt", old_text="...", new_text="...")
+fs(action="list", path=".")
+```
 
-## Workspace
-Your workspace is at: {self.workspace}
+### exec — Shell Execution
+Execute shell commands. Output truncated at 10K chars.
+```
+exec(command="ls -la", working_dir="/path")
+```
 
-When you have completed the task, provide a clear summary of your findings or actions."""
+### web_search — Web Search
+```
+web_search(query="latest news", count=5)
+```
+
+### web_fetch — Fetch Web Page
+Extract main content from a URL as markdown.
+```
+web_fetch(url="https://example.com", extractMode="markdown")
+```
+
+## Environment
+Platform: {runtime}
+Workspace: {workspace_path}
+Current time: {now}""")
+
+        return "\n\n".join(parts)
 
     def get_running_count(self) -> int:
         """Return the number of currently running background subagents."""
