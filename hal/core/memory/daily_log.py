@@ -158,9 +158,13 @@ class DailyLog:
             if entry.role == "system" and entry.content == "conversation_reset":
                 break
 
-            # Always keep injection entries (subagent results, summaries)
+            # Always keep injection/summary entries (subagent results, summaries)
             # even when include_tools=False — they carry essential context.
-            if not include_tools and entry.role == "tool" and entry.entry_type != "injection":
+            if (
+                not include_tools
+                and entry.role == "tool"
+                and entry.entry_type not in ("injection", "summary")
+            ):
                 continue
 
             result.append(entry)
@@ -174,14 +178,38 @@ class DailyLog:
         total_assistant = sum(1 for e in result if e.role == "assistant")
         verbatim_threshold = total_assistant - recent_full_turns
 
+        # Build a lookup: for each assistant entry index, find a paired summary
+        # (a summary entry that immediately follows it in the result list).
+        summary_for_assistant: dict[int, str] = {}
+        skip_indices: set[int] = set()
+        for i, entry in enumerate(result):
+            if (
+                entry.entry_type == "summary"
+                and entry.role == "user"
+                and i > 0
+                and result[i - 1].role == "assistant"
+            ):
+                summary_for_assistant[i - 1] = entry.content
+                skip_indices.add(i)
+
         messages: list[dict[str, Any]] = []
         assistant_idx = 0
-        for entry in result:
+        for i, entry in enumerate(result):
+            if i in skip_indices:
+                continue
+
             content = entry.content
             if entry.role == "assistant":
                 assistant_idx += 1
                 if assistant_idx <= verbatim_threshold:
-                    content = _truncate_assistant(content, assistant_truncate_chars)
+                    # Outside recent full turns: prefer summary over raw truncation
+                    if i in summary_for_assistant:
+                        content = summary_for_assistant[i]
+                    else:
+                        content = _truncate_assistant(content, assistant_truncate_chars)
+                else:
+                    # Inside recent full turns: skip paired summary (already in skip_indices)
+                    pass
             messages.append({"role": entry.role, "content": content})
 
         return messages

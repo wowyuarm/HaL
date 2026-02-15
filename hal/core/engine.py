@@ -591,7 +591,7 @@ class AgentEngine:
                     chat_id=chat_id,
                     role="user",
                     content=f"[System Summary]\n{response.content}",
-                    entry_type="injection",
+                    entry_type="summary",
                 )
                 logger.info(f"[summary] recorded for {channel}:{chat_id}")
         except Exception as e:

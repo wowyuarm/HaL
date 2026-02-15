@@ -5,8 +5,12 @@ Implements a 5-layer context system optimized for prompt cache hits:
     Layer 0 — Identity (stable, rarely changes)
     Layer 1 — Personality (per-agent instance)
     Layer 2 — Capabilities (tools, skills)
-    Layer 3 — Situation (dynamic per request: time, mode, memory)
-    Layer 4 — Conversation (current session + message)
+    Layer 3 — Situation (stable per session: mode directive, long-term memory)
+    Layer 4 — Conversation (current session + message with dynamic context prefix)
+
+Dynamic per-request content (time, channel, chat_id, memory search results) is
+injected as an XML-tagged prefix on the last user message rather than in the
+system prompt, so the system prompt stays stable and maximizes prefix cache hits.
 """
 
 from __future__ import annotations
@@ -81,12 +85,12 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         mode: ExecutionMode = ExecutionMode.COLLAB,
-        memory_search_results: list[Any] | None = None,
     ) -> str:
         """Build the system prompt from layered context.
 
-        Layers 0-2 are assembled here (stable prefix).
-        Layer 3 (situation) is appended dynamically.
+        Layers 0-2 are stable prefix (maximize prompt cache hits).
+        Layer 3 (situation) contains only stable-per-session content:
+        mode directive and long-term memory.
         """
         parts: list[str] = []
 
@@ -103,8 +107,8 @@ class ContextBuilder:
         if capabilities:
             parts.append(capabilities)
 
-        # Layer 3 — Situation (dynamic: time, mode, memory)
-        situation = self._build_situation(mode, memory_search_results)
+        # Layer 3 — Situation (stable per session: mode, long-term memory)
+        situation = self._build_situation(mode)
         if situation:
             parts.append(situation)
 
@@ -124,22 +128,29 @@ class ContextBuilder:
         """Build the complete message list for an LLM call.
 
         Assembles all 5 layers:
-            System message = Layer 0 + 1 + 2 + 3
+            System message = Layer 0 + 1 + 2 + 3 (stable)
             Conversation   = Layer 4 (history + current message)
+
+        Dynamic per-request context (time, channel, chat_id, memory search
+        results) is prepended to the last user message as an XML block, keeping
+        the system prompt stable for prompt cache hits.
         """
         messages: list[dict[str, Any]] = []
 
-        # Layers 0-3: system prompt
-        system_prompt = self.build_system_prompt(skill_names, mode, memory_search_results)
-        if channel and chat_id:
-            system_prompt += f"\n\nChannel: {channel} | Chat ID: {chat_id}"
+        # Layers 0-3: stable system prompt (no per-request dynamic content)
+        system_prompt = self.build_system_prompt(skill_names, mode)
         messages.append({"role": "system", "content": system_prompt})
 
         # Layer 4: conversation history
         messages.extend(history)
 
-        # Layer 4: current message
-        user_content = self._build_user_content(current_message, media)
+        # Layer 4: current message with dynamic context prefix
+        dynamic_ctx = self._build_dynamic_context(
+            channel=channel,
+            chat_id=chat_id,
+            memory_search_results=memory_search_results,
+        )
+        user_content = self._build_user_content(current_message, media, dynamic_ctx)
         messages.append({"role": "user", "content": user_content})
 
         return messages
@@ -214,39 +225,24 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
     def _build_situation(
         self,
         mode: ExecutionMode,
-        memory_search_results: list[Any] | None = None,
     ) -> str:
-        """Layer 3 — Situation: time, mode directive, memory. Dynamic per request."""
-        from datetime import datetime
+        """Layer 3 — Situation: mode directive + long-term memory.
 
+        Stable per session — no time or per-request search results.
+        """
         parts: list[str] = []
 
-        # Current time (moved here from Layer 0 to keep identity stable)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        parts.append(f"# Situation\n\nCurrent time: {now}")
+        parts.append("# Situation")
 
         # Mode-specific behavioral directive
         directive = _MODE_DIRECTIVES.get(mode)
         if directive:
             parts.append(directive)
 
-        # Memory context
+        # Long-term memory (stable per session — loaded from MEMORY.md)
         memory_ctx = self._get_memory_context()
         if memory_ctx:
             parts.append(f"## Memory\n\n{memory_ctx}")
-
-        # Relevant past memories from semantic search
-        if memory_search_results:
-            recall_parts: list[str] = []
-            for r in memory_search_results:
-                header = f"- **{r.source}"
-                if r.heading:
-                    header += f" — {r.heading}"
-                header += f"** (relevance: {r.score:.2f})"
-                recall_parts.append(header)
-                recall_parts.append(f"  {r.content[:500]}")
-            if recall_parts:
-                parts.append("## Relevant Past Memories\n\n" + "\n".join(recall_parts))
 
         return "\n\n".join(parts)
 
@@ -257,11 +253,66 @@ Skills: {workspace_path}/skills/*/SKILL.md"""
         return ""
 
     # ------------------------------------------------------------------
+    # Dynamic context (injected into user message, not system prompt)
+    # ------------------------------------------------------------------
+
+    def _build_dynamic_context(
+        self,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        memory_search_results: list[Any] | None = None,
+    ) -> str:
+        """Build an XML-tagged dynamic context block for the user message.
+
+        This content changes per request (time, channel, search results) and is
+        kept out of the system prompt to maximize prompt cache hits.
+        """
+        from datetime import datetime
+
+        parts: list[str] = []
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        parts.append(f"<time>{now}</time>")
+
+        if channel:
+            parts.append(f"<channel>{channel}</channel>")
+        if chat_id:
+            parts.append(f"<chat_id>{chat_id}</chat_id>")
+
+        if memory_search_results:
+            recall_lines: list[str] = []
+            for r in memory_search_results:
+                header = f"- **{r.source}"
+                if r.heading:
+                    header += f" — {r.heading}"
+                header += f"** (relevance: {r.score:.2f})"
+                recall_lines.append(header)
+                recall_lines.append(f"  {r.content[:500]}")
+            if recall_lines:
+                parts.append(
+                    "<relevant_memories>\n" + "\n".join(recall_lines) + "\n</relevant_memories>"
+                )
+
+        return "<context>\n" + "\n".join(parts) + "\n</context>"
+
+    # ------------------------------------------------------------------
     # Message helpers
     # ------------------------------------------------------------------
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+    def _build_user_content(
+        self,
+        text: str,
+        media: list[str] | None,
+        dynamic_context: str | None = None,
+    ) -> str | list[dict[str, Any]]:
+        """Build user message content with optional dynamic context and images.
+
+        When *dynamic_context* is provided it is prepended to the text body,
+        separated by a blank line.
+        """
+        if dynamic_context:
+            text = f"{dynamic_context}\n\n{text}"
+
         if not media:
             return text
 

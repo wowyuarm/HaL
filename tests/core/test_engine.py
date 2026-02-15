@@ -563,3 +563,29 @@ class TestSummaryTrigger:
 
         assert completed is True
         assert session_key not in engine._pending_summaries
+
+
+class TestGenerateSummary:
+    async def test_summary_uses_summary_entry_type(self, engine, mock_provider):
+        """_generate_summary should record with entry_type='summary'."""
+        mock_provider.chat = AsyncMock(
+            return_value=LLMResponse(content="Summary text", tool_calls=[])
+        )
+
+        meta = LoopMetadata(
+            iterations=6,
+            tools_used=["fs"],
+            files_modified=["/tmp/a.txt"],
+            has_side_effects=True,
+            loop_messages=[],
+        )
+
+        await engine._generate_summary(meta, "final response", "telegram", "c1")
+
+        engine.memory.record_conversation.assert_called_with(
+            channel="telegram",
+            chat_id="c1",
+            role="user",
+            content="[System Summary]\nSummary text",
+            entry_type="summary",
+        )

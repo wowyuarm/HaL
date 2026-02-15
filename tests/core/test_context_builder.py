@@ -148,7 +148,8 @@ class TestBuildMessages:
     def test_ends_with_user_message(self, builder: ContextBuilder) -> None:
         msgs = builder.build_messages([], "Hello")
         assert msgs[-1]["role"] == "user"
-        assert msgs[-1]["content"] == "Hello"
+        # Dynamic context prefix is prepended, actual message follows
+        assert "Hello" in msgs[-1]["content"]
 
     def test_includes_history(self, builder: ContextBuilder) -> None:
         history: list[dict[str, Any]] = [
@@ -160,28 +161,36 @@ class TestBuildMessages:
         assert len(msgs) == 4
         assert msgs[1]["content"] == "Hi"
         assert msgs[2]["content"] == "Hello!"
-        assert msgs[3]["content"] == "Follow-up"
+        assert msgs[3]["role"] == "user"
+        assert "Follow-up" in msgs[3]["content"]
 
-    def test_channel_and_chat_id_in_system_prompt(self, builder: ContextBuilder) -> None:
+    def test_channel_and_chat_id_in_user_message(self, builder: ContextBuilder) -> None:
         msgs = builder.build_messages([], "msg", channel="telegram", chat_id="12345")
+        user_content = msgs[-1]["content"]
+        assert "<channel>telegram</channel>" in user_content
+        assert "<chat_id>12345</chat_id>" in user_content
+        # Should NOT be in system prompt
         system_content = msgs[0]["content"]
-        assert "Channel: telegram" in system_content
-        assert "Chat ID: 12345" in system_content
+        assert "telegram" not in system_content
+        assert "12345" not in system_content
 
     def test_no_session_section_without_channel(self, builder: ContextBuilder) -> None:
         msgs = builder.build_messages([], "msg")
-        system_content = msgs[0]["content"]
-        assert "Current Session" not in system_content
+        user_content = msgs[-1]["content"]
+        assert "<channel>" not in user_content
+        assert "<chat_id>" not in user_content
 
     def test_no_session_section_with_only_channel(self, builder: ContextBuilder) -> None:
         msgs = builder.build_messages([], "msg", channel="telegram")
-        system_content = msgs[0]["content"]
-        # Both channel and chat_id are required
-        assert "Current Session" not in system_content
+        user_content = msgs[-1]["content"]
+        # chat_id not provided — should not appear
+        assert "<chat_id>" not in user_content
+        # channel is still included
+        assert "<channel>telegram</channel>" in user_content
 
-    def test_media_none_returns_plain_text(self, builder: ContextBuilder) -> None:
+    def test_media_none_returns_text_with_context(self, builder: ContextBuilder) -> None:
         msgs = builder.build_messages([], "Hello", media=None)
-        assert msgs[-1]["content"] == "Hello"
+        assert "Hello" in msgs[-1]["content"]
 
     def test_media_with_image(self, builder: ContextBuilder, workspace: Path) -> None:
         # Create a tiny valid PNG (1x1 pixel)
@@ -203,14 +212,14 @@ class TestBuildMessages:
 
     def test_media_with_nonexistent_file(self, builder: ContextBuilder) -> None:
         msgs = builder.build_messages([], "Hello", media=["/no/such/file.png"])
-        # Falls back to plain text when no valid images
-        assert msgs[-1]["content"] == "Hello"
+        # Falls back to text (with dynamic context prefix) when no valid images
+        assert "Hello" in msgs[-1]["content"]
 
     def test_media_with_non_image_file(self, builder: ContextBuilder, workspace: Path) -> None:
         txt = workspace / "data.txt"
         txt.write_text("not an image", encoding="utf-8")
         msgs = builder.build_messages([], "Hello", media=[str(txt)])
-        assert msgs[-1]["content"] == "Hello"
+        assert "Hello" in msgs[-1]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -250,3 +259,63 @@ class TestMessageHelpers:
         msgs: list[dict[str, Any]] = []
         builder.add_assistant_message(msgs, None)
         assert msgs[0]["content"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Dynamic context in user message
+# ---------------------------------------------------------------------------
+
+
+class TestDynamicContext:
+    def test_time_in_user_message_not_system(self, builder: ContextBuilder) -> None:
+        msgs = builder.build_messages([], "Hello")
+        system_content = msgs[0]["content"]
+        user_content = msgs[-1]["content"]
+        # Time should be in user message via <context> block
+        assert "<time>" in user_content
+        # Time should NOT be in system prompt
+        assert "Current time:" not in system_content
+
+    def test_system_prompt_stable_across_calls(self, builder: ContextBuilder) -> None:
+        prompt1 = builder.build_system_prompt()
+        prompt2 = builder.build_system_prompt()
+        assert prompt1 == prompt2
+
+    def test_memory_search_results_in_user_message(self, builder: ContextBuilder) -> None:
+        result = MagicMock()
+        result.source = "daily_log"
+        result.heading = "cooking"
+        result.score = 0.85
+        result.content = "User likes Italian food"
+
+        msgs = builder.build_messages(
+            [], "What food?", memory_search_results=[result]
+        )
+        user_content = msgs[-1]["content"]
+        assert "<relevant_memories>" in user_content
+        assert "daily_log" in user_content
+        assert "cooking" in user_content
+        assert "0.85" in user_content
+        # Should NOT be in system prompt
+        system_content = msgs[0]["content"]
+        assert "Relevant Past Memories" not in system_content
+
+    def test_dynamic_context_with_media(self, builder: ContextBuilder, workspace: Path) -> None:
+        import base64
+
+        img_path = workspace / "test.png"
+        png_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+            "nGNgYPgPAAEDAQAIicLsAAAABJRU5ErkJggg=="
+        )
+        img_path.write_bytes(png_bytes)
+
+        msgs = builder.build_messages(
+            [], "Describe", media=[str(img_path)], channel="telegram", chat_id="42"
+        )
+        user_content = msgs[-1]["content"]
+        assert isinstance(user_content, list)
+        text_parts = [p for p in user_content if p.get("type") == "text"]
+        assert len(text_parts) == 1
+        assert "<context>" in text_parts[0]["text"]
+        assert "<channel>telegram</channel>" in text_parts[0]["text"]

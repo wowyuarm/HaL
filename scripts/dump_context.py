@@ -216,12 +216,12 @@ SIMULATED_TURNS: list[dict[str, str]] = [
             "| Session data | N/A | Deprecated |\n\n"
             "## Context window usage\n\n"
             "Per request, the context consumes roughly:\n"
-            "- System prompt (L0-L2): ~3,000 tokens (stable, cached)\n"
-            "- Situation (L3): ~500-1,500 tokens (memory + time)\n"
+            "- System prompt (L0-L3): ~3,500 tokens (stable, cached)\n"
+            "- Dynamic context prefix: ~100-300 tokens (time, channel, memories)\n"
             "- History (L4): ~2,000-8,000 tokens (last 50 messages)\n"
             "- Current message: variable\n\n"
-            "Total: typically **6,000-13,000 tokens** per request, well within "
-            "most model context windows."
+            "Total: typically **6,000-12,000 tokens** per request, well within "
+            "most model context windows. The system prompt is fully cacheable."
         ),
     },
 ]
@@ -404,17 +404,30 @@ def dump_context(
         len(m.get("content", "")) if isinstance(m.get("content"), str) else 0 for m in messages
     )
     sections.append(
-        f"- System prompt: **{len(system_content)}** chars (~{len(system_content) // 4} tokens)"
+        f"- System prompt (stable): **{len(system_content)}** chars "
+        f"(~{len(system_content) // 4} tokens)"
     )
     sections.append(
         f"- Total message content: **{total_chars}** chars (~{total_chars // 4} tokens)"
     )
     sections.append(f"- Conversation history messages: **{len(history)}**")
 
+    # Show dynamic context size (last user message minus the raw user text)
+    if messages:
+        last_msg = messages[-1].get("content", "")
+        if isinstance(last_msg, str) and "<context>" in last_msg:
+            ctx_end = last_msg.find("</context>")
+            if ctx_end != -1:
+                dynamic_size = ctx_end + len("</context>")
+                sections.append(
+                    f"- Dynamic context prefix: **{dynamic_size}** chars "
+                    f"(~{dynamic_size // 4} tokens) — time, channel, memories"
+                )
+
     # Layer breakdown (heuristic: split by --- dividers in system prompt)
     if isinstance(system_content, str):
         layers = system_content.split("\n\n---\n\n")
-        sections.append(f"- System prompt layers: **{len(layers)}**")
+        sections.append(f"- System prompt layers: **{len(layers)}** (all stable, cacheable)")
         for j, layer in enumerate(layers):
             first_line = layer.strip().split("\n")[0][:80]
             sections.append(f"  - Layer {j}: {len(layer)} chars — `{first_line}`")
