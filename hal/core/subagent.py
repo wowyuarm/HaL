@@ -205,8 +205,11 @@ class SubagentManager:
                     "role": "user",
                     "content": (
                         "You have reached the maximum number of tool iterations. "
-                        "Do NOT call any more tools. Summarize your progress and "
-                        "findings so far in a final response."
+                        "Do NOT call any more tools. Provide a structured final "
+                        "report:\n"
+                        "1. **Completed**: what you accomplished\n"
+                        "2. **Incomplete**: what remains unfinished (if any)\n"
+                        "3. **Key findings**: important results or data discovered"
                     ),
                 }
             )

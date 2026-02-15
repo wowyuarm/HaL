@@ -541,6 +541,9 @@ class AgentEngine:
     # Post-loop summary
     # ------------------------------------------------------------------
 
+    _SUMMARY_MSG_CHAR_LIMIT = 5000
+    _SUMMARY_TOTAL_CHAR_LIMIT = 60000
+
     async def _generate_summary(
         self,
         meta: LoopMetadata,
@@ -550,34 +553,28 @@ class AgentEngine:
     ) -> None:
         """Generate a concise summary of a tool-heavy loop and persist it."""
         try:
-            # Build a compact representation of what happened
-            parts = [
-                "Summarize what was done in this tool-calling session concisely (2-4 sentences)."
-            ]
-            parts.append(f"\nIterations: {meta.iterations}")
-            parts.append(f"Tools used: {', '.join(meta.tools_used)}")
-            if meta.files_modified:
-                parts.append(f"Files modified: {', '.join(meta.files_modified)}")
-            if meta.commands_run:
-                parts.append(f"Commands run: {', '.join(meta.commands_run)}")
-            parts.append(f"\nFinal response to user:\n{final_content[:500]}")
-
-            # Include a condensed version of loop messages (skip system prompt)
-            compact_msgs = []
-            for msg in meta.loop_messages:
-                role = msg.get("role", "")
-                content = str(msg.get("content", ""))[:300]
-                compact_msgs.append(f"[{role}] {content}")
-            if compact_msgs:
-                parts.append("\nLoop messages (truncated):\n" + "\n".join(compact_msgs[:20]))
-
-            prompt = "\n".join(parts)
+            prompt = self._build_summary_prompt(meta, final_content)
 
             response = await self.provider.chat(
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a concise summarizer. Output only the summary.",
+                        "content": (
+                            "You summarize an AI agent's tool-calling session into "
+                            "a concise record (2-4 sentences). This summary will "
+                            "replace the agent's verbose response in conversation "
+                            "history so that future LLM calls have compact context.\n\n"
+                            "Rules:\n"
+                            "- Describe what THE AGENT did and the outcomes.\n"
+                            "- NEVER attribute the agent's actions to the user. "
+                            'The user asked; the agent acted. (e.g. "Agent read '
+                            'config.json and updated the timeout to 30s", NOT '
+                            '"User read config.json").\n'
+                            "- Focus on results and key changes, not process.\n"
+                            "- Mention specific files, commands, or data only "
+                            "when they are important to the outcome.\n"
+                            "- Output ONLY the summary, no preamble."
+                        ),
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -600,6 +597,44 @@ class AgentEngine:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _build_summary_prompt(self, meta: LoopMetadata, final_content: str) -> str:
+        """Build the user prompt for summary generation from full loop messages."""
+        limit = self._SUMMARY_MSG_CHAR_LIMIT
+        parts: list[str] = ["<session>"]
+
+        # Serialize each loop message faithfully
+        total = 0
+        for msg in meta.loop_messages:
+            role = msg.get("role", "")
+            lines: list[str] = []
+
+            # assistant messages may carry tool_calls
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "")
+                    args = fn.get("arguments", "")
+                    if len(args) > limit:
+                        args = args[:limit] + "…"
+                    lines.append(f"  tool_call: {name}({args})")
+
+            content = str(msg.get("content", "") or "")
+            if len(content) > limit:
+                content = content[:limit] + "…"
+            if content:
+                lines.append(f"  {content}")
+
+            entry = f"[{role}]\n" + "\n".join(lines) if lines else f"[{role}]"
+            total += len(entry)
+            if total > self._SUMMARY_TOTAL_CHAR_LIMIT:
+                parts.append("[...earlier messages truncated...]")
+                break
+            parts.append(entry)
+
+        parts.append("</session>")
+        return "\n".join(parts)
 
     def _update_tool_contexts(self, channel: str, chat_id: str) -> None:
         """Update context-dependent tools with current channel/chat info."""
