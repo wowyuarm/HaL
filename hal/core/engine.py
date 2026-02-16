@@ -260,15 +260,6 @@ class AgentEngine:
             content=final_content,
         )
 
-        # Record any mid-loop injected messages
-        for injected_msg in injected:
-            self.memory.record_conversation(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                role="user",
-                content=injected_msg.content,
-            )
-
         # Trigger async summary if qualifying loop
         if meta.needs_summary:
             self._pending_summaries[msg.session_key] = asyncio.create_task(
@@ -420,6 +411,15 @@ class AgentEngine:
                     messages.append({"role": "user", "content": prefixed})
                     injected.append(pending)
                     logger.info(f"[inject] mid-loop message from {pending.sender_id}")
+
+                    # Record immediately so DailyLog order matches LLM context
+                    if channel and chat_id:
+                        self.memory.record_conversation(
+                            channel=channel,
+                            chat_id=chat_id,
+                            role="user",
+                            content=prefixed,
+                        )
 
             response = await self.provider.chat(
                 messages=messages, tools=self.tools.get_definitions(), model=self.model
