@@ -75,6 +75,7 @@ class AgentEngine:
         restrict_to_workspace: bool = False,
         memory_manager: MemoryManager | None = None,
         summary_model: str = "default",
+        summary_provider: LLMProvider | None = None,
         memory_search: "MemorySearch | None" = None,
         auto_inject_top_k: int = 3,
         history_config: "HistoryConfig | None" = None,
@@ -91,6 +92,7 @@ class AgentEngine:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._summary_model = summary_model
+        self._summary_provider = summary_provider
         self._memory_search = memory_search
         self._auto_inject_top_k = auto_inject_top_k
         self._history_config = history_config or HistoryConfig()
@@ -555,7 +557,8 @@ class AgentEngine:
         try:
             prompt = self._build_summary_prompt(meta, final_content)
 
-            response = await self.provider.chat(
+            provider = self._summary_provider or self.provider
+            response = await provider.chat(
                 messages=[
                     {
                         "role": "system",

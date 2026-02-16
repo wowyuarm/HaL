@@ -161,6 +161,38 @@ def _make_provider(config):
     )
 
 
+def _make_summary_provider(config):
+    """Create a separate LiteLLMProvider for summary model if needed. Returns None if same provider."""
+    from hal.infra.providers.litellm_provider import LiteLLMProvider
+
+    summary_model = config.agents.defaults.summary_model
+    if summary_model == "default":
+        return None
+
+    sp = config.get_provider(summary_model)
+    mp = config.get_provider()
+    # If summary model resolves to the same provider, no need for a separate instance
+    if sp and mp and sp.api_key == mp.api_key and sp.api_base == mp.api_base:
+        return None
+    if not sp or not sp.api_key:
+        return None
+
+    api_base = sp.api_base
+    if not api_base:
+        from hal.infra.providers.registry import find_by_model
+
+        spec = find_by_model(summary_model)
+        if spec and spec.default_api_base:
+            api_base = spec.default_api_base
+
+    return LiteLLMProvider(
+        api_key=sp.api_key,
+        api_base=api_base,
+        default_model=summary_model,
+        extra_headers=sp.extra_headers if sp else None,
+    )
+
+
 def _resolve_embedding_provider(config, ms_cfg) -> dict:
     """Resolve api_key/api_base for embedding from the named provider."""
     result: dict = {}
@@ -281,6 +313,7 @@ def gateway(
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
+        summary_provider=_make_summary_provider(config),
         memory_search=memory_search,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
         history_config=config.agents.defaults.history,
@@ -426,6 +459,7 @@ def agent(
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
+        summary_provider=_make_summary_provider(config),
         memory_search=ms,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
         history_config=config.agents.defaults.history,
