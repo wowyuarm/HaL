@@ -78,6 +78,7 @@ class AgentDefaults(BaseModel):
     temperature: float = 0.7
     max_tool_iterations: int = 20
     summary_model: str = "default"  # Model for post-loop summaries; "default" uses main model
+    subagent_model: str = "default"  # Model for subagents; "default" uses main model
     history: HistoryConfig = Field(default_factory=HistoryConfig)
 
 

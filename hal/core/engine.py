@@ -76,6 +76,8 @@ class AgentEngine:
         memory_manager: MemoryManager | None = None,
         summary_model: str = "default",
         summary_provider: LLMProvider | None = None,
+        subagent_model: str = "default",
+        subagent_provider: LLMProvider | None = None,
         memory_search: "MemorySearch | None" = None,
         auto_inject_top_k: int = 3,
         history_config: "HistoryConfig | None" = None,
@@ -101,10 +103,14 @@ class AgentEngine:
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(workspace, memory_manager=self.memory)
         self.tools = ToolRegistry()
+
+        # Resolve subagent model/provider
+        sa_provider = subagent_provider or provider
+        sa_model = self.model if subagent_model == "default" else subagent_model
         self.subagents = SubagentManager(
-            provider=provider,
+            provider=sa_provider,
             workspace=workspace,
-            model=self.model,
+            model=sa_model,
             web_search_api_key=web_search_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,

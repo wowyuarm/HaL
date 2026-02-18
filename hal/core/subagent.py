@@ -168,13 +168,14 @@ class SubagentManager:
                     }
                     for tc in response.tool_calls
                 ]
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": response.content or "",
-                        "tool_calls": tool_call_dicts,
-                    }
-                )
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": tool_call_dicts,
+                }
+                if response.reasoning_content:
+                    assistant_msg["reasoning_content"] = response.reasoning_content
+                messages.append(assistant_msg)
 
                 for tool_call in response.tool_calls:
                     logger.debug(f"Subagent [{task_id}] executing: {tool_call.name}")

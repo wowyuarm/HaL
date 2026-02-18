@@ -163,15 +163,24 @@ def _make_provider(config):
 
 def _make_summary_provider(config):
     """Create a separate LiteLLMProvider for summary model if needed. Returns None if same provider."""
+    return _make_alternate_provider(config, config.agents.defaults.summary_model)
+
+
+def _make_subagent_provider(config):
+    """Create a separate LiteLLMProvider for subagent model if needed. Returns None if same provider."""
+    return _make_alternate_provider(config, config.agents.defaults.subagent_model)
+
+
+def _make_alternate_provider(config, model_name: str):
+    """Create a separate LiteLLMProvider for an alternate model. Returns None if 'default' or same provider."""
     from hal.infra.providers.litellm_provider import LiteLLMProvider
 
-    summary_model = config.agents.defaults.summary_model
-    if summary_model == "default":
+    if model_name == "default":
         return None
 
-    sp = config.get_provider(summary_model)
+    sp = config.get_provider(model_name)
     mp = config.get_provider()
-    # If summary model resolves to the same provider, no need for a separate instance
+    # If alternate model resolves to the same provider, no need for a separate instance
     if sp and mp and sp.api_key == mp.api_key and sp.api_base == mp.api_base:
         return None
     if not sp or not sp.api_key:
@@ -181,14 +190,14 @@ def _make_summary_provider(config):
     if not api_base:
         from hal.infra.providers.registry import find_by_model
 
-        spec = find_by_model(summary_model)
+        spec = find_by_model(model_name)
         if spec and spec.default_api_base:
             api_base = spec.default_api_base
 
     return LiteLLMProvider(
         api_key=sp.api_key,
         api_base=api_base,
-        default_model=summary_model,
+        default_model=model_name,
         extra_headers=sp.extra_headers if sp else None,
     )
 
@@ -314,6 +323,8 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
         summary_provider=_make_summary_provider(config),
+        subagent_model=config.agents.defaults.subagent_model,
+        subagent_provider=_make_subagent_provider(config),
         memory_search=memory_search,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
         history_config=config.agents.defaults.history,
@@ -460,6 +471,8 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
         summary_provider=_make_summary_provider(config),
+        subagent_model=config.agents.defaults.subagent_model,
+        subagent_provider=_make_subagent_provider(config),
         memory_search=ms,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
         history_config=config.agents.defaults.history,
