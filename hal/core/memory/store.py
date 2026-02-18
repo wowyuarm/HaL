@@ -115,6 +115,11 @@ class VectorStore:
         )
         return result.get("upsert_count", len(chunks)) if isinstance(result, dict) else len(chunks)
 
+    @property
+    def is_ready(self) -> bool:
+        """Whether the store has been initialized and is ready for queries."""
+        return self._client is not None
+
     async def search(
         self, query_embedding: list[float], *, query_text: str = "", top_k: int = 5
     ) -> list[SearchResult]:
@@ -122,7 +127,12 @@ class VectorStore:
 
         Falls back to dense-only search if BM25 produces invalid values
         (known Milvus Lite issue with small collections).
+        Returns empty list if the store has not been initialized yet.
         """
+        if not self.is_ready:
+            logger.debug("VectorStore not yet initialized, skipping search")
+            return []
+
         try:
             raw = await asyncio.to_thread(
                 self._hybrid_search_sync, query_embedding, query_text, top_k
