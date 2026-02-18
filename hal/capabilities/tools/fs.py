@@ -15,7 +15,9 @@ def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
 
 
 class ReadFileTool(Tool):
-    """Tool to read file contents."""
+    """Tool to read file contents with pagination and line numbers."""
+
+    _MAX_LINE_BYTES = 50 * 1024  # 50KB per line
 
     def __init__(self, allowed_dir: Path | None = None):
         self._allowed_dir = allowed_dir
@@ -26,17 +28,31 @@ class ReadFileTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Read the contents of a file at the given path."
+        return (
+            "Read the contents of a file with line numbers. "
+            "Returns up to `limit` lines starting from `offset`. "
+            "If the file has more lines, a hint is appended to continue reading."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
-            "properties": {"path": {"type": "string", "description": "The file path to read"}},
+            "properties": {
+                "path": {"type": "string", "description": "The file path to read"},
+                "offset": {
+                    "type": "integer",
+                    "description": "Line number to start reading from (1-based, default 1)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of lines to return (default 2000)",
+                },
+            },
             "required": ["path"],
         }
 
-    async def execute(self, path: str, **kwargs: Any) -> str:
+    async def execute(self, path: str, offset: int = 1, limit: int = 2000, **kwargs: Any) -> str:
         try:
             file_path = _resolve_path(path, self._allowed_dir)
             if not file_path.exists():
@@ -45,7 +61,41 @@ class ReadFileTool(Tool):
                 return f"Error: Not a file: {path}"
 
             content = file_path.read_text(encoding="utf-8")
-            return content
+            lines = content.split("\n")
+            # Remove trailing empty line from final newline
+            if lines and lines[-1] == "":
+                lines.pop()
+            total = len(lines)
+
+            if total == 0:
+                return "(empty file)"
+
+            offset = max(1, offset)
+            start_idx = offset - 1
+            end_idx = min(start_idx + limit, total)
+
+            output_lines = []
+            for i in range(start_idx, end_idx):
+                line = lines[i]
+                lineno = i + 1
+                if len(line.encode("utf-8", errors="replace")) > self._MAX_LINE_BYTES:
+                    size_kb = len(line.encode("utf-8", errors="replace")) / 1024
+                    output_lines.append(
+                        f"[Line {lineno} is {size_kb:.1f}KB, exceeds 50.0KB limit. "
+                        f"Use exec tool: head -c 51200 {path}]"
+                    )
+                else:
+                    output_lines.append(f"{lineno:>6}\t{line}")
+
+            result = "\n".join(output_lines)
+
+            if end_idx < total:
+                result += (
+                    f"\n\n[Showing lines {offset}-{end_idx} of {total}. "
+                    f"Use offset={end_idx + 1} to continue.]"
+                )
+
+            return result
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -215,6 +265,14 @@ class FsTool(Tool):
                     "description": "The file operation to perform",
                 },
                 "path": {"type": "string", "description": "File or directory path"},
+                "offset": {
+                    "type": "integer",
+                    "description": "Line to start reading from, 1-based (read action, default 1)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max lines to return (read action, default 2000)",
+                },
                 "content": {"type": "string", "description": "Content for write action"},
                 "old_text": {"type": "string", "description": "Text to find (edit action)"},
                 "new_text": {"type": "string", "description": "Replacement text (edit action)"},
@@ -224,7 +282,9 @@ class FsTool(Tool):
 
     async def execute(self, action: str, path: str, **kwargs: Any) -> str:
         if action == "read":
-            return await self._read.execute(path=path)
+            offset = kwargs.get("offset", 1)
+            limit = kwargs.get("limit", 2000)
+            return await self._read.execute(path=path, offset=offset, limit=limit)
         elif action == "write":
             content = kwargs.get("content")
             if content is None:

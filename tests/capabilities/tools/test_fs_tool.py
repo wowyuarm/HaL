@@ -36,6 +36,8 @@ class TestFsToolProperties:
         props = params["properties"]
         assert "action" in props
         assert "path" in props
+        assert "offset" in props
+        assert "limit" in props
         assert "content" in props
         assert "old_text" in props
         assert "new_text" in props
@@ -49,12 +51,65 @@ class TestFsToolProperties:
 
 
 class TestFsToolRead:
-    async def test_read_file(self, unrestricted_fs_tool, tmp_path):
+    async def test_read_small_file_with_line_numbers(self, unrestricted_fs_tool, tmp_path):
         target = tmp_path / "hello.txt"
-        target.write_text("hello world", encoding="utf-8")
+        target.write_text("hello\nworld", encoding="utf-8")
 
         result = await unrestricted_fs_tool.execute(action="read", path=str(target))
-        assert result == "hello world"
+        assert "1\thello" in result
+        assert "2\tworld" in result
+        # No pagination hint for small files
+        assert "Use offset=" not in result
+
+    async def test_read_large_file_pagination(self, unrestricted_fs_tool, tmp_path):
+        target = tmp_path / "big.txt"
+        lines = [f"line {i}" for i in range(1, 3001)]
+        target.write_text("\n".join(lines), encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(action="read", path=str(target))
+        assert "1\tline 1" in result
+        assert "2000\tline 2000" in result
+        assert "line 2001" not in result
+        assert "[Showing lines 1-2000 of 3000. Use offset=2001 to continue.]" in result
+
+    async def test_read_with_offset(self, unrestricted_fs_tool, tmp_path):
+        target = tmp_path / "big.txt"
+        lines = [f"line {i}" for i in range(1, 3001)]
+        target.write_text("\n".join(lines), encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(action="read", path=str(target), offset=2001)
+        assert "2001\tline 2001" in result
+        assert "3000\tline 3000" in result
+        assert "Use offset=" not in result  # last page, no more hint
+
+    async def test_read_with_custom_limit(self, unrestricted_fs_tool, tmp_path):
+        target = tmp_path / "medium.txt"
+        lines = [f"line {i}" for i in range(1, 101)]
+        target.write_text("\n".join(lines), encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(action="read", path=str(target), limit=10)
+        assert "1\tline 1" in result
+        assert "10\tline 10" in result
+        assert "line 11" not in result
+        assert "[Showing lines 1-10 of 100. Use offset=11 to continue.]" in result
+
+    async def test_read_oversized_line(self, unrestricted_fs_tool, tmp_path):
+        target = tmp_path / "huge_line.txt"
+        huge = "x" * (60 * 1024)  # 60KB single line
+        target.write_text(huge, encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(action="read", path=str(target))
+        assert "exceeds 50.0KB limit" in result
+        assert "Use exec tool" in result
+        # The huge content itself should NOT be in the result
+        assert huge not in result
+
+    async def test_read_empty_file(self, unrestricted_fs_tool, tmp_path):
+        target = tmp_path / "empty.txt"
+        target.write_text("", encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(action="read", path=str(target))
+        assert result == "(empty file)"
 
 
 class TestFsToolWrite:
@@ -154,4 +209,4 @@ class TestFsToolAllowedDir:
         target.write_text("allowed", encoding="utf-8")
 
         result = await fs_tool.execute(action="read", path=str(target))
-        assert result == "allowed"
+        assert "allowed" in result
