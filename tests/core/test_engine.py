@@ -261,6 +261,7 @@ class TestDispatch:
             origin="cron",
             metadata={
                 "cron_job_id": "abc123",
+                "cron_job_name": "update-check",
                 "deliver": True,
                 "deliver_channel": "telegram",
                 "deliver_chat_id": "999",
@@ -273,7 +274,8 @@ class TestDispatch:
         assert result is not None
         assert result.channel == "telegram"
         assert result.chat_id == "999"
-        assert result.content == "Update found!"
+        assert "[⏰ cron: update-check]" in result.content
+        assert "Update found!" in result.content
 
     async def test_dispatch_heartbeat_routes_to_operator(self, engine):
         """Heartbeat-origin messages should route to process_operator, return None."""

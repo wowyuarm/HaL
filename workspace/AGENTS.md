@@ -1,14 +1,16 @@
 # Agent Instructions
 
-## Reminders
+## Scheduled Tasks (Cron)
 
-When the user asks for a reminder at a specific time, use `exec` to run:
-```
-hal cron add --name "reminder" --message "Your message" --at "YYYY-MM-DDTHH:MM:SS" --deliver --to "USER_ID" --channel "CHANNEL"
-```
-Get USER_ID and CHANNEL from the current session context (e.g., `8281248569` and `telegram`).
+Use the `cron` tool (not `exec`) to schedule recurring tasks. The `message`
+parameter becomes your **operator-mode prompt** — write it as an actionable
+instruction, not static text.
 
-**Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
+- **Do**: `message="Check npm for new @anthropic-ai/claude-code releases and report only if a newer version exists."`
+- **Don't**: `message="Claude Code has an update!"` (static text, nothing to execute)
+
+Each time the job fires, you wake up in operator mode, execute the instruction
+with full tool access, and the result is delivered to the user if `deliver=true`.
 
 ## Subagent Delegation
 

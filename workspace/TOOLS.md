@@ -56,23 +56,18 @@ spawn(task="Long analysis", label="analysis", background=true)
 - Default (sync): awaits completion, result returned directly
 - `background=true`: fire-and-forget, result announced later via system message
 
-## Cron — Scheduled Tasks
+## cron — Scheduled Tasks
 
-Use `exec` to manage scheduled tasks via the `hal cron` CLI:
+Schedule recurring tasks via the `cron` tool. The `message` becomes your
+operator-mode prompt — write actionable instructions, not static text.
 
-```bash
-# Recurring
-hal cron add --name "morning" --message "Good morning!" --cron "0 9 * * *"
+```
+cron(action="add",
+     message="Check GitHub releases for X and report if newer than last known version",
+     cron_expr="0 9 * * *")
 
-# One-time
-hal cron add --name "meeting" --message "Meeting now!" --at "2025-01-31T15:00:00"
-
-# With delivery to a channel
-hal cron add --name "reminder" --message "Check inbox" --deliver --to "USER_ID" --channel "telegram"
-
-# Manage
-hal cron list
-hal cron remove <job_id>
+cron(action="list")
+cron(action="remove", job_id="abc123")
 ```
 
 ## recall — Memory Search

@@ -1,4 +1,4 @@
-"""Cron tool for scheduling reminders and tasks."""
+"""Cron tool for scheduling tasks and reminders."""
 
 from typing import Any
 
@@ -26,7 +26,11 @@ class CronTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return (
+            "Schedule recurring tasks or reminders. Actions: add, list, remove. "
+            "The message becomes the agent's prompt in operator mode — "
+            "write it as an actionable instruction, not static text."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -38,7 +42,14 @@ class CronTool(Tool):
                     "enum": ["add", "list", "remove"],
                     "description": "Action to perform",
                 },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
+                "message": {
+                    "type": "string",
+                    "description": (
+                        "Instruction for the agent to execute each time the job fires "
+                        "(e.g. 'Check GitHub releases for X and report if newer than "
+                        "last known version'). This becomes the operator-mode prompt."
+                    ),
+                },
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",

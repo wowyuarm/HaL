@@ -200,10 +200,12 @@ class AgentEngine:
             origin="cron",
         )
         if msg.metadata.get("deliver"):
+            job_name = msg.metadata.get("cron_job_name", msg.metadata.get("cron_job_id", ""))
+            content = f"[⏰ cron: {job_name}]\n{response}"
             return OutboundMessage(
                 channel=msg.metadata["deliver_channel"],
                 chat_id=msg.metadata["deliver_chat_id"],
-                content=response,
+                content=content,
             )
         return None
 

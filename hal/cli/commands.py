@@ -338,6 +338,7 @@ def gateway(
 
         metadata: dict[str, Any] = {
             "cron_job_id": job.id,
+            "cron_job_name": job.name,
             "deliver": job.payload.deliver and bool(job.payload.to),
         }
         if metadata["deliver"]:

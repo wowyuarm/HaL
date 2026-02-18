@@ -1,30 +1,43 @@
 ---
 name: cron
-description: Schedule reminders and recurring tasks.
+description: Schedule recurring tasks via the cron tool.
 ---
 
-# Cron
+# Cron — Scheduled Tasks
 
-Use the `cron` tool to schedule reminders or recurring tasks.
+Use the `cron` tool to schedule tasks that the agent executes autonomously.
 
-## Two Modes
+## How It Works
 
-1. **Reminder** - message is sent directly to user
-2. **Task** - message is a task description, agent executes and sends result
+The `message` you provide becomes the **agent's prompt in operator mode**.
+Each time the job fires, the agent wakes up, receives your message as its
+instruction, executes it (with full tool access), and optionally delivers
+the result to the user.
+
+**Key rule**: write `message` as an actionable instruction, not static text.
 
 ## Examples
 
-Fixed reminder:
+Correct — agent checks and reports only when relevant:
+```
+cron(action="add",
+     message="Check if @anthropic-ai/claude-code has a new release. Compare npm show version with the last known version. Only report if there is a newer version.",
+     cron_expr="0 9 * * *")
+```
+
+Correct — agent performs a recurring task:
+```
+cron(action="add",
+     message="Fetch the top 3 HackerNews stories and summarize them.",
+     every_seconds=3600)
+```
+
+Wrong — static text, agent has nothing to execute:
 ```
 cron(action="add", message="Time to take a break!", every_seconds=1200)
 ```
 
-Dynamic task (agent executes each time):
-```
-cron(action="add", message="Check HKUDS/hal GitHub stars and report", every_seconds=600)
-```
-
-List/remove:
+List / remove:
 ```
 cron(action="list")
 cron(action="remove", job_id="abc123")
