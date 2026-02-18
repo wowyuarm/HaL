@@ -24,6 +24,7 @@ class LogEntry(BaseModel):
     tool_name: str | None = None  # Only for role="tool"
     tool_result: str | None = None  # Only for role="tool"
     entry_type: str = "message"  # "message" | "summary"
+    origin: str = "user"  # "user" | "cron" | "heartbeat"
 
 
 class DailyLog:
@@ -77,6 +78,7 @@ class DailyLog:
         tool_name: str | None = None,
         tool_result: str | None = None,
         entry_type: str = "message",
+        origin: str = "user",
     ) -> LogEntry:
         """
         Append a new entry to the daily log.
@@ -102,6 +104,7 @@ class DailyLog:
             tool_name=tool_name,
             tool_result=tool_result,
             entry_type=entry_type,
+            origin=origin,
         )
 
         log_file = self._get_today_file()

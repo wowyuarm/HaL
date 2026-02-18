@@ -49,16 +49,21 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
 class CronService:
     """Service for managing and executing scheduled jobs."""
 
+    # Exponential backoff intervals (seconds) for consecutive failures
+    _BACKOFF_S = [30, 60, 300, 900, 3600]
+
     def __init__(
         self,
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        max_concurrent_runs: int = 1,
     ):
         self.store_path = store_path
         self.on_job = on_job  # Callback to execute job, returns response text
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._semaphore = asyncio.Semaphore(max_concurrent_runs)
 
     def _load_store(self) -> CronStore:
         """Load jobs from disk."""
@@ -94,6 +99,7 @@ class CronService:
                                 last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
                                 last_status=j.get("state", {}).get("lastStatus"),
                                 last_error=j.get("state", {}).get("lastError"),
+                                consecutive_errors=j.get("state", {}).get("consecutiveErrors", 0),
                             ),
                             created_at_ms=j.get("createdAtMs", 0),
                             updated_at_ms=j.get("updatedAtMs", 0),
@@ -142,6 +148,7 @@ class CronService:
                         "lastRunAtMs": j.state.last_run_at_ms,
                         "lastStatus": j.state.last_status,
                         "lastError": j.state.last_error,
+                        "consecutiveErrors": j.state.consecutive_errors,
                     },
                     "createdAtMs": j.created_at_ms,
                     "updatedAtMs": j.updated_at_ms,
@@ -227,36 +234,47 @@ class CronService:
         self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
-        """Execute a single job."""
-        start_ms = _now_ms()
-        logger.info(f"Cron: executing job '{job.name}' ({job.id})")
+        """Execute a single job with concurrency control and backoff."""
+        async with self._semaphore:
+            start_ms = _now_ms()
+            logger.info(f"Cron: executing job '{job.name}' ({job.id})")
 
-        try:
-            if self.on_job:
-                await self.on_job(job)
+            try:
+                if self.on_job:
+                    await self.on_job(job)
 
-            job.state.last_status = "ok"
-            job.state.last_error = None
-            logger.info(f"Cron: job '{job.name}' completed")
+                job.state.last_status = "ok"
+                job.state.last_error = None
+                job.state.consecutive_errors = 0
+                logger.info(f"Cron: job '{job.name}' dispatched")
 
-        except Exception as e:
-            job.state.last_status = "error"
-            job.state.last_error = str(e)
-            logger.error(f"Cron: job '{job.name}' failed: {e}")
+            except Exception as e:
+                job.state.last_status = "error"
+                job.state.last_error = str(e)
+                job.state.consecutive_errors += 1
+                logger.error(
+                    f"Cron: job '{job.name}' failed (attempt {job.state.consecutive_errors}): {e}"
+                )
 
-        job.state.last_run_at_ms = start_ms
-        job.updated_at_ms = _now_ms()
+            job.state.last_run_at_ms = start_ms
+            job.updated_at_ms = _now_ms()
 
-        # Handle one-shot jobs
-        if job.schedule.kind == "at":
-            if job.delete_after_run:
-                self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+            # Handle one-shot jobs
+            if job.schedule.kind == "at":
+                if job.delete_after_run:
+                    self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+                else:
+                    job.enabled = False
+                    job.state.next_run_at_ms = None
+            elif job.state.last_status == "error":
+                # Apply exponential backoff on failure
+                idx = min(job.state.consecutive_errors - 1, len(self._BACKOFF_S) - 1)
+                backoff_s = self._BACKOFF_S[idx]
+                job.state.next_run_at_ms = _now_ms() + backoff_s * 1000
+                logger.info(f"Cron: backoff {backoff_s}s for '{job.name}'")
             else:
-                job.enabled = False
-                job.state.next_run_at_ms = None
-        else:
-            # Compute next run
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+                # Normal next run
+                job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
     # ========== Public API ==========
 

@@ -228,8 +228,75 @@ class TestDispatch:
         await engine._dispatch(msg)
         engine.process_collab.assert_awaited_once_with(msg)
 
+    async def test_dispatch_cron_routes_to_operator(self, engine):
+        """Cron-origin messages should route to process_operator, not process_collab."""
+        msg = InboundMessage(
+            channel="cron",
+            sender_id="cron",
+            chat_id="abc123",
+            content="check updates",
+            origin="cron",
+            metadata={"cron_job_id": "abc123", "deliver": False},
+        )
+        engine.process_operator = AsyncMock(return_value="done")  # type: ignore[method-assign]
 
-class TestProcessCollab:
+        result = await engine._dispatch(msg)
+
+        engine.process_operator.assert_awaited_once_with(
+            prompt="check updates",
+            channel="cron",
+            chat_id="abc123",
+            session_key="cron:abc123",
+            origin="cron",
+        )
+        assert result is None  # deliver=False → no outbound
+
+    async def test_dispatch_cron_with_deliver(self, engine):
+        """Cron with deliver=True should return OutboundMessage to target channel."""
+        msg = InboundMessage(
+            channel="cron",
+            sender_id="cron",
+            chat_id="abc123",
+            content="check updates",
+            origin="cron",
+            metadata={
+                "cron_job_id": "abc123",
+                "deliver": True,
+                "deliver_channel": "telegram",
+                "deliver_chat_id": "999",
+            },
+        )
+        engine.process_operator = AsyncMock(return_value="Update found!")  # type: ignore[method-assign]
+
+        result = await engine._dispatch(msg)
+
+        assert result is not None
+        assert result.channel == "telegram"
+        assert result.chat_id == "999"
+        assert result.content == "Update found!"
+
+    async def test_dispatch_heartbeat_routes_to_operator(self, engine):
+        """Heartbeat-origin messages should route to process_operator, return None."""
+        msg = InboundMessage(
+            channel="heartbeat",
+            sender_id="heartbeat",
+            chat_id="system",
+            content="check tasks",
+            origin="heartbeat",
+        )
+        engine.process_operator = AsyncMock(return_value="HEARTBEAT_OK")  # type: ignore[method-assign]
+
+        result = await engine._dispatch(msg)
+
+        engine.process_operator.assert_awaited_once_with(
+            prompt="check tasks",
+            channel="heartbeat",
+            chat_id="system",
+            session_key="heartbeat:system",
+            origin="heartbeat",
+        )
+        assert result is None
+
     async def test_defaults_final_content_when_execute_loop_returns_none(self, engine):
         engine._execute_loop = AsyncMock(return_value=(None, LoopMetadata(tools_used=["fs"]), []))  # type: ignore[method-assign]
 

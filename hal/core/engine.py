@@ -184,7 +184,39 @@ class AgentEngine:
 
     async def _dispatch(self, msg: InboundMessage) -> OutboundMessage | None:
         """Route a message to the appropriate execution mode."""
+        if msg.origin == "cron":
+            return await self._dispatch_cron(msg)
+        if msg.origin == "heartbeat":
+            return await self._dispatch_heartbeat(msg)
         return await self.process_collab(msg)
+
+    async def _dispatch_cron(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Handle a cron-origin message: run in OPERATOR mode, optionally deliver."""
+        response = await self.process_operator(
+            prompt=msg.content,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            session_key=msg.session_key,
+            origin="cron",
+        )
+        if msg.metadata.get("deliver"):
+            return OutboundMessage(
+                channel=msg.metadata["deliver_channel"],
+                chat_id=msg.metadata["deliver_chat_id"],
+                content=response,
+            )
+        return None
+
+    async def _dispatch_heartbeat(self, msg: InboundMessage) -> OutboundMessage | None:
+        """Handle a heartbeat-origin message: run in OPERATOR mode, no delivery."""
+        await self.process_operator(
+            prompt=msg.content,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            session_key=msg.session_key,
+            origin="heartbeat",
+        )
+        return None
 
     # ------------------------------------------------------------------
     # Execution modes
@@ -283,6 +315,7 @@ class AgentEngine:
         channel: str = "cli",
         chat_id: str = "direct",
         session_key: str | None = None,
+        origin: str = "user",
     ) -> str:
         """
         OPERATOR mode: scheduled monitoring.
@@ -300,6 +333,7 @@ class AgentEngine:
             chat_id=chat_id,
             role="user",
             content=prompt,
+            origin=origin,
         )
 
         self._update_tool_contexts(channel, chat_id)
@@ -342,6 +376,7 @@ class AgentEngine:
             chat_id=chat_id,
             role="assistant",
             content=final_content,
+            origin=origin,
         )
 
         # Trigger async summary if qualifying loop (no barrier needed for operator)

@@ -62,6 +62,7 @@ class MemoryManager:
         tool_name: str | None = None,
         tool_result: str | None = None,
         entry_type: str = "message",
+        origin: str = "user",
     ) -> LogEntry:
         """
         Record a conversation entry in the daily log.
@@ -86,6 +87,7 @@ class MemoryManager:
             tool_name=tool_name,
             tool_result=tool_result,
             entry_type=entry_type,
+            origin=origin,
         )
 
     def get_conversation_history(

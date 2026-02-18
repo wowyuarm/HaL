@@ -46,7 +46,7 @@ class HeartbeatService:
     def __init__(
         self,
         workspace: Path,
-        on_heartbeat: Callable[[str], Coroutine[Any, Any, str]] | None = None,
+        on_heartbeat: Callable[[str], Coroutine[Any, Any, str | None]] | None = None,
         interval_s: int = DEFAULT_HEARTBEAT_INTERVAL_S,
         enabled: bool = True,
     ):
@@ -112,16 +112,10 @@ class HeartbeatService:
 
         if self.on_heartbeat:
             try:
-                response = await self.on_heartbeat(HEARTBEAT_PROMPT)
-
-                # Check if agent said "nothing to do"
-                if HEARTBEAT_OK_TOKEN.replace("_", "") in response.upper().replace("_", ""):
-                    logger.info("Heartbeat: OK (no action needed)")
-                else:
-                    logger.info("Heartbeat: completed task")
-
+                await self.on_heartbeat(HEARTBEAT_PROMPT)
+                logger.info("Heartbeat: dispatched to agent")
             except Exception as e:
-                logger.error(f"Heartbeat execution failed: {e}")
+                logger.error(f"Heartbeat dispatch failed: {e}")
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""

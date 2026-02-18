@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -332,31 +333,46 @@ def gateway(
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
-        response = await agent.process_direct(
-            job.payload.message,
-            session_key=f"cron:{job.id}",
-            channel=job.payload.channel or "cli",
-            chat_id=job.payload.to or "direct",
-        )
-        if job.payload.deliver and job.payload.to:
-            from hal.bus.events import OutboundMessage
+        """Publish a cron job to the MessageBus for processing."""
+        from hal.bus.events import InboundMessage
 
-            await bus.publish_outbound(
-                OutboundMessage(
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
-                    content=response or "",
-                )
+        metadata: dict[str, Any] = {
+            "cron_job_id": job.id,
+            "deliver": job.payload.deliver and bool(job.payload.to),
+        }
+        if metadata["deliver"]:
+            metadata["deliver_channel"] = job.payload.channel or "cli"
+            metadata["deliver_chat_id"] = job.payload.to
+
+        await bus.publish_inbound(
+            InboundMessage(
+                channel="cron",
+                sender_id="cron",
+                chat_id=job.id,
+                content=job.payload.message,
+                origin="cron",
+                metadata=metadata,
             )
-        return response
+        )
+        return None
 
     cron.on_job = on_cron_job
 
     # Create heartbeat service
-    async def on_heartbeat(prompt: str) -> str:
-        """Execute heartbeat through the agent."""
-        return await agent.process_direct(prompt, session_key="heartbeat")
+    async def on_heartbeat(prompt: str) -> str | None:
+        """Publish heartbeat to the MessageBus for processing."""
+        from hal.bus.events import InboundMessage
+
+        await bus.publish_inbound(
+            InboundMessage(
+                channel="heartbeat",
+                sender_id="heartbeat",
+                chat_id="system",
+                content=prompt,
+                origin="heartbeat",
+            )
+        )
+        return None
 
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,

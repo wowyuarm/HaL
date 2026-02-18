@@ -94,6 +94,80 @@ async def test_cron_service_execute_job_error_sets_last_error(
 
     assert job.state.last_status == "error"
     assert "boom" in (job.state.last_error or "")
+    assert job.state.consecutive_errors == 1
+
+
+@pytest.mark.asyncio
+async def test_cron_service_backoff_on_consecutive_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "jobs.json"
+    monkeypatch.setattr("hal.capabilities.scheduling.cron_service.time.time", lambda: 1000.0)
+
+    service = CronService(store_path=store)
+    service.on_job = AsyncMock(side_effect=RuntimeError("fail"))
+
+    job = service.add_job(
+        name="backoff",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hi",
+    )
+
+    monkeypatch.setattr(service, "_arm_timer", lambda: None)
+
+    # First failure: 30s backoff
+    job.state.next_run_at_ms = _now_ms() - 1
+    await service._on_timer()
+    assert job.state.consecutive_errors == 1
+    expected_next = _now_ms() + 30 * 1000
+    assert job.state.next_run_at_ms == expected_next
+
+    # Second failure: 60s backoff
+    job.state.next_run_at_ms = _now_ms() - 1
+    await service._on_timer()
+    assert job.state.consecutive_errors == 2
+    expected_next = _now_ms() + 60 * 1000
+    assert job.state.next_run_at_ms == expected_next
+
+
+@pytest.mark.asyncio
+async def test_cron_service_backoff_resets_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "jobs.json"
+    monkeypatch.setattr("hal.capabilities.scheduling.cron_service.time.time", lambda: 1000.0)
+
+    call_count = 0
+
+    async def fail_then_succeed(job):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise RuntimeError("fail")
+
+    service = CronService(store_path=store)
+    service.on_job = fail_then_succeed
+
+    job = service.add_job(
+        name="recover",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hi",
+    )
+
+    monkeypatch.setattr(service, "_arm_timer", lambda: None)
+
+    # Two failures
+    job.state.next_run_at_ms = _now_ms() - 1
+    await service._on_timer()
+    job.state.next_run_at_ms = _now_ms() - 1
+    await service._on_timer()
+    assert job.state.consecutive_errors == 2
+
+    # Third call succeeds
+    job.state.next_run_at_ms = _now_ms() - 1
+    await service._on_timer()
+    assert job.state.consecutive_errors == 0
+    assert job.state.last_status == "ok"
 
 
 @pytest.mark.asyncio
@@ -218,11 +292,11 @@ async def test_trigger_now_returns_response(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
 
-    called = AsyncMock(return_value="ok")
+    called = AsyncMock(return_value=None)
     hb = HeartbeatService(workspace=ws, on_heartbeat=called)
 
     result = await hb.trigger_now()
-    assert result == "ok"
+    assert result is None
 
 
 @pytest.mark.asyncio
