@@ -9,8 +9,11 @@ from hal.capabilities.tools.base import Tool
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
     """Resolve path and optionally enforce directory restriction."""
     resolved = Path(path).expanduser().resolve()
-    if allowed_dir and not str(resolved).startswith(str(allowed_dir.resolve())):
-        raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+    if allowed_dir:
+        try:
+            resolved.relative_to(allowed_dir.resolve())
+        except ValueError:
+            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
 
 
@@ -300,3 +303,10 @@ class FsTool(Tool):
             return await self._list.execute(path=path)
         else:
             return f"Error: Unknown action '{action}'. Use one of: read, write, edit, list."
+
+    def get_side_effects(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        action = params.get("action", "")
+        if action in ("write", "edit"):
+            path = params.get("path", "")
+            return {"files_modified": [path]} if path else {}
+        return None

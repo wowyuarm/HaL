@@ -30,10 +30,6 @@ if TYPE_CHECKING:
     from hal.infra.config.schema import ExecToolConfig, HistoryConfig
 
 
-SIDE_EFFECT_TOOLS = {"fs", "exec"}
-FS_SIDE_EFFECT_ACTIONS = {"write", "edit"}
-
-
 @dataclass
 class LoopMetadata:
     """Metadata collected during a tool-calling loop execution."""
@@ -493,19 +489,18 @@ class AgentEngine:
                     if tool_call.name not in meta.tools_used:
                         meta.tools_used.append(tool_call.name)
 
-                    # Track side effects
-                    if tool_call.name == "fs":
-                        action = tool_call.arguments.get("action", "")
-                        if action in FS_SIDE_EFFECT_ACTIONS:
+                    # Track side effects via tool interface
+                    tool_obj = self.tools.get(tool_call.name)
+                    if tool_obj:
+                        effects = tool_obj.get_side_effects(tool_call.arguments)
+                        if effects is not None:
                             meta.has_side_effects = True
-                            path = tool_call.arguments.get("path", "")
-                            if path and path not in meta.files_modified:
-                                meta.files_modified.append(path)
-                    elif tool_call.name == "exec":
-                        meta.has_side_effects = True
-                        cmd = tool_call.arguments.get("command", "")
-                        if cmd:
-                            meta.commands_run.append(cmd[:200])
+                            for path in effects.get("files_modified", []):
+                                if path and path not in meta.files_modified:
+                                    meta.files_modified.append(path)
+                            for cmd in effects.get("commands_run", []):
+                                if cmd:
+                                    meta.commands_run.append(cmd)
 
                 results = await asyncio.gather(
                     *(self.tools.execute(tc.name, tc.arguments) for tc in response.tool_calls)

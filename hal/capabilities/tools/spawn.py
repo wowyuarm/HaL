@@ -91,8 +91,6 @@ class SpawnTool(Tool):
             return await self._manager.spawn_background(
                 task=task,
                 label=label,
-                origin_channel=self._origin_channel,
-                origin_chat_id=self._origin_chat_id,
             )
 
         display_label = label or task[:40]

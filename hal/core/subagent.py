@@ -82,8 +82,6 @@ class SubagentManager:
         self,
         task: str,
         label: str | None = None,
-        origin_channel: str = "cli",
-        origin_chat_id: str = "direct",
     ) -> str:
         """
         Spawn a subagent in the background (parallel execution).

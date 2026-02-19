@@ -52,6 +52,16 @@ class Tool(ABC):
         """
         pass
 
+    def get_side_effects(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """Return side-effect metadata for tracking, or None if the call is read-only.
+
+        Override in tools that modify state. The returned dict is merged into
+        LoopMetadata by the engine. Recognized keys:
+        - ``files_modified``: list[str]
+        - ``commands_run``: list[str]
+        """
+        return None
+
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         """Validate tool parameters against JSON schema. Returns error list (empty if valid)."""
         schema = self.parameters or {}

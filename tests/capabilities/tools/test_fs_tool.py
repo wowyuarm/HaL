@@ -210,3 +210,20 @@ class TestFsToolAllowedDir:
 
         result = await fs_tool.execute(action="read", path=str(target))
         assert "allowed" in result
+
+    async def test_sibling_path_blocked(self, tmp_path):
+        """Sibling directory with shared prefix must be rejected."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        evil = tmp_path / "workspace-evil"
+        evil.mkdir()
+        (evil / "secret.txt").write_text("stolen", encoding="utf-8")
+
+        tool = FsTool(allowed_dir=workspace)
+        result = await tool.execute(action="read", path=str(evil / "secret.txt"))
+        assert "Error" in result
+
+    async def test_parent_traversal_blocked(self, fs_tool, tmp_path):
+        """Path traversal via .. must be rejected."""
+        result = await fs_tool.execute(action="read", path=str(tmp_path / "subdir" / ".." / ".." / "etc" / "passwd"))
+        assert "Error" in result

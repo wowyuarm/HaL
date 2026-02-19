@@ -83,7 +83,6 @@ class ContextBuilder:
 
     def build_system_prompt(
         self,
-        skill_names: list[str] | None = None,
         mode: ExecutionMode = ExecutionMode.COLLAB,
     ) -> str:
         """Build the system prompt from layered context.
@@ -118,7 +117,6 @@ class ContextBuilder:
         self,
         history: list[dict[str, Any]],
         current_message: str,
-        skill_names: list[str] | None = None,
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
@@ -138,7 +136,7 @@ class ContextBuilder:
         messages: list[dict[str, Any]] = []
 
         # Layers 0-3: stable system prompt (no per-request dynamic content)
-        system_prompt = self.build_system_prompt(skill_names, mode)
+        system_prompt = self.build_system_prompt(mode)
         messages.append({"role": "system", "content": system_prompt})
 
         # Layer 4: conversation history

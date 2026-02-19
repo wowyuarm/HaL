@@ -148,3 +148,7 @@ class ExecTool(Tool):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
+
+    def get_side_effects(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        cmd = params.get("command", "")
+        return {"commands_run": [cmd[:200]]} if cmd else {}
