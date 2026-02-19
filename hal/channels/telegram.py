@@ -190,6 +190,37 @@ class TelegramChannel(BaseChannel):
             await self._app.shutdown()
             self._app = None
 
+    def _split_telegram_message(self, text: str, max_length: int = 4000) -> list[str]:
+        """
+        将长文本拆分为多个 Telegram 消息块。
+
+        策略（仿照 PR #694）：
+        1. 优先在换行符处拆分
+        2. 次选在空格处拆分
+        3. 如果没有好的分割点，强制在 max_length 处拆分
+        """
+        if len(text) <= max_length:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+
+        while len(remaining) > max_length:
+            split_pos = remaining.rfind("\n", 0, max_length + 1)
+            if split_pos <= 0:
+                split_pos = remaining.rfind(" ", 0, max_length + 1)
+            if split_pos <= 0:
+                split_pos = max_length
+
+            chunks.append(remaining[:split_pos])
+            remaining = remaining[split_pos:]
+            remaining = remaining.lstrip("\n ")
+
+        if remaining:
+            chunks.append(remaining)
+
+        return chunks
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
@@ -200,20 +231,22 @@ class TelegramChannel(BaseChannel):
         self._stop_typing(msg.chat_id)
 
         try:
-            # chat_id should be the Telegram chat ID (integer)
             chat_id = int(msg.chat_id)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(msg.content)
-            await self._app.bot.send_message(chat_id=chat_id, text=html_content, parse_mode="HTML")
         except ValueError:
             logger.error(f"Invalid chat_id: {msg.chat_id}")
-        except Exception as e:
-            # Fallback to plain text if HTML parsing fails
-            logger.warning(f"HTML parse failed, falling back to plain text: {e}")
+            return
+
+        # Split markdown first, then convert each chunk to HTML to avoid breaking tags.
+        for chunk in self._split_telegram_message(msg.content):
             try:
-                await self._app.bot.send_message(chat_id=int(msg.chat_id), text=msg.content)
-            except Exception as e2:
-                logger.error(f"Error sending Telegram message: {e2}")
+                html_chunk = _markdown_to_telegram_html(chunk)
+                await self._app.bot.send_message(chat_id=chat_id, text=html_chunk, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"HTML parse failed for one chunk, falling back to plain text: {e}")
+                try:
+                    await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+                except Exception as e2:
+                    logger.error(f"Error sending Telegram message chunk: {e2}")
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

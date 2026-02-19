@@ -12,6 +12,34 @@ from hal.channels.telegram import TelegramChannel, _markdown_to_telegram_html
 from hal.infra.config.schema import TelegramConfig
 
 
+
+def test_split_telegram_message_no_split() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    text = "hello"
+    assert ch._split_telegram_message(text) == [text]
+
+
+def test_split_telegram_message_long_text() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    text = "a" * 9001
+    chunks = ch._split_telegram_message(text, max_length=4000)
+
+    assert len(chunks) == 3
+    assert all(len(c) <= 4000 for c in chunks)
+    assert "".join(chunks) == text
+
+
+def test_split_telegram_message_prefers_newline_then_space() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+
+    text_with_newline = "a" * 50 + "\n" + "b" * 50
+    chunks_newline = ch._split_telegram_message(text_with_newline, max_length=60)
+    assert chunks_newline == ["a" * 50, "b" * 50]
+
+    text_with_space = "a" * 50 + " " + "b" * 50
+    chunks_space = ch._split_telegram_message(text_with_space, max_length=60)
+    assert chunks_space == ["a" * 50, "b" * 50]
+
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     md = (
         "# Title\n"
@@ -81,17 +109,19 @@ async def test_send_invalid_chat_id_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_falls_back_to_plain_text_on_html_error() -> None:
+async def test_send_falls_back_to_plain_text_on_single_chunk_html_error() -> None:
     class DummyBot:
         def __init__(self):
             self.sent: list[tuple[int, str, str | None]] = []
+            self.html_calls = 0
 
         async def send_message(
             self, chat_id: int, text: str, parse_mode: str | None = None
         ) -> None:
-            # Simulate Telegram rejecting HTML
             if parse_mode == "HTML":
-                raise RuntimeError("bad html")
+                self.html_calls += 1
+                if self.html_calls == 1:
+                    raise RuntimeError("bad html")
             self.sent.append((chat_id, text, parse_mode))
 
     class DummyApp:
@@ -104,8 +134,46 @@ async def test_send_falls_back_to_plain_text_on_html_error() -> None:
     msg = OutboundMessage(channel="telegram", chat_id="123", content="**hi**")
     await ch.send(msg)
 
-    # First attempt raised, second attempt should succeed without parse_mode.
     assert ch._app.bot.sent == [(123, "**hi**", None)]
+
+
+@pytest.mark.asyncio
+async def test_send_multiple_chunks_calls_send_message_multiple_times() -> None:
+    class DummyBot:
+        def __init__(self):
+            self.sent: list[tuple[int, str, str | None]] = []
+
+        async def send_message(
+            self, chat_id: int, text: str, parse_mode: str | None = None
+        ) -> None:
+            self.sent.append((chat_id, text, parse_mode))
+
+    class DummyApp:
+        def __init__(self):
+            self.bot = DummyBot()
+
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    ch._app = DummyApp()  # type: ignore[attr-defined]
+
+    msg = OutboundMessage(channel="telegram", chat_id="123", content=("a" * 4100))
+    await ch.send(msg)
+
+    assert len(ch._app.bot.sent) == 2
+    assert all(item[2] == "HTML" for item in ch._app.bot.sent)
+
+
+def test_split_then_html_keeps_tags_complete_per_chunk() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+
+    md = "**bold** " * 700
+    chunks = ch._split_telegram_message(md, max_length=4000)
+    html_chunks = [_markdown_to_telegram_html(chunk) for chunk in chunks]
+
+    assert len(html_chunks) >= 2
+    for html in html_chunks:
+        assert html.count("<b>") == html.count("</b>")
+        assert html.count("<i>") == html.count("</i>")
+        assert html.count("<s>") == html.count("</s>")
 
 
 def test_get_extension_prefers_mime_type_mapping() -> None:
