@@ -14,13 +14,7 @@ Named after HAL 9000 from *2001: A Space Odyssey* — HaL is an AI agent framewo
 ## 📦 Install
 
 ```bash
-pip install hal-agent
-```
-
-Or from source:
-
-```bash
-git clone https://github.com/poemdistance/HaL.git
+git clone https://github.com/wowyuarm/HaL.git
 cd HaL
 pip install -e .
 ```
@@ -29,7 +23,7 @@ pip install -e .
 
 > [!TIP]
 > Set your API key in `~/.hal/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [DashScope](https://dashscope.console.aliyun.com) (Qwen) · [Tavily Search](https://tavily.com/) (optional, for web search)
+> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Tavily Search](https://tavily.com/) (optional, for web search)
 
 **1. Initialize**
 
@@ -48,7 +42,7 @@ hal onboard
   },
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-sonnet-4-5-20250929"
+      "model": "..."
     }
   }
 }
@@ -59,37 +53,6 @@ hal onboard
 ```bash
 hal agent -m "Hello, World!"
 ```
-
-## 🖥️ Local Models (vLLM)
-
-Run HaL with your own local models using vLLM or any OpenAI-compatible server.
-
-```bash
-vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
-```
-
-```json
-{
-  "providers": {
-    "vllm": {
-      "apiKey": "dummy",
-      "apiBase": "http://localhost:8000/v1"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "meta-llama/Llama-3.1-8B-Instruct"
-    }
-  }
-}
-```
-
-```bash
-hal agent -m "Hello from my local LLM!"
-```
-
-> [!TIP]
-> The `apiKey` can be any non-empty string for local servers that don't require authentication.
 
 ## 💬 Chat Apps
 
@@ -249,19 +212,6 @@ Config file: `~/.hal/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 
-<details>
-<summary><b>Adding a New Provider (Developer Guide)</b></summary>
-
-HaL uses a **Provider Registry** (`hal/providers/registry.py`) as the single source of truth.
-Adding a new provider only takes **2 steps** — no if-elif chains.
-
-**Step 1.** Add a `ProviderSpec` to `PROVIDERS` in `hal/providers/registry.py`
-
-**Step 2.** Add a field to `ProvidersConfig` in `hal/config/schema.py`
-
-That's it. Environment variables, model prefixing, config matching, and `hal status` display derive automatically.
-
-</details>
 
 ### Security
 
@@ -302,30 +252,3 @@ docker build -t hal .
 docker run -v ~/.hal:/root/.hal --rm hal onboard
 docker run -v ~/.hal:/root/.hal -p 18790:18790 hal gateway
 ```
-
-## 📁 Project Structure
-
-```
-hal/
-├── agent/          # 🧠 Core agent logic (loop, context, memory, tools)
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
-├── channels/       # 📱 Chat integrations (Telegram, Discord, WhatsApp, Feishu)
-├── bus/            # 🚌 Async message routing
-├── cron/           # ⏰ Scheduled tasks
-├── heartbeat/      # 💓 Proactive wake-up
-├── providers/      # 🤖 LLM providers (OpenRouter, Anthropic, local...)
-├── session/        # 💬 Conversation sessions
-├── config/         # ⚙️ Configuration (Pydantic models)
-└── cli/            # 🖥️ CLI commands
-```
-
-## 🤝 Contribute
-
-PRs welcome! The codebase is intentionally small and readable.
-
-**Roadmap**
-
-- [ ] **Context engineering** — Layered prompt compilation with cache optimization
-- [ ] **Structured memory** — Episodic + long-term memory system
-- [ ] **Multi-modal** — See and hear (images, voice, video)
-- [ ] **Better reasoning** — Multi-step planning and reflection
