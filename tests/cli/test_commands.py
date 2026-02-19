@@ -164,8 +164,8 @@ def test_agent_single_message_success_with_patched_loop(
         async def process_direct(self, content: str, session_key: str = "cli:default", **kwargs):
             return f"echo:{content}:{session_key}"
 
-    # Avoid exiting in _make_provider
-    monkeypatch.setattr(commands, "_make_provider", lambda cfg: object())
+    # Avoid exiting in make_provider
+    monkeypatch.setattr(commands, "make_provider", lambda cfg: object())
 
     import hal.core.engine as engine_mod
 
