@@ -300,15 +300,23 @@ def find_by_model(model: str) -> ProviderSpec | None:
     return None
 
 
-def find_gateway(api_key: str | None, api_base: str | None) -> ProviderSpec | None:
+def find_gateway(
+    api_key: str | None, api_base: str | None, model: str | None = None
+) -> ProviderSpec | None:
     """Detect gateway/local by api_key prefix or api_base substring.
-    Fallback: unknown api_base → treat as local (vLLM)."""
+    Fallback: unknown api_base → treat as local (vLLM), unless the model
+    matches a known standard provider (e.g. gpt-* → openai)."""
     for spec in PROVIDERS:
         if spec.detect_by_key_prefix and api_key and api_key.startswith(spec.detect_by_key_prefix):
             return spec
         if spec.detect_by_base_keyword and api_base and spec.detect_by_base_keyword in api_base:
             return spec
     if api_base:
+        # Don't fallback to vLLM if the model matches a known standard provider.
+        # This allows e.g. openai provider with a custom api_base (proxy) to
+        # work without being misidentified as a local deployment.
+        if model and find_by_model(model):
+            return None
         return next((s for s in PROVIDERS if s.is_local), None)
     return None
 

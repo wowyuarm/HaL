@@ -26,13 +26,19 @@ class LiteLLMProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
+        compat_mode: str = "",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._compat_mode = compat_mode
 
-        # Detect gateway / local deployment from api_key and api_base
-        self._gateway = find_gateway(api_key, api_base)
+        # In compat_mode, skip gateway detection — the user explicitly declared
+        # the protocol, so auto-detection (vLLM fallback etc.) is unnecessary.
+        if compat_mode:
+            self._gateway = None
+        else:
+            self._gateway = find_gateway(api_key, api_base, default_model)
 
         # Backwards-compatible flags (used by tests and possibly external code)
         self.is_openrouter = bool(self._gateway and self._gateway.name == "openrouter")
@@ -43,11 +49,13 @@ class LiteLLMProvider(LLMProvider):
         if api_key:
             self._setup_env(api_key, api_base, default_model)
 
-        if api_base:
-            litellm.api_base = api_base
+        # NOTE: Never set litellm.api_base (global) — it pollutes other provider
+        # instances sharing the same process.  Pass api_base per-request via kwargs.
 
         # Disable LiteLLM logging noise
         litellm.suppress_debug_info = True
+        # Drop unsupported params for unknown models (e.g. tool_choice for proxied models)
+        litellm.drop_params = True
 
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
@@ -71,6 +79,12 @@ class LiteLLMProvider(LLMProvider):
 
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""
+        # compat_mode: model name is passed as-is to the endpoint.
+        # custom_llm_provider (set in chat()) tells LiteLLM the protocol,
+        # so no prefixing is needed.
+        if self._compat_mode:
+            return model
+
         if self._gateway:
             # Gateway mode: apply gateway prefix, skip provider-specific prefixes
             prefix = self._gateway.litellm_prefix
@@ -82,9 +96,15 @@ class LiteLLMProvider(LLMProvider):
 
         # Standard mode: auto-prefix for known providers
         spec = find_by_model(model)
-        if spec and spec.litellm_prefix:
-            if not any(model.startswith(s) for s in spec.skip_prefixes):
-                model = f"{spec.litellm_prefix}/{model}"
+        if spec:
+            prefix = spec.litellm_prefix
+            # When using a custom api_base with a provider that has no litellm_prefix
+            # (e.g. openai with a proxy), LiteLLM still needs "openai/" for unknown
+            # model names like gpt-5.3-codex. Force "openai/" in this case.
+            if not prefix and self.api_base:
+                prefix = "openai"
+            if prefix and not any(model.startswith(s) for s in spec.skip_prefixes):
+                model = f"{prefix}/{model}"
 
         return model
 
@@ -135,6 +155,11 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
+        # compat_mode: tell LiteLLM the exact protocol, bypassing its model
+        # registry lookups, parameter support checks, and streaming quirks.
+        if self._compat_mode:
+            kwargs["custom_llm_provider"] = self._compat_mode
+
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
@@ -144,6 +169,14 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
+            # compat_mode proxies may always stream regardless of the stream flag.
+            # Force streaming and aggregate chunks so _parse_response sees a
+            # complete response object.
+            if self._compat_mode:
+                kwargs["stream"] = True
+                response = await acompletion(**kwargs)
+                return await self._aggregate_stream(response)
+
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
@@ -152,6 +185,77 @@ class LiteLLMProvider(LLMProvider):
                 content=f"Error calling LLM: {str(e)}",
                 finish_reason="error",
             )
+
+    async def _aggregate_stream(self, stream: Any) -> LLMResponse:
+        """Aggregate a streaming response into a single LLMResponse."""
+        content_parts: list[str] = []
+        tool_calls_map: dict[int, dict[str, Any]] = {}  # index → {id, name, arguments}
+        finish_reason = "stop"
+        usage: dict[str, int] = {}
+        reasoning_parts: list[str] = []
+
+        async for chunk in stream:
+            choice = chunk.choices[0] if chunk.choices else None
+            if not choice:
+                continue
+
+            delta = choice.delta
+
+            # Content
+            if hasattr(delta, "content") and delta.content:
+                content_parts.append(delta.content)
+
+            # Reasoning content
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                reasoning_parts.append(delta.reasoning_content)
+
+            # Tool calls (streamed incrementally)
+            if hasattr(delta, "tool_calls") and delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_map:
+                        tool_calls_map[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": getattr(tc_delta.function, "name", "") or "",
+                            "arguments": "",
+                        }
+                    entry = tool_calls_map[idx]
+                    if tc_delta.id:
+                        entry["id"] = tc_delta.id
+                    if hasattr(tc_delta.function, "name") and tc_delta.function.name:
+                        entry["name"] = tc_delta.function.name
+                    if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
+                        entry["arguments"] += tc_delta.function.arguments
+
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+            # Usage (usually on the last chunk)
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = {
+                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
+                    "completion_tokens": chunk.usage.completion_tokens or 0,
+                    "total_tokens": chunk.usage.total_tokens or 0,
+                }
+
+        # Build tool calls list
+        tool_calls: list[ToolCallRequest] = []
+        for idx in sorted(tool_calls_map):
+            entry = tool_calls_map[idx]
+            args_str = entry["arguments"]
+            try:
+                args = json.loads(args_str) if args_str else {}
+            except json.JSONDecodeError:
+                args = {"raw": args_str}
+            tool_calls.append(ToolCallRequest(id=entry["id"], name=entry["name"], arguments=args))
+
+        return LLMResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+            reasoning_content="".join(reasoning_parts) or None,
+        )
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""

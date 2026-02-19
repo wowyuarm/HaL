@@ -23,6 +23,7 @@ def make_provider(config):
         api_base=config.get_api_base(),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
+        compat_mode=p.compat_mode if p else "",
     )
 
 
@@ -64,6 +65,7 @@ def _make_alternate_provider(config, model_name: str):
         api_base=api_base,
         default_model=model_name,
         extra_headers=sp.extra_headers if sp else None,
+        compat_mode=sp.compat_mode if sp else "",
     )
 
 

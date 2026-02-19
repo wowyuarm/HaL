@@ -93,6 +93,8 @@ Single source of truth for LLM provider metadata. A tuple of `ProviderSpec` data
 
 All providers use `LiteLLMProvider` (`infra/providers/litellm_provider.py`) as the unified implementation.
 
+For OpenAI-compatible proxies (e.g. codex-proxy), set `compatMode: "openai"` in the provider config. This bypasses gateway auto-detection, model-name prefixing, and LiteLLM's internal model registry — the model name is sent as-is and `custom_llm_provider` is passed to LiteLLM so it treats the endpoint as a plain OpenAI client.
+
 ### Channels (`hal/channels/`)
 
 Chat platform integrations (Telegram, Discord, WhatsApp, Feishu). Each channel pushes `InboundMessage` to the bus and subscribes to `OutboundMessage` dispatches. They are independent of agent internals.
@@ -101,7 +103,8 @@ Chat platform integrations (Telegram, Discord, WhatsApp, Feishu). Each channel p
 
 Pydantic models. Config lives at `~/.hal/config.json`. Key paths:
 - `agents.defaults` — model, workspace, max_tokens, temperature, max_tool_iterations
-- `providers.<name>` — apiKey, apiBase per provider
+- `providers.<name>` — apiKey, apiBase, compatMode per provider
+  - `compatMode` — protocol hint for proxy endpoints (e.g. `"openai"` for any OpenAI-compatible server); bypasses LiteLLM model registry and auto-detection
 - `tools.web.search` — api_key (Tavily), max_results
 - `tools.exec` — timeout
 - `tools.restrict_to_workspace` — boolean sandbox flag

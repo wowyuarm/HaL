@@ -94,6 +94,7 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    compat_mode: str = ""  # Protocol hint for proxies: "openai" = OpenAI-compatible endpoint
 
 
 class ProvidersConfig(BaseModel):
