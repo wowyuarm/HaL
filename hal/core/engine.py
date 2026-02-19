@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,15 +11,14 @@ from loguru import logger
 
 from hal.bus.events import InboundMessage, OutboundMessage
 from hal.bus.queue import MessageBus
-from hal.capabilities.tools.exec import ExecTool
-from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.message import MessageTool
-from hal.capabilities.tools.registry import ToolRegistry
 from hal.capabilities.tools.schedule import CronTool
 from hal.capabilities.tools.spawn import SpawnTool
-from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
 from hal.core.context.builder import ContextBuilder, ExecutionMode
 from hal.core.memory.manager import MemoryManager
+from hal.core.runtime.loop import LoopMetadata, run_tool_loop
+from hal.core.runtime.summary import generate_summary
+from hal.core.runtime.tool_factory import create_tools
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider
 
@@ -28,22 +26,6 @@ if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.core.memory.search import MemorySearch
     from hal.infra.config.schema import ExecToolConfig, HistoryConfig
-
-
-@dataclass
-class LoopMetadata:
-    """Metadata collected during a tool-calling loop execution."""
-
-    iterations: int = 0
-    tools_used: list[str] = field(default_factory=list)
-    files_modified: list[str] = field(default_factory=list)
-    commands_run: list[str] = field(default_factory=list)
-    has_side_effects: bool = False
-    loop_messages: list[dict[str, Any]] = field(default_factory=list)
-
-    @property
-    def needs_summary(self) -> bool:
-        return self.iterations >= 5 or self.has_side_effects
 
 
 class AgentEngine:
@@ -98,7 +80,6 @@ class AgentEngine:
 
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(workspace, memory_manager=self.memory)
-        self.tools = ToolRegistry()
 
         # Resolve subagent model/provider
         sa_provider = subagent_provider or provider
@@ -116,34 +97,17 @@ class AgentEngine:
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
-        """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        self.tools.register(FsTool(allowed_dir=allowed_dir))
-
-        self.tools.register(
-            ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            )
+        """Register the default set of tools via the shared factory."""
+        self.tools = create_tools(
+            workspace=self.workspace,
+            exec_config=self.exec_config,
+            restrict_to_workspace=self.restrict_to_workspace,
+            web_search_api_key=self.web_search_api_key,
+            bus=self.bus,
+            subagent_manager=self.subagents,
+            cron_service=self.cron_service,
+            memory_search=self._memory_search,
         )
-
-        self.tools.register(WebSearchTool(api_key=self.web_search_api_key))
-        self.tools.register(WebFetchTool())
-
-        message_tool = MessageTool(send_callback=self.bus.publish_outbound)
-        self.tools.register(message_tool)
-
-        spawn_tool = SpawnTool(manager=self.subagents, send_callback=self.bus.publish_outbound)
-        self.tools.register(spawn_tool)
-
-        if self.cron_service:
-            self.tools.register(CronTool(self.cron_service))
-
-        if self._memory_search:
-            from hal.capabilities.tools.recall import RecallTool
-
-            self.tools.register(RecallTool(self._memory_search))
 
     # ------------------------------------------------------------------
     # Main loop
@@ -297,10 +261,9 @@ class AgentEngine:
         )
 
         # Trigger async summary if qualifying loop
-        if meta.needs_summary:
-            self._pending_summaries[msg.session_key] = asyncio.create_task(
-                self._generate_summary(meta, final_content, msg.channel, msg.chat_id)
-            )
+        summary_task = self._trigger_summary(meta, final_content, msg.channel, msg.chat_id)
+        if summary_task:
+            self._pending_summaries[msg.session_key] = summary_task
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"[collab] response: {preview}")
@@ -378,8 +341,7 @@ class AgentEngine:
         )
 
         # Trigger async summary if qualifying loop (no barrier needed for operator)
-        if meta.needs_summary:
-            asyncio.create_task(self._generate_summary(meta, final_content, channel, chat_id))
+        self._trigger_summary(meta, final_content, channel, chat_id)
 
         return final_content
 
@@ -412,7 +374,7 @@ class AgentEngine:
         return matching
 
     # ------------------------------------------------------------------
-    # Core tool loop (shared by all modes)
+    # Core tool loop (delegates to shared runtime)
     # ------------------------------------------------------------------
 
     async def _execute_loop(
@@ -423,259 +385,56 @@ class AgentEngine:
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> tuple[str | None, LoopMetadata, list[InboundMessage]]:
-        """
-        Run the LLM tool-calling loop.
-
-        If *session_key* is provided, new inbound messages for the same session
-        are drained from the bus between iterations and injected as user
-        messages — the LLM sees them on the next turn without interrupting
-        the current execution.
+        """Run the LLM tool-calling loop via the shared runtime.
 
         Returns:
             Tuple of (final_content, loop_metadata, injected_messages).
         """
-        iteration = 0
-        final_content: str | None = None
-        meta = LoopMetadata()
-        injected: list[InboundMessage] = []
-        start_idx = len(messages)
+        hooks = _EngineLoopHooks(
+            engine=self,
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+        )
 
-        while iteration < max_iterations:
-            iteration += 1
+        final_content, meta = await run_tool_loop(
+            provider=self.provider,
+            model=self.model,
+            tools=self.tools,
+            messages=messages,
+            max_iterations=max_iterations,
+            hooks=hooks,
+            add_assistant_message=self.context.add_assistant_message,
+            add_tool_result=self.context.add_tool_result,
+        )
 
-            # Inject any messages that arrived mid-execution
-            if session_key:
-                for pending in self._drain_pending_for_session(session_key):
-                    prefixed = f"[User follow-up while you are working] {pending.content}"
-                    messages.append({"role": "user", "content": prefixed})
-                    injected.append(pending)
-                    logger.info(f"[inject] mid-loop message from {pending.sender_id}")
-
-                    # Record immediately so DailyLog order matches LLM context
-                    if channel and chat_id:
-                        self.memory.record_conversation(
-                            channel=channel,
-                            chat_id=chat_id,
-                            role="user",
-                            content=prefixed,
-                        )
-
-            response = await self.provider.chat(
-                messages=messages, tools=self.tools.get_definitions(), model=self.model
-            )
-
-            if response.has_tool_calls:
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in response.tool_calls
-                ]
-                messages = self.context.add_assistant_message(
-                    messages,
-                    response.content,
-                    tool_call_dicts,
-                    reasoning_content=response.reasoning_content,
-                )
-
-                for tool_call in response.tool_calls:
-                    args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                    logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
-                    if tool_call.name not in meta.tools_used:
-                        meta.tools_used.append(tool_call.name)
-
-                    # Track side effects via tool interface
-                    tool_obj = self.tools.get(tool_call.name)
-                    if tool_obj:
-                        effects = tool_obj.get_side_effects(tool_call.arguments)
-                        if effects is not None:
-                            meta.has_side_effects = True
-                            for path in effects.get("files_modified", []):
-                                if path and path not in meta.files_modified:
-                                    meta.files_modified.append(path)
-                            for cmd in effects.get("commands_run", []):
-                                if cmd:
-                                    meta.commands_run.append(cmd)
-
-                results = await asyncio.gather(
-                    *(self.tools.execute(tc.name, tc.arguments) for tc in response.tool_calls)
-                )
-
-                for tool_call, result in zip(response.tool_calls, results):
-                    messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
-                    )
-
-                    # Record tool call and result
-                    if channel and chat_id:
-                        # Record tool call (as assistant tool message)
-                        self.memory.record_conversation(
-                            channel=channel,
-                            chat_id=chat_id,
-                            role="tool",
-                            content=f"Calling {tool_call.name} with arguments: {json.dumps(tool_call.arguments, ensure_ascii=False)}",
-                            tool_name=tool_call.name,
-                            tool_result=result,
-                        )
-
-                        # Persist sync spawn results as user-injection so they
-                        # survive include_tools=False in future history rebuilds.
-                        if tool_call.name == "spawn":
-                            bg = tool_call.arguments.get("background", False)
-                            if not bg:
-                                label = tool_call.arguments.get(
-                                    "label", tool_call.arguments.get("task", "")[:40]
-                                )
-                                self.memory.record_conversation(
-                                    channel=channel,
-                                    chat_id=chat_id,
-                                    role="user",
-                                    content=f"[Subagent Result: {label}]\n\n{result}",
-                                    entry_type="injection",
-                                )
-            else:
-                # Before finalizing, collect any pending background subagent results.
-                # These are injected as ephemeral context (not recorded to history)
-                # so the LLM can produce a unified response.
-                pending = await self.subagents.await_pending()
-                if pending:
-                    # LLM wanted to respond, but subagents are still pending.
-                    # Inject their results and let the LLM incorporate them.
-                    messages = self.context.add_assistant_message(
-                        messages,
-                        response.content,
-                        [],
-                        reasoning_content=response.reasoning_content,
-                    )
-                    for label, result in pending:
-                        status = "failed" if result.startswith("Error:") else "completed"
-                        inject = f"[Background subagent '{label}' {status}]\n\nResult:\n{result}"
-                        messages.append({"role": "user", "content": inject})
-                        logger.info(f"[inject] subagent result: {label} ({status})")
-
-                        # Persist so future history rebuilds retain the result
-                        if channel and chat_id:
-                            self.memory.record_conversation(
-                                channel=channel,
-                                chat_id=chat_id,
-                                role="user",
-                                content=inject,
-                                entry_type="injection",
-                            )
-                    continue
-
-                final_content = response.content
-                break
-
-        meta.iterations = iteration
-        meta.loop_messages = messages[start_idx:]
-
-        return final_content, meta, injected
-
-    # ------------------------------------------------------------------
-    # Post-loop summary
-    # ------------------------------------------------------------------
-
-    _SUMMARY_MSG_CHAR_LIMIT = 5000
-    _SUMMARY_TOTAL_CHAR_LIMIT = 60000
-
-    async def _generate_summary(
-        self,
-        meta: LoopMetadata,
-        final_content: str,
-        channel: str,
-        chat_id: str,
-    ) -> None:
-        """Generate a concise summary of a tool-heavy loop and persist it."""
-        try:
-            prompt = self._build_summary_prompt(meta, final_content)
-
-            provider = self._summary_provider or self.provider
-            response = await provider.chat(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You summarize an AI agent's tool-calling session into "
-                            "a concise record (2-4 sentences). This summary will "
-                            "replace the agent's verbose response in conversation "
-                            "history so that future LLM calls have compact context.\n\n"
-                            "Rules:\n"
-                            "- Describe what THE AGENT did and the outcomes.\n"
-                            "- NEVER attribute the agent's actions to the user. "
-                            'The user asked; the agent acted. (e.g. "Agent read '
-                            'config.json and updated the timeout to 30s", NOT '
-                            '"User read config.json").\n'
-                            "- Focus on results and key changes, not process.\n"
-                            "- Mention specific files, commands, or data only "
-                            "when they are important to the outcome.\n"
-                            "- Output ONLY the summary, no preamble."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                tools=[],
-                model=self.model if self._summary_model == "default" else self._summary_model,
-            )
-
-            if response.content:
-                self.memory.record_conversation(
-                    channel=channel,
-                    chat_id=chat_id,
-                    role="user",
-                    content=f"[System Summary]\n{response.content}",
-                    entry_type="summary",
-                )
-                logger.info(f"[summary] recorded for {channel}:{chat_id}")
-        except Exception as e:
-            logger.warning(f"Failed to generate loop summary: {e}")
+        return final_content, meta, hooks.injected
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _build_summary_prompt(self, meta: LoopMetadata, final_content: str) -> str:
-        """Build the user prompt for summary generation from full loop messages."""
-        limit = self._SUMMARY_MSG_CHAR_LIMIT
-        parts: list[str] = ["<session>"]
+    def _summary_model_id(self) -> str:
+        """Resolve the model to use for summary generation."""
+        return self.model if self._summary_model == "default" else self._summary_model
 
-        # Serialize each loop message faithfully
-        total = 0
-        for msg in meta.loop_messages:
-            role = msg.get("role", "")
-            lines: list[str] = []
-
-            # assistant messages may carry tool_calls
-            tool_calls = msg.get("tool_calls")
-            if tool_calls:
-                for tc in tool_calls:
-                    fn = tc.get("function", {})
-                    name = fn.get("name", "")
-                    args = fn.get("arguments", "")
-                    if len(args) > limit:
-                        args = args[:limit] + "…"
-                    lines.append(f"  tool_call: {name}({args})")
-
-            content = str(msg.get("content", "") or "")
-            if len(content) > limit:
-                content = content[:limit] + "…"
-            if content:
-                lines.append(f"  {content}")
-
-            entry = f"[{role}]\n" + "\n".join(lines) if lines else f"[{role}]"
-            total += len(entry)
-            if total > self._SUMMARY_TOTAL_CHAR_LIMIT:
-                parts.append("[...earlier messages truncated...]")
-                break
-            parts.append(entry)
-
-        parts.append("</session>")
-        return "\n".join(parts)
+    def _trigger_summary(
+        self, meta: LoopMetadata, final_content: str, channel: str, chat_id: str
+    ) -> asyncio.Task | None:
+        """Create an async summary task if the loop qualifies."""
+        if not meta.needs_summary:
+            return None
+        return asyncio.create_task(
+            generate_summary(
+                meta=meta,
+                final_content=final_content,
+                channel=channel,
+                chat_id=chat_id,
+                provider=self._summary_provider or self.provider,
+                model=self._summary_model_id(),
+                memory=self.memory,
+            )
+        )
 
     def _update_tool_contexts(self, channel: str, chat_id: str) -> None:
         """Update context-dependent tools with current channel/chat info."""
@@ -713,6 +472,124 @@ class AgentEngine:
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self.process_collab(msg)
         return response.content if response else ""
+
+
+class _EngineLoopHooks:
+    """Loop hooks for the main AgentEngine.
+
+    Handles mid-loop message injection, memory recording, and
+    background subagent result collection.
+    """
+
+    def __init__(
+        self,
+        engine: AgentEngine,
+        session_key: str | None,
+        channel: str | None,
+        chat_id: str | None,
+    ):
+        self._engine = engine
+        self._session_key = session_key
+        self._channel = channel
+        self._chat_id = chat_id
+        self.injected: list[InboundMessage] = []
+
+    def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
+        """Inject any messages that arrived mid-execution."""
+        if not self._session_key:
+            return
+        for pending in self._engine._drain_pending_for_session(self._session_key):
+            prefixed = f"[User follow-up while you are working] {pending.content}"
+            messages.append({"role": "user", "content": prefixed})
+            self.injected.append(pending)
+            logger.info(f"[inject] mid-loop message from {pending.sender_id}")
+
+            if self._channel and self._chat_id:
+                self._engine.memory.record_conversation(
+                    channel=self._channel,
+                    chat_id=self._chat_id,
+                    role="user",
+                    content=prefixed,
+                )
+
+    def on_tool_result(
+        self,
+        tool_name: str,
+        tool_id: str,
+        arguments: dict[str, Any],
+        result: str,
+        messages: list[dict[str, Any]],
+        meta: LoopMetadata,
+    ) -> None:
+        """Record tool calls to memory."""
+        if not (self._channel and self._chat_id):
+            return
+
+        self._engine.memory.record_conversation(
+            channel=self._channel,
+            chat_id=self._chat_id,
+            role="tool",
+            content=(
+                f"Calling {tool_name} with arguments: {json.dumps(arguments, ensure_ascii=False)}"
+            ),
+            tool_name=tool_name,
+            tool_result=result,
+        )
+
+        # Persist sync spawn results as user-injection so they survive
+        # include_tools=False in future history rebuilds.
+        if tool_name == "spawn":
+            bg = arguments.get("background", False)
+            if not bg:
+                label = arguments.get("label", arguments.get("task", "")[:40])
+                self._engine.memory.record_conversation(
+                    channel=self._channel,
+                    chat_id=self._chat_id,
+                    role="user",
+                    content=f"[Subagent Result: {label}]\n\n{result}",
+                    entry_type="injection",
+                )
+
+    async def on_no_tool_calls(
+        self,
+        messages: list[dict[str, Any]],
+        response: Any,
+        meta: LoopMetadata,
+    ) -> bool:
+        """Collect pending background subagent results before finalizing."""
+        pending = await self._engine.subagents.await_pending()
+        if not pending:
+            return False
+
+        # Inject subagent results and let LLM incorporate them
+        messages = self._engine.context.add_assistant_message(
+            messages,
+            response.content,
+            [],
+            reasoning_content=response.reasoning_content,
+        )
+        for label, result in pending:
+            status = "failed" if result.startswith("Error:") else "completed"
+            inject = f"[Background subagent '{label}' {status}]\n\nResult:\n{result}"
+            messages.append({"role": "user", "content": inject})
+            logger.info(f"[inject] subagent result: {label} ({status})")
+
+            if self._channel and self._chat_id:
+                self._engine.memory.record_conversation(
+                    channel=self._channel,
+                    chat_id=self._chat_id,
+                    role="user",
+                    content=inject,
+                    entry_type="injection",
+                )
+        return True
+
+    async def on_loop_exhausted(
+        self,
+        messages: list[dict[str, Any]],
+        meta: LoopMetadata,
+    ) -> str | None:
+        return None
 
 
 # Backward compatibility alias

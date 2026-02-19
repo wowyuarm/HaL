@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import platform
 import uuid
 from datetime import datetime
@@ -12,14 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from hal.capabilities.tools.exec import ExecTool
-from hal.capabilities.tools.fs import FsTool
-from hal.capabilities.tools.registry import ToolRegistry
-from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
 from hal.core.context.builder import _MODE_DIRECTIVES, ExecutionMode
+from hal.core.runtime.loop import LoopMetadata, run_tool_loop
+from hal.core.runtime.tool_factory import create_tools
 from hal.infra.providers.base import LLMProvider
 
 if TYPE_CHECKING:
+    from hal.capabilities.tools.registry import ToolRegistry
     from hal.infra.config.schema import ExecToolConfig
 
 
@@ -140,103 +138,37 @@ class SubagentManager:
         ]
 
         max_iterations = 50
-        iteration = 0
-        final_result: str | None = None
         self._current_iteration = 0
 
-        while iteration < max_iterations:
-            iteration += 1
-            self._current_iteration = iteration
+        hooks = _SubagentLoopHooks(self, task_id)
 
-            response = await self.provider.chat(
-                messages=messages,
-                tools=tools.get_definitions(),
-                model=self.model,
-            )
+        final_content, _meta = await run_tool_loop(
+            provider=self.provider,
+            model=self.model,
+            tools=tools,
+            messages=messages,
+            max_iterations=max_iterations,
+            hooks=hooks,
+        )
 
-            if response.has_tool_calls:
-                tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in response.tool_calls
-                ]
-                assistant_msg: dict[str, Any] = {
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": tool_call_dicts,
-                }
-                if response.reasoning_content:
-                    assistant_msg["reasoning_content"] = response.reasoning_content
-                messages.append(assistant_msg)
-
-                for tool_call in response.tool_calls:
-                    logger.debug(f"Subagent [{task_id}] executing: {tool_call.name}")
-
-                results = await asyncio.gather(
-                    *(tools.execute(tc.name, tc.arguments) for tc in response.tool_calls)
-                )
-
-                for tool_call, result in zip(response.tool_calls, results):
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_call.name,
-                            "content": result,
-                        }
-                    )
-            else:
-                final_result = response.content
-                break
-
-        if final_result is None:
-            # Loop exhausted while still making tool calls.
-            # Make one final LLM call without tools to force a summary.
-            logger.warning(f"Subagent [{task_id}] hit max iterations, forcing summary")
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "You have reached the maximum number of tool iterations. "
-                        "Do NOT call any more tools. Provide a structured final "
-                        "report:\n"
-                        "1. **Completed**: what you accomplished\n"
-                        "2. **Incomplete**: what remains unfinished (if any)\n"
-                        "3. **Key findings**: important results or data discovered"
-                    ),
-                }
-            )
-            response = await self.provider.chat(messages=messages, tools=[], model=self.model)
-            final_result = response.content or "Task completed but no summary was generated."
+        if final_content is None:
+            final_content = "Task completed but no summary was generated."
 
         logger.info(f"Subagent [{task_id}] completed")
-        return final_result
+        return final_content
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _build_tools(self) -> ToolRegistry:
+    def _build_tools(self) -> "ToolRegistry":
         """Build an isolated tool registry for a subagent."""
-        tools = ToolRegistry()
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
-        tools.register(FsTool(allowed_dir=allowed_dir))
-        tools.register(
-            ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-            )
+        return create_tools(
+            workspace=self.workspace,
+            exec_config=self.exec_config,
+            restrict_to_workspace=self.restrict_to_workspace,
+            web_search_api_key=self.web_search_api_key,
         )
-        tools.register(WebSearchTool(api_key=self.web_search_api_key))
-        tools.register(WebFetchTool())
-        return tools
 
     def _build_system_prompt(self) -> str:
         """Build a focused, task-agnostic system prompt for the subagent.
@@ -321,3 +253,61 @@ Current time: {now}""")
     def get_last_iteration(self) -> int:
         """Return the iteration count of the most recent sync subagent execution."""
         return self._current_iteration
+
+
+class _SubagentLoopHooks:
+    """Loop hooks for subagent execution.
+
+    Tracks iteration count and forces a summary when the loop is exhausted.
+    """
+
+    def __init__(self, manager: SubagentManager, task_id: str):
+        self._manager = manager
+        self._task_id = task_id
+
+    def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
+        self._manager._current_iteration = meta.iterations
+
+    def on_tool_result(
+        self,
+        tool_name: str,
+        tool_id: str,
+        arguments: dict[str, Any],
+        result: str,
+        messages: list[dict[str, Any]],
+        meta: LoopMetadata,
+    ) -> None:
+        logger.debug(f"Subagent [{self._task_id}] executed: {tool_name}")
+
+    async def on_no_tool_calls(
+        self,
+        messages: list[dict[str, Any]],
+        response: Any,
+        meta: LoopMetadata,
+    ) -> bool:
+        return False
+
+    async def on_loop_exhausted(
+        self,
+        messages: list[dict[str, Any]],
+        meta: LoopMetadata,
+    ) -> str | None:
+        """Force a final summary when max iterations reached."""
+        logger.warning(f"Subagent [{self._task_id}] hit max iterations, forcing summary")
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "You have reached the maximum number of tool iterations. "
+                    "Do NOT call any more tools. Provide a structured final "
+                    "report:\n"
+                    "1. **Completed**: what you accomplished\n"
+                    "2. **Incomplete**: what remains unfinished (if any)\n"
+                    "3. **Key findings**: important results or data discovered"
+                ),
+            }
+        )
+        response = await self._manager.provider.chat(
+            messages=messages, tools=[], model=self._manager.model
+        )
+        return response.content

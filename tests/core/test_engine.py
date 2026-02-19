@@ -636,7 +636,9 @@ class TestSummaryTrigger:
 
 class TestGenerateSummary:
     async def test_summary_uses_summary_entry_type(self, engine, mock_provider):
-        """_generate_summary should record with entry_type='summary'."""
+        """generate_summary should record with entry_type='summary'."""
+        from hal.core.runtime.summary import generate_summary
+
         mock_provider.chat = AsyncMock(
             return_value=LLMResponse(content="Summary text", tool_calls=[])
         )
@@ -649,7 +651,15 @@ class TestGenerateSummary:
             loop_messages=[],
         )
 
-        await engine._generate_summary(meta, "final response", "telegram", "c1")
+        await generate_summary(
+            meta=meta,
+            final_content="final response",
+            channel="telegram",
+            chat_id="c1",
+            provider=mock_provider,
+            model="test-model",
+            memory=engine.memory,
+        )
 
         engine.memory.record_conversation.assert_called_with(
             channel="telegram",
