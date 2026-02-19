@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -590,6 +591,79 @@ class _EngineLoopHooks:
         meta: LoopMetadata,
     ) -> str | None:
         return None
+
+    async def on_tool_calls_start(
+        self,
+        tool_calls: list[Any],
+        assistant_content: str | None,
+        meta: LoopMetadata,
+    ) -> None:
+        """Send a fire-and-forget progress message to the user."""
+        if not (self._channel and self._chat_id):
+            return
+
+        text = _format_progress_message(assistant_content, tool_calls)
+        if not text:
+            return
+
+        await self._engine.bus.publish_outbound(
+            OutboundMessage(
+                channel=self._channel,
+                chat_id=self._chat_id,
+                content=text,
+                metadata={"progress": True},
+            )
+        )
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.DOTALL)
+
+
+def _format_progress_message(
+    assistant_content: str | None,
+    tool_calls: list[Any],
+) -> str | None:
+    """Build a progress message from LLM content or tool calls.
+
+    Three-tier fallback:
+    1. Use assistant_content if present and not just <think> tags
+    2. Otherwise format tool call signatures
+    3. Clean <think> tags from content
+    """
+    if assistant_content:
+        cleaned = _THINK_RE.sub("", assistant_content).strip()
+        if cleaned:
+            return cleaned
+
+    if not tool_calls:
+        return None
+
+    lines = []
+    for tc in tool_calls:
+        args = tc.arguments
+        # Pick the most descriptive argument for a short summary
+        summary = _summarize_args(args)
+        lines.append(f"↳ {tc.name}({summary})")
+
+    return "\n".join(lines)
+
+
+def _summarize_args(args: dict[str, Any] | None) -> str:
+    """Produce a short argument summary for progress display."""
+    if not args:
+        return ""
+    # Prefer common descriptive keys
+    for key in ("query", "task", "command", "path", "url", "content", "pattern"):
+        if key in args:
+            val = str(args[key])
+            if len(val) > 60:
+                val = val[:57] + "..."
+            return repr(val)
+    # Fallback: first key's value
+    first_val = str(next(iter(args.values())))
+    if len(first_val) > 60:
+        first_val = first_val[:57] + "..."
+    return repr(first_val)
 
 
 # Backward compatibility alias

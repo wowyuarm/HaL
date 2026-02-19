@@ -287,6 +287,14 @@ class _SubagentLoopHooks:
     ) -> bool:
         return False
 
+    async def on_tool_calls_start(
+        self,
+        tool_calls: list[Any],
+        assistant_content: str | None,
+        meta: LoopMetadata,
+    ) -> None:
+        pass
+
     async def on_loop_exhausted(
         self,
         messages: list[dict[str, Any]],

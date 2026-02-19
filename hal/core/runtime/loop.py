@@ -65,6 +65,15 @@ class LoopHooks(Protocol):
         """
         ...
 
+    async def on_tool_calls_start(
+        self,
+        tool_calls: list[Any],
+        assistant_content: str | None,
+        meta: LoopMetadata,
+    ) -> None:
+        """Called before tool execution begins. Used for progress notifications."""
+        ...
+
     async def on_loop_exhausted(
         self,
         messages: list[dict[str, Any]],
@@ -101,6 +110,14 @@ class _NoOpHooks:
         meta: LoopMetadata,
     ) -> bool:
         return False
+
+    async def on_tool_calls_start(
+        self,
+        tool_calls: list[Any],
+        assistant_content: str | None,
+        meta: LoopMetadata,
+    ) -> None:
+        pass
 
     async def on_loop_exhausted(
         self,
@@ -211,6 +228,9 @@ async def run_tool_loop(
                         for cmd in effects.get("commands_run", []):
                             if cmd:
                                 meta.commands_run.append(cmd)
+
+            # Hook: notify progress before execution
+            await h.on_tool_calls_start(response.tool_calls, response.content, meta)
 
             # Execute tools in parallel
             results = await asyncio.gather(
