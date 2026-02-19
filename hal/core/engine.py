@@ -623,29 +623,25 @@ def _format_progress_message(
     assistant_content: str | None,
     tool_calls: list[Any],
 ) -> str | None:
-    """Build a progress message from LLM content or tool calls.
+    """Build a progress message combining intent and tool calls.
 
-    Three-tier fallback:
-    1. Use assistant_content if present and not just <think> tags
-    2. Otherwise format tool call signatures
-    3. Clean <think> tags from content
+    Format: optional cleaned content + tool call hints.
+    Example:
+        让我检查分支状态
+        ↳ exec('git status')
     """
+    parts: list[str] = []
+
     if assistant_content:
         cleaned = _THINK_RE.sub("", assistant_content).strip()
         if cleaned:
-            return cleaned
+            parts.append(cleaned)
 
-    if not tool_calls:
-        return None
+    for tc in tool_calls or []:
+        summary = _summarize_args(tc.arguments)
+        parts.append(f"↳ {tc.name}({summary})")
 
-    lines = []
-    for tc in tool_calls:
-        args = tc.arguments
-        # Pick the most descriptive argument for a short summary
-        summary = _summarize_args(args)
-        lines.append(f"↳ {tc.name}({summary})")
-
-    return "\n".join(lines)
+    return "\n".join(parts) if parts else None
 
 
 def _summarize_args(args: dict[str, Any] | None) -> str:
