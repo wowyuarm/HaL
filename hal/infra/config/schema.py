@@ -100,6 +100,7 @@ class ProviderConfig(BaseModel):
 class ProvidersConfig(BaseModel):
     """Configuration for LLM providers."""
 
+    anyrouter: ProviderConfig = Field(default_factory=ProviderConfig)  # AnyRouter (Anthropic relay)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)

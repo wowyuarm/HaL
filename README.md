@@ -204,6 +204,7 @@ Config file: `~/.hal/config.json`
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `anyrouter` | LLM (Claude relay, requires local bridge) | [anyrouter.top](https://anyrouter.top) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
@@ -211,6 +212,8 @@ Config file: `~/.hal/config.json`
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
+
+AnyRouter setup guide: `docs/anyrouter.md`
 
 
 ### Security

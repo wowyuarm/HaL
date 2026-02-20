@@ -8,7 +8,7 @@ import litellm
 from litellm import acompletion
 
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from hal.infra.providers.registry import find_by_model, find_gateway
+from hal.infra.providers.registry import find_by_model, find_by_name, find_gateway
 
 
 class LiteLLMProvider(LLMProvider):
@@ -27,18 +27,24 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         compat_mode: str = "",
+        provider_name: str = "",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._compat_mode = compat_mode
+        self.provider_name = provider_name
 
         # In compat_mode, skip gateway detection — the user explicitly declared
         # the protocol, so auto-detection (vLLM fallback etc.) is unnecessary.
         if compat_mode:
             self._gateway = None
         else:
-            self._gateway = find_gateway(api_key, api_base, default_model)
+            forced = find_by_name(provider_name) if provider_name else None
+            if forced and (forced.is_gateway or forced.is_local):
+                self._gateway = forced
+            else:
+                self._gateway = find_gateway(api_key, api_base, default_model)
 
         # Backwards-compatible flags (used by tests and possibly external code)
         self.is_openrouter = bool(self._gateway and self._gateway.name == "openrouter")

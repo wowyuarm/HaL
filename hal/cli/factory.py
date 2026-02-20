@@ -8,12 +8,32 @@ from rich.console import Console
 console = Console()
 
 
+def _resolve_provider_name(config, model_name: str):
+    """Resolve the selected provider config field name for a model."""
+    from hal.infra.providers.registry import PROVIDERS
+
+    model_lower = model_name.lower()
+
+    for spec in PROVIDERS:
+        p = getattr(config.providers, spec.name, None)
+        if p and p.api_key and any(kw in model_lower for kw in spec.keywords):
+            return spec.name
+
+    for spec in PROVIDERS:
+        p = getattr(config.providers, spec.name, None)
+        if p and p.api_key:
+            return spec.name
+
+    return ""
+
+
 def make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
     from hal.infra.providers.litellm_provider import LiteLLMProvider
 
     p = config.get_provider()
     model = config.agents.defaults.model
+    provider_name = _resolve_provider_name(config, model)
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.hal/config.json under providers section")
@@ -24,6 +44,7 @@ def make_provider(config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         compat_mode=p.compat_mode if p else "",
+        provider_name=provider_name,
     )
 
 
@@ -52,6 +73,8 @@ def _make_alternate_provider(config, model_name: str):
     if not sp or not sp.api_key:
         return None
 
+    provider_name = _resolve_provider_name(config, model_name)
+
     api_base = sp.api_base
     if not api_base:
         from hal.infra.providers.registry import find_by_model
@@ -66,6 +89,7 @@ def _make_alternate_provider(config, model_name: str):
         default_model=model_name,
         extra_headers=sp.extra_headers if sp else None,
         compat_mode=sp.compat_mode if sp else "",
+        provider_name=provider_name,
     )
 
 

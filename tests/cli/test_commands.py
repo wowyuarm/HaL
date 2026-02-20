@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 import hal.cli.commands as commands
+from hal.infra.config.loader import save_config
+from hal.infra.config.schema import Config
 
 runner = CliRunner()
 
@@ -174,3 +177,48 @@ def test_agent_single_message_success_with_patched_loop(
     result = runner.invoke(commands.app, ["agent", "-m", "hello", "--session", "cli:test"])
     assert result.exit_code == 0
     assert "echo:hello:cli:test" in result.output
+
+
+def test_anyrouter_bridge_requires_api_key(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/node")
+
+    result = runner.invoke(commands.app, ["anyrouter", "bridge"])
+    assert result.exit_code == 1
+    assert "api key not configured" in result.output.lower()
+
+
+def test_anyrouter_bridge_invokes_node_process(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = Config()
+    cfg.providers.anyrouter.api_key = "sk-test"
+    save_config(cfg)
+
+    called = {}
+
+    class Result:
+        def __init__(self, stdout: str = "", stderr: str = ""):
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, env=None, check=None, capture_output=None, text=None):
+        if cmd == ["node", "--help"]:
+            return Result(stdout="  --use-env-proxy")
+        called["cmd"] = cmd
+        called["env"] = env
+        called["check"] = check
+        return Result()
+
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
+
+    result = runner.invoke(
+        commands.app,
+        ["anyrouter", "bridge", "--port", "4318", "--upstream", "https://anyrouter.top"],
+    )
+    assert result.exit_code == 0
+    assert called["cmd"][0] == "node"
+    assert "--use-env-proxy" in called["cmd"]
+    assert called["check"] is True
+    assert called["env"]["ANYROUTER_BRIDGE_PORT"] == "4318"

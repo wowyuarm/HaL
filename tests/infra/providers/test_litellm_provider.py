@@ -78,6 +78,19 @@ def test_resolve_model_standard_provider_prefixing() -> None:
     assert p._resolve_model("openrouter/glm-4") == "openrouter/glm-4"
 
 
+def test_provider_name_forces_gateway_on_local_anyrouter_base() -> None:
+    p = LiteLLMProvider(
+        api_key="test-key",
+        api_base="http://127.0.0.1:3181",
+        default_model="anthropic/claude-opus-4-5",
+        provider_name="anyrouter",
+    )
+
+    assert p._gateway is not None
+    assert p._gateway.name == "anyrouter"
+    assert p._resolve_model("anthropic/claude-opus-4-5") == "anthropic/claude-opus-4-5"
+
+
 def test_parse_response_tool_calls_and_usage() -> None:
     p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
 

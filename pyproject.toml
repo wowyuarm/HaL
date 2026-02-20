@@ -63,6 +63,7 @@ packages = ["hal"]
 [tool.hatch.build]
 include = [
     "hal/**/*.py",
+    "hal/**/*.mjs",
     "hal/skills/**/*.md",
     "hal/skills/**/*.sh",
 ]

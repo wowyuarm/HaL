@@ -99,6 +99,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,  # anthropic/claude-3 → claude-3 → openai/claude-3
         model_overrides=(),
     ),
+    # AnyRouter: Anthropic-compatible relay. Requires Claude Code stealth headers
+    # (user-agent, x-app, anthropic-beta) set via extraHeaders in config.
+    # No litellm_prefix — LiteLLM recognizes "claude-*" natively as Anthropic.
+    ProviderSpec(
+        name="anyrouter",
+        keywords=("anyrouter",),
+        env_key="ANTHROPIC_API_KEY",
+        display_name="AnyRouter",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=True,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="anyrouter",
+        default_api_base="https://anyrouter.top",
+        strip_model_prefix=False,
+        model_overrides=(),
+    ),
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: LiteLLM recognizes "claude-*" natively, no prefix needed.
     ProviderSpec(
