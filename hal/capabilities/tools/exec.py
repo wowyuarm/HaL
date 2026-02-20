@@ -26,7 +26,8 @@ class ExecTool(Tool):
             r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",  # del /f, del /q
             r"\brmdir\s+/s\b",  # rmdir /s
-            r"\b(format|mkfs|diskpart)\b",  # disk operations
+            r"(?:^|[;&|]\s*)format\b",  # format command (not URL params)
+            r"\b(mkfs|diskpart)\b",  # other disk operations
             r"\bdd\s+if=",  # dd
             r">\s*/dev/sd",  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
@@ -90,6 +91,10 @@ class ExecTool(Tool):
                 )
             except asyncio.TimeoutError:
                 process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    pass  # Process didn't exit in time, but we tried
                 return f"Error: Command timed out after {actual_timeout} seconds"
 
             output_parts = []
@@ -117,13 +122,58 @@ class ExecTool(Tool):
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
+    def _extract_git_commit_cmd_part(self, cmd: str) -> str:
+        """Extract command part of git commit, excluding -m/-F message content.
+
+        Examples:
+        - git commit -m "fix: kill process" -> returns "git commit"
+        - git commit -F file.txt -> returns "git commit"
+        """
+        import shlex
+
+        try:
+            parts = shlex.split(cmd)
+        except ValueError:
+            # Malformed command, return as-is for safety
+            return cmd
+
+        result_parts = []
+        skip_next = False
+
+        for part in parts:
+            if skip_next:
+                skip_next = False
+                continue
+
+            # -m / --message / -f (lowered -F) / --file take the next token as value
+            if part in ("-m", "--message", "-f", "--file"):
+                skip_next = True
+                continue
+
+            # --message=content or --file=content
+            if part.startswith(("--message=", "--file=")):
+                continue
+
+            # -m<content> (shlex merges -m"msg" into one token like -mmsg)
+            if len(part) > 2 and part.startswith("-m"):
+                continue
+
+            result_parts.append(part)
+
+        return " ".join(result_parts)
+
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
 
+        # For git commit, extract the command part (exclude commit message content)
+        check_text = lower
+        if re.search(r"\bgit\s+commit\b", lower):
+            check_text = self._extract_git_commit_cmd_part(lower)
+
         for pattern in self.deny_patterns:
-            if re.search(pattern, lower):
+            if re.search(pattern, check_text):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
 
         if self.allow_patterns:
