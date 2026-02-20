@@ -179,7 +179,7 @@ class SubagentManager:
         Includes:
         - Role and behavioral rules
         - Tool usage guide (subset available to subagent)
-        - Long-term memory (MEMORY.md) for user preferences and project context
+        - Skills (DeepWiki, etc.)
         - Environment basics (time, platform, workspace)
         """
         mode_directive = _MODE_DIRECTIVES[ExecutionMode.ASYNC]
@@ -237,14 +237,71 @@ web_search(query="latest news", count=5)
 Extract main content from a URL as markdown.
 ```
 web_fetch(url="https://example.com", extractMode="markdown")
-```
+```""")
 
+        # Skills
+        skills_section = self._build_skills_section()
+        if skills_section:
+            parts.append(skills_section)
+
+        # Environment
+        parts.append(f"""\
 ## Environment
 Platform: {runtime}
 Workspace: {workspace_path}
 Current time: {now}""")
 
         return "\n\n".join(parts)
+
+    def _build_skills_section(self) -> str | None:
+        """Build the skills section for the subagent system prompt.
+
+        Loads skills that are useful for subagent tasks (e.g., DeepWiki for
+        repository research). Skills are loaded with absolute script paths
+        so the subagent can execute them directly.
+        """
+        from hal.capabilities.skills.loader import SkillsLoader
+
+        loader = SkillsLoader(self.workspace)
+        parts: list[str] = []
+
+        # DeepWiki — essential for repository research tasks
+        deepwiki_content = loader.load_skill("deepwiki")
+        if deepwiki_content:
+            # Resolve the absolute path to the deepwiki script
+            deepwiki_script = self._resolve_skill_script("deepwiki", "scripts/deepwiki.sh")
+            if deepwiki_script:
+                content = loader._strip_frontmatter(deepwiki_content)
+                # Replace relative script paths with absolute paths
+                content = content.replace(
+                    "scripts/deepwiki.sh",
+                    str(deepwiki_script),
+                )
+                parts.append(f"### Skill: DeepWiki\n\n{content}")
+
+        if not parts:
+            return None
+
+        return "## Skills\n\n" + "\n\n---\n\n".join(parts)
+
+    def _resolve_skill_script(self, skill_name: str, relative_path: str) -> Path | None:
+        """Resolve the absolute path to a skill's script file.
+
+        Checks workspace skills first, then built-in skills.
+        """
+        from hal.capabilities.skills.loader import BUILTIN_SKILLS_DIR
+
+        # Workspace skills
+        workspace_path = self.workspace / "skills" / skill_name / relative_path
+        if workspace_path.exists():
+            return workspace_path
+
+        # Built-in skills
+        builtin_path = BUILTIN_SKILLS_DIR / skill_name / relative_path
+        if builtin_path.exists():
+            return builtin_path
+
+        return None
 
     def get_running_count(self) -> int:
         """Return the number of currently running background subagents."""
