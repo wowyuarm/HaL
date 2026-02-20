@@ -158,3 +158,47 @@ async def test_chat_exception_returns_error_content(monkeypatch: pytest.MonkeyPa
     r = await p.chat(messages=[{"role": "user", "content": "hi"}])
     assert r.finish_reason == "error"
     assert r.content and r.content.startswith("Error calling LLM:")
+
+
+@pytest.mark.asyncio
+async def test_chat_anyrouter_forces_stream_aggregation(monkeypatch: pytest.MonkeyPatch) -> None:
+    p = LiteLLMProvider(
+        api_key="test-key",
+        api_base="http://127.0.0.1:3181",
+        default_model="claude-opus-4-6",
+        provider_name="anyrouter",
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return object()
+
+    async def fake_aggregate(stream):
+        return LLMResponse(content="ok")
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr(p, "_aggregate_stream", fake_aggregate)
+
+    r = await p.chat(messages=[{"role": "user", "content": "hi"}])
+
+    assert r.content == "ok"
+    assert called["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_chat_exception_strips_raw_response_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
+
+    async def boom(**kwargs):
+        raise RuntimeError(
+            "AnthropicException - Unable to get json response. "
+            "Original Response: event: message_start\\ndata:{...}"
+        )
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", boom)
+
+    r = await p.chat(messages=[{"role": "user", "content": "hi"}])
+    assert r.content is not None
+    assert "Original Response:" not in r.content
+    assert "event: message_start" not in r.content

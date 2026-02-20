@@ -1,6 +1,7 @@
 """LiteLLM provider implementation for multi-provider support."""
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -9,6 +10,8 @@ from litellm import acompletion
 
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from hal.infra.providers.registry import find_by_model, find_by_name, find_gateway
+
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -45,6 +48,9 @@ class LiteLLMProvider(LLMProvider):
                 self._gateway = forced
             else:
                 self._gateway = find_gateway(api_key, api_base, default_model)
+        self._force_stream_aggregate = bool(
+            self._compat_mode or (self._gateway and self._gateway.name == "anyrouter")
+        )
 
         # Backwards-compatible flags (used by tests and possibly external code)
         self.is_openrouter = bool(self._gateway and self._gateway.name == "openrouter")
@@ -175,10 +181,10 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tool_choice"] = "auto"
 
         try:
-            # compat_mode proxies may always stream regardless of the stream flag.
-            # Force streaming and aggregate chunks so _parse_response sees a
-            # complete response object.
-            if self._compat_mode:
+            # compat_mode proxies and AnyRouter bridge may always stream regardless
+            # of the stream flag. Force streaming and aggregate chunks so
+            # _parse_response always sees a complete response object.
+            if self._force_stream_aggregate:
                 kwargs["stream"] = True
                 response = await acompletion(**kwargs)
                 return await self._aggregate_stream(response)
@@ -186,11 +192,22 @@ class LiteLLMProvider(LLMProvider):
             response = await acompletion(**kwargs)
             return self._parse_response(response)
         except Exception as e:
+            logger.exception("LLM request failed")
             # Return error as content for graceful handling
             return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
+                content=f"Error calling LLM: {self._sanitize_error_message(e)}",
                 finish_reason="error",
             )
+
+    @staticmethod
+    def _sanitize_error_message(error: Exception) -> str:
+        """Keep user-facing error concise and avoid leaking raw upstream payloads."""
+        message = str(error).strip().replace("\n", " ")
+        if "Original Response:" in message:
+            message = message.split("Original Response:", 1)[0].strip()
+        if len(message) > 300:
+            message = f"{message[:297]}..."
+        return message
 
     async def _aggregate_stream(self, stream: Any) -> LLMResponse:
         """Aggregate a streaming response into a single LLMResponse."""

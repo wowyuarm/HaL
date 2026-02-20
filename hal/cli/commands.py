@@ -196,6 +196,11 @@ def anyrouter_bridge(
     api_key: str = typer.Option("", help="AnyRouter API key override"),
     force_stream: bool = typer.Option(True, "--force-stream/--no-force-stream"),
     inject_system: bool = typer.Option(True, "--inject-system/--no-inject-system"),
+    verbose: bool = typer.Option(
+        True,
+        "--verbose/--quiet",
+        help="Bridge logs detail level (default: verbose metadata, no message content)",
+    ),
 ):
     """Start local Node bridge for AnyRouter (fixes Python TLS fingerprint mismatch)."""
     import os
@@ -240,6 +245,7 @@ def anyrouter_bridge(
             "ANYROUTER_DIRECT_BROWSER_ACCESS": "true",
             "ANYROUTER_FORCE_STREAM": "true" if force_stream else "false",
             "ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM": "true" if inject_system else "false",
+            "ANYROUTER_VERBOSE": "true" if verbose else "false",
         }
     )
 

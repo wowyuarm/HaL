@@ -24,6 +24,19 @@ hal anyrouter bridge --port 3181
 
 The command reads `providers.anyrouter.apiKey` from `~/.hal/config.json` by default.
 If `HTTPS_PROXY` / `HTTP_PROXY` is set, HaL enables Node `--use-env-proxy` automatically.
+Bridge runs in verbose mode by default (request metadata, no message content).
+
+Explicitly force verbose mode:
+
+```bash
+hal anyrouter bridge --port 3181 --verbose
+```
+
+Reduce log noise when needed:
+
+```bash
+hal anyrouter bridge --port 3181 --quiet
+```
 
 ## Configure HaL
 

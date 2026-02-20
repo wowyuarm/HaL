@@ -131,6 +131,18 @@ const betaHeader = process.env.ANYROUTER_ANTHROPIC_BETA || DEFAULT_BETA;
 const allowBrowserAccess = envBool("ANYROUTER_DIRECT_BROWSER_ACCESS", true);
 const forceStream = envBool("ANYROUTER_FORCE_STREAM", true);
 const injectClaudeCodeSystem = envBool("ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM", true);
+const verboseLogs = envBool("ANYROUTER_VERBOSE", false);
+let requestCounter = 0;
+
+function logInfo(message) {
+  console.log(`[anyrouter-bridge] ${message}`);
+}
+
+function logDebug(message) {
+  if (verboseLogs) {
+    logInfo(message);
+  }
+}
 
 if (!apiKey) {
   console.error("[anyrouter-bridge] Missing ANYROUTER_API_KEY");
@@ -143,25 +155,32 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const reqId = ++requestCounter;
+  const startedAt = Date.now();
+  const method = req.method || "UNKNOWN";
+  const requestUrl = req.url || "/";
+  const requestPath = requestUrl.split("?")[0];
+
   try {
-    if (req.url === "/health") {
+    if (requestPath === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, upstream }));
       return;
     }
 
-    if (req.method !== "POST" || !req.url?.startsWith("/v1/")) {
+    if (method !== "POST" || !requestPath.startsWith("/v1/")) {
+      logInfo(`#${reqId} ${method} ${requestPath} -> 404`);
       res.writeHead(404, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "Not found" }));
       return;
     }
 
+    logInfo(`#${reqId} ${method} ${requestPath} accepted`);
     const rawBody = await readBody(req);
     const contentType = String(req.headers["content-type"] || "").toLowerCase();
     const isJson = contentType.includes("application/json");
 
     let upstreamBody = rawBody;
-    const requestPath = req.url.split("?")[0];
     if (isJson && requestPath === "/v1/messages") {
       let payload;
       try {
@@ -179,6 +198,13 @@ const server = http.createServer(async (req, res) => {
         ensureClaudeCodeSystem(payload);
       }
       upstreamBody = Buffer.from(JSON.stringify(payload));
+      logDebug(
+        `#${reqId} payload model=${payload.model || "-"} messages=${
+          Array.isArray(payload.messages) ? payload.messages.length : 0
+        } tools=${Array.isArray(payload.tools) ? payload.tools.length : 0} stream=${Boolean(
+          payload.stream,
+        )}`,
+      );
     }
 
     const upstreamHeaders = new Headers();
@@ -208,14 +234,21 @@ const server = http.createServer(async (req, res) => {
       upstreamHeaders.set("content-type", "application/json");
     }
 
-    const upstreamUrl = `${upstream}${req.url}`;
+    const upstreamUrl = `${upstream}${requestUrl}`;
     const upstreamResponse = await fetch(upstreamUrl, {
-      method: req.method,
+      method,
       headers: upstreamHeaders,
       body: upstreamBody.length > 0 ? upstreamBody : undefined,
       redirect: "manual",
     });
 
+    const elapsed = Date.now() - startedAt;
+    logInfo(
+      `#${reqId} ${method} ${requestPath} -> ${upstreamResponse.status} (${elapsed}ms)`,
+    );
+    logDebug(
+      `#${reqId} upstream content-type=${upstreamResponse.headers.get("content-type") || "-"}`,
+    );
     copyResponseHeaders(upstreamResponse.headers, res);
     res.statusCode = upstreamResponse.status;
 
@@ -226,7 +259,10 @@ const server = http.createServer(async (req, res) => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[anyrouter-bridge] error: ${message}`);
+    const elapsed = Date.now() - startedAt;
+    console.error(
+      `[anyrouter-bridge] #${reqId} ${method} ${requestPath} error after ${elapsed}ms: ${message}`,
+    );
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json" });
     }
