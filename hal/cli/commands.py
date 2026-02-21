@@ -57,9 +57,9 @@ def main(
 @app.command()
 def onboard():
     """Initialize HaL configuration and workspace."""
-    from hal.infra.config.loader import get_config_path, save_config
+    from hal.infra.config.loader import get_auth_path, get_config_path, save_config
     from hal.infra.config.schema import Config
-    from hal.utils.helpers import get_workspace_path
+    from hal.utils.helpers import get_data_path
 
     config_path = get_config_path()
 
@@ -72,17 +72,15 @@ def onboard():
     config = Config()
     save_config(config)
     console.print(f"[green]✓[/green] Created config at {config_path}")
+    console.print(f"[green]✓[/green] Created auth at {get_auth_path()}")
 
-    # Create workspace
-    workspace = get_workspace_path()
-    console.print(f"[green]✓[/green] Created workspace at {workspace}")
-
-    # Create default bootstrap files
-    _create_workspace_templates(workspace)
+    # Create bootstrap files in ~/.hal/
+    hal_dir = get_data_path()
+    _create_workspace_templates(hal_dir)
 
     console.print(f"\n{__logo__} HaL is ready!")
     console.print("\nNext steps:")
-    console.print("  1. Add your API key to [cyan]~/.hal/config.json[/cyan]")
+    console.print("  1. Add your API key to [cyan]~/.hal/auth.yaml[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print('  2. Chat: [cyan]hal agent -m "Hello!"[/cyan]')
 
@@ -93,7 +91,7 @@ def _create_workspace_templates(workspace: Path):
         "AGENTS.md": """# Agent Instructions
 
 Add operational instructions for your HaL agent here.
-See workspace/TOOLS.md for tool usage examples.
+See TOOLS.md for tool usage examples.
 """,
         "SOUL.md": """# Soul
 
@@ -120,6 +118,43 @@ Information about the user goes here.
 - Communication style: (casual/formal)
 - Timezone: (your timezone)
 - Language: (your preferred language)
+""",
+        "TOOLS.md": """# Tools Reference
+
+## File System (fs)
+- read: Read file contents
+- write: Create or overwrite files
+- edit: Replace text in files
+- list: List directory contents
+
+## Shell (exec)
+- Run shell commands with timeout control
+
+## Web
+- web_search: Search the web (Tavily)
+- web_fetch: Fetch and parse web pages
+
+## Memory (recall)
+- Semantic search over conversation history and notes
+
+## Subagent (spawn)
+- Spawn background agents for parallel tasks
+
+## Scheduling (cron)
+- Schedule recurring tasks with cron expressions
+
+## Heartbeat
+- Check HEARTBEAT.md every 30 min for pending tasks
+""",
+        "HEARTBEAT.md": """# Heartbeat Tasks
+
+## Active Tasks
+
+(Add tasks here for the heartbeat monitor to check)
+
+## Completed
+
+(Completed tasks are moved here)
 """,
     }
 
@@ -153,7 +188,7 @@ This file stores important information that should persist across sessions.
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
     # Create utility directories
-    for dirname in ("tmp", "scripts"):
+    for dirname in ("tmp", "scripts", "skills", "logs"):
         d = workspace / dirname
         if not d.exists():
             d.mkdir(exist_ok=True)
@@ -224,7 +259,7 @@ def anyrouter_bridge(
     resolved_key = api_key or cfg.api_key
     if not resolved_key:
         console.print("[red]AnyRouter API key not configured.[/red]")
-        console.print("Set providers.anyrouter.apiKey in ~/.hal/config.json or pass --api-key")
+        console.print("Set providers.anyrouter.api_key in ~/.hal/auth.yaml or pass --api-key")
         raise typer.Exit(1)
 
     resolved_upstream = upstream
@@ -250,7 +285,7 @@ def anyrouter_bridge(
     )
 
     console.print(f"{__logo__} Starting AnyRouter bridge at http://{host}:{port}")
-    console.print("Set providers.anyrouter.apiBase to this local URL in ~/.hal/config.json")
+    console.print("Set providers.anyrouter.api_base to this local URL in ~/.hal/config.yaml")
     console.print(f"Upstream: {resolved_upstream}\n")
 
     proxy_vars = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")

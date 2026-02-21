@@ -25,20 +25,23 @@ def test_onboard_creates_config_workspace_and_templates(tmp_home: Path) -> None:
     result = runner.invoke(commands.app, ["onboard"], input="y\n")
     assert result.exit_code == 0
 
-    config_path = tmp_home / ".hal" / "config.json"
+    config_path = tmp_home / ".hal" / "config.yaml"
     assert config_path.exists()
 
-    data = json.loads(config_path.read_text(encoding="utf-8"))
+    import yaml
+
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert "agents" in data
     assert "providers" in data
 
-    workspace = tmp_home / ".hal" / "workspace"
-    assert workspace.exists()
-    assert (workspace / "AGENTS.md").exists()
-    assert (workspace / "SOUL.md").exists()
-    assert (workspace / "USER.md").exists()
+    hal_dir = tmp_home / ".hal"
+    assert (hal_dir / "AGENTS.md").exists()
+    assert (hal_dir / "SOUL.md").exists()
+    assert (hal_dir / "USER.md").exists()
+    assert (hal_dir / "TOOLS.md").exists()
+    assert (hal_dir / "HEARTBEAT.md").exists()
 
-    mem = workspace / "memory" / "MEMORY.md"
+    mem = hal_dir / "memory" / "MEMORY.md"
     assert mem.exists()
 
 
@@ -47,7 +50,7 @@ def test_onboard_declines_overwrite(tmp_home: Path) -> None:
     first = runner.invoke(commands.app, ["onboard"], input="y\n")
     assert first.exit_code == 0
 
-    config_path = tmp_home / ".hal" / "config.json"
+    config_path = tmp_home / ".hal" / "config.yaml"
     original = config_path.read_text(encoding="utf-8")
 
     # Second run: config exists, user declines overwrite

@@ -36,7 +36,7 @@ def make_provider(config):
     provider_name = _resolve_provider_name(config, model)
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
-        console.print("Set one in ~/.hal/config.json under providers section")
+        console.print("Set one in ~/.hal/auth.yaml under providers section")
         raise typer.Exit(1)
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
