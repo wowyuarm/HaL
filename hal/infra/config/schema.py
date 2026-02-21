@@ -158,6 +158,7 @@ class MemorySearchConfig(BaseModel):
     recall_min_score: float = 0.0
     max_chunk_size: int = 1000
     chunk_overlap_lines: int = 2
+    chunk_heading_max_level: int = 2
 
 
 class Config(BaseSettings):

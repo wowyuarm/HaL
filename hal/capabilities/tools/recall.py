@@ -66,7 +66,7 @@ class RecallTool(Tool):
             header = f"**[{i}] {r.source}"
             if r.heading:
                 header += f" — {r.heading}"
-            header += f"** (score: {r.score:.3f}"
+            header += f"** (rrf_score: {r.score:.3f}"
             if r.source_type and r.source_type != "raw":
                 header += f", {r.source_type}"
             header += ")"

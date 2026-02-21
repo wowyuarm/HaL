@@ -305,7 +305,7 @@ Layout:
                 header = f"- **{r.source}"
                 if r.heading:
                     header += f" — {r.heading}"
-                header += f"** (relevance: {r.score:.2f}, type: {source_type})"
+                header += f"** (rrf_score: {r.score:.2f}, type: {source_type})"
                 item_content = str(r.content)[:per_item_limit]
                 entry = f"{header}\n  {item_content}"
                 if (

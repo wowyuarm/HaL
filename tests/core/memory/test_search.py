@@ -336,3 +336,61 @@ class TestExportAndIndexYesterday:
             count = await memory_search.export_and_index_yesterday()
             assert count == 5
             mock_idx.assert_called_once()
+
+
+class TestEmbeddingResilience:
+    async def test_embed_texts_retries_on_transient_error(self, memory_search):
+        with (
+            patch.object(
+                memory_search,
+                "_embed_texts_litellm",
+                new_callable=AsyncMock,
+                side_effect=[RuntimeError("temporary"), _fake_embedding(["query"])],
+            ) as mock_embed,
+            patch("hal.core.memory.search.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            out = await memory_search._embed_texts(["query"])
+            assert len(out) == 1
+            assert mock_embed.await_count == 2
+            mock_sleep.assert_awaited_once()
+
+    async def test_index_file_falls_back_to_per_chunk_embedding(self, memory_search, daily_dir):
+        md_path = daily_dir / "2026-02-12.md"
+        md_path.write_text("# A\n\nalpha\n\n## B\n\nbeta", encoding="utf-8")
+
+        async def flaky_embed(texts: list[str]) -> list[list[float]]:
+            # Simulate batch failure, then one single-chunk failure.
+            if len(texts) > 1:
+                return []
+            if "beta" in texts[0]:
+                return []
+            return _fake_embedding(texts)
+
+        with patch.object(memory_search, "_embed_texts", new=flaky_embed):
+            count = await memory_search._index_file(md_path)
+
+        assert count == 1
+
+    async def test_needs_reindex_detects_chunk_id_mismatch(self, memory_search, daily_dir):
+        md_path = daily_dir / "2026-02-12.md"
+        md_path.write_text("# A\n\nalpha", encoding="utf-8")
+
+        with patch.object(
+            memory_search,
+            "_embed_texts",
+            new_callable=AsyncMock,
+            side_effect=lambda texts: _fake_embedding(texts),
+        ):
+            await memory_search._index_file(md_path)
+
+        source_name = "2026-02-12.md"
+        needs_reindex = await memory_search._needs_reindex(
+            source_name, indexed_sources={source_name}
+        )
+        assert needs_reindex is False
+
+        md_path.write_text("# A\n\nalpha changed", encoding="utf-8")
+        needs_reindex = await memory_search._needs_reindex(
+            source_name, indexed_sources={source_name}
+        )
+        assert needs_reindex is True

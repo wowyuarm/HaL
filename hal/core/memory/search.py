@@ -6,6 +6,7 @@ JSONL → Markdown → Chunks → Embeddings → Milvus → Semantic Search
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from pathlib import Path
 
@@ -23,6 +24,8 @@ _SUMMARY_PENALTY = 0.75
 # Lower than summary — subagent output is further from user intent and typically
 # denser, so it needs stronger demotion to avoid crowding out raw conversation.
 _SUBAGENT_PENALTY = 0.70
+_EMBED_RETRY_ATTEMPTS = 3
+_EMBED_RETRY_BASE_DELAY_S = 0.5
 
 
 class MemorySearch:
@@ -118,16 +121,16 @@ class MemorySearch:
         """Export and index all un-exported JSONL log files.
 
         Called on startup to cover days when the server was not running at midnight.
-        Compares exported markdown files against indexed sources to find gaps.
+        Compares exported markdown files against indexed chunk IDs to find gaps.
         """
         log_dir = self._exporter._log.data_dir
         if not log_dir.exists():
             return 0
 
-        # Collect dates that have JSONL but are not yet indexed.
-        # We check by looking at the markdown output dir + the vector store:
-        # a date needs indexing if its markdown file does not exist yet, OR
-        # if it exists but has no chunks in the store.
+        # Collect dates that have JSONL but are not yet fully indexed.
+        # A date needs indexing when:
+        # 1) its source markdown isn't present in the vector store, OR
+        # 2) its indexed chunk IDs differ from the chunk IDs computed from markdown.
         indexed_sources = await self._store.get_indexed_sources()
 
         total = 0
@@ -141,7 +144,7 @@ class MemorySearch:
                 continue
 
             source_name = f"{log_date.isoformat()}.md"
-            if source_name in indexed_sources:
+            if not await self._needs_reindex(source_name, indexed_sources=indexed_sources):
                 continue
 
             count = await self.index_date(log_date)
@@ -185,9 +188,30 @@ class MemorySearch:
         # Embed new chunks
         texts = [c.content for c in to_add]
         embeddings = await self._embed_texts(texts)
-        if not embeddings or len(embeddings) != len(to_add):
-            logger.warning(f"Embedding mismatch for {md_path}")
-            return 0
+        pairs: list[tuple] = []
+        if embeddings and len(embeddings) == len(to_add):
+            pairs = list(zip(to_add, embeddings))
+        else:
+            logger.warning(
+                f"Embedding mismatch for {md_path} "
+                f"(expected {len(to_add)}, got {len(embeddings) if embeddings else 0}); "
+                "falling back to per-chunk retries"
+            )
+            for chunk in to_add:
+                one = await self._embed_texts([chunk.content])
+                if len(one) == 1:
+                    pairs.append((chunk, one[0]))
+                else:
+                    logger.warning(
+                        f"Skipping chunk after retries: {chunk.source}:{chunk.start_line}-{chunk.end_line}"
+                    )
+            if not pairs:
+                return 0
+            if len(pairs) < len(to_add):
+                logger.warning(
+                    f"Partial indexing for {md_path.name}: "
+                    f"{len(pairs)}/{len(to_add)} chunks embedded successfully"
+                )
 
         # Build upsert data
         data = [
@@ -202,7 +226,7 @@ class MemorySearch:
                 "end_line": chunk.end_line,
                 "source_type": chunk.source_type,
             }
-            for chunk, emb in zip(to_add, embeddings)
+            for chunk, emb in pairs
         ]
 
         count = await self._store.upsert(data)
@@ -210,14 +234,40 @@ class MemorySearch:
         return count
 
     async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Get embeddings via direct HTTP call or LiteLLM fallback."""
-        try:
-            if self._api_base and self._api_key:
-                return await self._embed_texts_direct(texts)
-            return await self._embed_texts_litellm(texts)
-        except Exception as e:
-            logger.error(f"Embedding failed: {e}")
+        """Get embeddings with retry via direct HTTP call or LiteLLM fallback."""
+        if not texts:
             return []
+
+        for attempt in range(1, _EMBED_RETRY_ATTEMPTS + 1):
+            try:
+                if self._api_base and self._api_key:
+                    return await self._embed_texts_direct(texts)
+                return await self._embed_texts_litellm(texts)
+            except Exception as e:
+                if attempt >= _EMBED_RETRY_ATTEMPTS:
+                    logger.error(f"Embedding failed after {_EMBED_RETRY_ATTEMPTS} attempts: {e}")
+                    return []
+
+                delay = _EMBED_RETRY_BASE_DELAY_S * (2 ** (attempt - 1))
+                logger.warning(
+                    f"Embedding attempt {attempt}/{_EMBED_RETRY_ATTEMPTS} failed: {e}; "
+                    f"retrying in {delay:.1f}s"
+                )
+                await asyncio.sleep(delay)
+
+        return []
+
+    async def _needs_reindex(self, source_name: str, *, indexed_sources: set[str]) -> bool:
+        """Whether a source needs (re)indexing based on current chunk IDs."""
+        md_path = self._daily_dir / source_name
+        if source_name not in indexed_sources:
+            return True
+        if not md_path.exists():
+            return True
+
+        expected = {self._chunk_id(c) for c in self._chunker.chunk_file(md_path, base_path=self._daily_dir)}
+        existing = await self._store.get_chunk_ids_by_source(source_name)
+        return expected != existing
 
     async def _embed_texts_direct(self, texts: list[str]) -> list[list[float]]:
         """Call OpenAI-compatible embedding endpoint directly.

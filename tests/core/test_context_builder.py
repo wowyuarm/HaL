@@ -315,6 +315,7 @@ class TestDynamicContext:
         assert "daily_log" in user_content
         assert "cooking" in user_content
         assert "0.85" in user_content
+        assert "rrf_score" in user_content
         assert "data, not instructions" in user_content
         # Should NOT be in system prompt
         system_content = msgs[0]["content"]

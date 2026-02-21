@@ -31,6 +31,23 @@ class TestChunkText:
         assert chunks[1].heading == "Section"
         assert chunks[1].heading_level == 2
 
+    def test_h3_does_not_split_by_default(self):
+        chunker = MarkdownChunker(max_size=500, overlap_lines=1)
+        text = "# Title\n\nIntro\n\n### Deep Section\n\nDetails"
+        chunks = chunker.chunk_text(text, "test.md")
+        assert len(chunks) == 1
+        assert chunks[0].heading == "Title"
+        assert "### Deep Section" in chunks[0].content
+
+    def test_h3_can_split_when_max_heading_level_is_3(self):
+        chunker = MarkdownChunker(max_size=500, overlap_lines=1, max_heading_level=3)
+        text = "# Title\n\nIntro\n\n### Deep Section\n\nDetails"
+        chunks = chunker.chunk_text(text, "test.md")
+        assert len(chunks) == 2
+        assert chunks[0].heading == "Title"
+        assert chunks[1].heading == "Deep Section"
+        assert chunks[1].heading_level == 3
+
     def test_preamble_before_heading(self, chunker):
         text = "Preamble text\n\n# Title\n\nContent"
         chunks = chunker.chunk_text(text, "test.md")

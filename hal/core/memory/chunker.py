@@ -55,15 +55,18 @@ class MarkdownChunker:
     """Split markdown into heading-based chunks.
 
     Algorithm:
-    1. Find all headings via regex.
+    1. Find headings (up to max_heading_level) via regex.
     2. Split into sections at heading boundaries.
     3. If a section <= max_size chars, emit as one chunk.
     4. If a section > max_size, split on blank lines with overlap.
     """
 
-    def __init__(self, max_size: int = 1000, overlap_lines: int = 2):
+    def __init__(self, max_size: int = 1000, overlap_lines: int = 2, max_heading_level: int = 2):
         self._max_size = max_size
         self._overlap_lines = overlap_lines
+        # Default to H1/H2 boundaries so markdown inside messages (###, ####, ...)
+        # doesn't over-fragment conversational context.
+        self._max_heading_level = max(1, min(max_heading_level, 6))
 
     def chunk_file(self, path: Path, base_path: Path | None = None) -> list[Chunk]:
         """Chunk a markdown file. Source is set relative to base_path if provided."""
@@ -80,7 +83,7 @@ class MarkdownChunker:
             return []
 
         lines = text.split("\n")
-        sections = self._split_into_sections(lines)
+        sections = self._split_into_sections(lines, max_heading_level=self._max_heading_level)
         chunks: list[Chunk] = []
 
         for heading, heading_level, start_line, section_lines in sections:
@@ -145,6 +148,8 @@ class MarkdownChunker:
     @staticmethod
     def _split_into_sections(
         lines: list[str],
+        *,
+        max_heading_level: int,
     ) -> list[tuple[str, int, int, list[str]]]:
         """Split lines into (heading, level, start_line, lines) sections."""
         sections: list[tuple[str, int, int, list[str]]] = []
@@ -152,8 +157,11 @@ class MarkdownChunker:
 
         for i, line in enumerate(lines):
             m = _HEADING_RE.match(line)
-            if m:
-                heading_positions.append((i, m.group(2).strip(), len(m.group(1))))
+            if not m:
+                continue
+            level = len(m.group(1))
+            if level <= max_heading_level:
+                heading_positions.append((i, m.group(2).strip(), level))
 
         if not heading_positions:
             # No headings — entire file is one chunk

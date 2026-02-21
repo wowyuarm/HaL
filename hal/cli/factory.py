@@ -179,6 +179,7 @@ def make_memory_search(config):
     chunker = MarkdownChunker(
         max_size=ms_cfg.max_chunk_size,
         overlap_lines=ms_cfg.chunk_overlap_lines,
+        max_heading_level=ms_cfg.chunk_heading_max_level,
     )
     store = VectorStore(
         uri=ms_cfg.milvus_uri,
