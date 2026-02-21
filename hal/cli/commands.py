@@ -188,7 +188,7 @@ This file stores important information that should persist across sessions.
         console.print("  [dim]Created memory/MEMORY.md[/dim]")
 
     # Create utility directories
-    for dirname in ("tmp", "scripts", "skills", "logs"):
+    for dirname in ("tmp", "scripts", "skills", "logs", "cron", "projects", "media"):
         d = workspace / dirname
         if not d.exists():
             d.mkdir(exist_ok=True)
