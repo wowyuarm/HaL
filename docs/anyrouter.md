@@ -22,7 +22,7 @@ This keeps HaL unchanged while moving the upstream TLS fingerprint to Node.
 hal anyrouter bridge --port 3181
 ```
 
-The command reads `providers.anyrouter.apiKey` from `~/.hal/config.json` by default.
+The command reads `providers.anyrouter.api_key` from `~/.hal/auth.yaml` by default.
 If `HTTPS_PROXY` / `HTTP_PROXY` is set, HaL enables Node `--use-env-proxy` automatically.
 Bridge runs in verbose mode by default (request metadata, no message content).
 
@@ -40,22 +40,22 @@ hal anyrouter bridge --port 3181 --quiet
 
 ## Configure HaL
 
-Point AnyRouter `apiBase` to the local bridge:
+Point AnyRouter `api_base` to the local bridge:
 
-```json
-{
-  "providers": {
-    "anyrouter": {
-      "apiKey": "sk-xxx",
-      "apiBase": "http://127.0.0.1:3181",
-      "extraHeaders": {
-        "user-agent": "claude-cli/2.1.2 (external, cli)",
-        "x-app": "cli",
-        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
-      }
-    }
-  }
-}
+```yaml
+# ~/.hal/auth.yaml
+providers:
+  anyrouter:
+    api_key: sk-xxx
+
+# ~/.hal/config.yaml
+providers:
+  anyrouter:
+    api_base: http://127.0.0.1:3181
+    extra_headers:
+      user-agent: "claude-cli/2.1.2 (external, cli)"
+      x-app: cli
+      anthropic-beta: "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
 ```
 
 Then run HaL normally:
@@ -73,7 +73,7 @@ Switch by changing `agents.defaults.model`:
 - Moonshot: `"kimi-k2.5"`
 
 HaL resolves provider from model keywords + configured keys.
-To force AnyRouter, keep `providers.anyrouter.apiKey` enabled and set model to Claude.
+To force AnyRouter, keep `providers.anyrouter.api_key` enabled and set model to Claude.
 
 ## Notes
 

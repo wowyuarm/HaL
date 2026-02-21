@@ -121,6 +121,6 @@ Daily interaction logs are stored in `<workspace>/logs/YYYY-MM-DD.jsonl`. Each l
 
 ### Common Issues
 
-- **"No API key configured"** — Set a provider API key in `~/.hal/config.json`
-- **"Path outside allowed directory"** — The agent is trying to access files outside the workspace (when `restrictToWorkspace` is enabled)
+- **"No API key configured"** — Set a provider API key in `~/.hal/auth.yaml`
+- **"Path outside allowed directory"** — The agent is trying to access files outside the workspace (when `restrict_to_workspace` is enabled)
 - **Memory search unavailable** — Install optional dependencies: `pip install pymilvus`

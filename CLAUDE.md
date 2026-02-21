@@ -93,19 +93,23 @@ Single source of truth for LLM provider metadata. A tuple of `ProviderSpec` data
 
 All providers use `LiteLLMProvider` (`infra/providers/litellm_provider.py`) as the unified implementation.
 
-For OpenAI-compatible proxies (e.g. codex-proxy), set `compatMode: "openai"` in the provider config. This bypasses gateway auto-detection, model-name prefixing, and LiteLLM's internal model registry — the model name is sent as-is and `custom_llm_provider` is passed to LiteLLM so it treats the endpoint as a plain OpenAI client.
+For OpenAI-compatible proxies (e.g. codex-proxy), set `compat_mode: "openai"` in the provider config. This bypasses gateway auto-detection, model-name prefixing, and LiteLLM's internal model registry — the model name is sent as-is and `custom_llm_provider` is passed to LiteLLM so it treats the endpoint as a plain OpenAI client.
 
 ### Channels (`hal/channels/`)
 
-Chat platform integrations (Telegram, Discord, WhatsApp, Feishu). Each channel pushes `InboundMessage` to the bus and subscribes to `OutboundMessage` dispatches. They are independent of agent internals.
+Chat platform integrations (Telegram, Discord, Feishu). Each channel pushes `InboundMessage` to the bus and subscribes to `OutboundMessage` dispatches. They are independent of agent internals.
 
-### Configuration (`hal/infra/config/schema.py`)
+### Configuration (`hal/infra/config/`)
 
-Pydantic models. Config lives at `~/.hal/config.json`. Key paths:
+Pydantic models with YAML persistence. Config is split into two files:
+- `~/.hal/config.yaml` — structure and settings (snake_case natively)
+- `~/.hal/auth.yaml` — secrets (API keys, tokens), gitignored
+
+Key paths in config:
 - `agents.defaults` — model, workspace, max_tokens, temperature, max_tool_iterations
-- `providers.<name>` — apiKey, apiBase, compatMode per provider
-  - `compatMode` — protocol hint for proxy endpoints (e.g. `"openai"` for any OpenAI-compatible server); bypasses LiteLLM model registry and auto-detection
-- `tools.web.search` — api_key (Tavily), max_results
+- `providers.<name>` — api_key (in auth.yaml), api_base, compat_mode per provider
+  - `compat_mode` — protocol hint for proxy endpoints (e.g. `"openai"` for any OpenAI-compatible server); bypasses LiteLLM model registry and auto-detection
+- `tools.web.search` — api_key (Tavily, in auth.yaml), max_results
 - `tools.exec` — timeout
 - `tools.restrict_to_workspace` — boolean sandbox flag
 
@@ -122,7 +126,7 @@ Pydantic models. Config lives at `~/.hal/config.json`. Key paths:
 - **Python >=3.11**, async-first design throughout
 - **Ruff** for linting: rules `E, F, I, N, W` (E501 ignored), line length 100
 - **pytest-asyncio** with `asyncio_mode = "auto"`
-- Workspace bootstrap files (AGENTS.md, SOUL.md, etc.) are loaded into the system prompt at runtime — they are not code but agent personality/instruction configuration
+- Workspace bootstrap files (AGENTS.md, SOUL.md, etc.) live in `~/.hal/` and are loaded into the system prompt at runtime — they are not code but agent personality/instruction configuration
 
 ## Directory Structure
 
@@ -164,17 +168,18 @@ hal/
 │   ├── base.py         # Abstract Channel class
 │   ├── telegram.py     # Telegram integration
 │   ├── discord.py      # Discord integration
-│   └── [other channels]
+│   └── feishu.py       # Feishu/Lark integration
 ├── bus/                # Async message routing
 │   ├── events.py       # InboundMessage, OutboundMessage
-│   └── queue.py        # MessageBus — async queue & dispatch
+│   └── queue.py        # MessageBus — async queue routing
 ├── infra/              # Providers, config, logging
 │   ├── providers/      # LLM provider integrations
 │   │   ├── registry.py # ProviderSpec — declarative metadata
 │   │   ├── litellm_provider.py # Unified LLM client
 │   │   └── [provider files]
 │   └── config/         # Configuration management
-│       └── schema.py   # Pydantic config models
+│       ├── schema.py   # Pydantic config models
+│       └── loader.py   # YAML loading, auth separation
 ├── cli/                # CLI commands
 │   ├── commands.py     # CLI entry points (onboard, agent, gateway, status)
 │   ├── factory.py      # Provider and memory search construction

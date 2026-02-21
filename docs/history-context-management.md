@@ -33,20 +33,15 @@ Simple heuristic applied in `DailyLog.get_recent_conversation()`:
 - User messages are **always kept in full** (they carry intent, not style)
 - Tool messages are already filtered by `include_tools=False`
 
-Configuration via `config.json`:
+Configuration via `config.yaml`:
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "history": {
-        "max_messages": 50,
-        "recent_full_turns": 3,
-        "assistant_truncate_chars": 200
-      }
-    }
-  }
-}
+```yaml
+agents:
+  defaults:
+    history:
+      max_messages: 50
+      recent_full_turns: 3
+      assistant_truncate_chars: 200
 ```
 
 This addresses the core issue: old assistant outputs lose their formatting/style information through truncation, while preserving enough factual content for conversation coherence.
@@ -127,24 +122,18 @@ Recommendation: start with **heuristic template** for Zone B (sufficient for sty
 
 #### Configuration (Proposed)
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "history": {
-        "max_messages": 50,
-        "recent_full_turns": 3,
-        "assistant_truncate_chars": 200,
-        "condensed_context": {
-          "enabled": false,
-          "verbatim_budget_tokens": 8000,
-          "condensed_budget_tokens": 10000,
-          "compacted_budget_tokens": 2000
-        }
-      }
-    }
-  }
-}
+```yaml
+agents:
+  defaults:
+    history:
+      max_messages: 50
+      recent_full_turns: 3
+      assistant_truncate_chars: 200
+      condensed_context:
+        enabled: false
+        verbatim_budget_tokens: 8000
+        condensed_budget_tokens: 10000
+        compacted_budget_tokens: 2000
 ```
 
 #### Open Questions

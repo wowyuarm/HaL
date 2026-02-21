@@ -5,7 +5,7 @@ HaL is an AI agent framework built around an async message bus that decouples ch
 ## System Overview
 
 ```
-Channels (Telegram/Discord/WhatsApp/Feishu)
+Channels (Telegram/Discord/Feishu)
     │
     ▼
 MessageBus (async queue)

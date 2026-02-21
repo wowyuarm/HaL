@@ -22,7 +22,7 @@ pip install -e .
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.hal/config.json`.
+> Set your API key in `~/.hal/auth.yaml`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global) · [Tavily Search](https://tavily.com/) (optional, for web search)
 
 **1. Initialize**
@@ -31,21 +31,22 @@ pip install -e .
 hal onboard
 ```
 
-**2. Configure** (`~/.hal/config.json`)
+**2. Configure**
 
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "model": "..."
-    }
-  }
-}
+`~/.hal/auth.yaml` (secrets):
+
+```yaml
+providers:
+  openrouter:
+    api_key: sk-or-v1-xxx
+```
+
+`~/.hal/config.yaml` (settings):
+
+```yaml
+agents:
+  defaults:
+    model: "..."
 ```
 
 **3. Chat**
@@ -56,13 +57,12 @@ hal agent -m "Hello, World!"
 
 ## 💬 Chat Apps
 
-Talk to your HaL through Telegram, Discord, WhatsApp, or Feishu — anytime, anywhere.
+Talk to your HaL through Telegram, Discord, or Feishu — anytime, anywhere.
 
 | Channel | Setup |
 |---------|-------|
 | **Telegram** | Easy (just a token) |
 | **Discord** | Easy (bot token + intents) |
-| **WhatsApp** | Medium (scan QR) |
 | **Feishu** | Medium (app credentials) |
 
 <details>
@@ -75,16 +75,18 @@ Talk to your HaL through Telegram, Discord, WhatsApp, or Feishu — anytime, any
 
 **2. Configure**
 
-```json
-{
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
+```yaml
+# ~/.hal/auth.yaml
+channels:
+  telegram:
+    token: YOUR_BOT_TOKEN
+
+# ~/.hal/config.yaml
+channels:
+  telegram:
+    enabled: true
+    allow_from:
+      - YOUR_USER_ID
 ```
 
 > Get your user ID from `@userinfobot` on Telegram.
@@ -114,16 +116,18 @@ hal gateway
 
 **4. Configure**
 
-```json
-{
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
+```yaml
+# ~/.hal/auth.yaml
+channels:
+  discord:
+    token: YOUR_BOT_TOKEN
+
+# ~/.hal/config.yaml
+channels:
+  discord:
+    enabled: true
+    allow_from:
+      - YOUR_USER_ID
 ```
 
 **5. Invite the bot**
@@ -134,29 +138,6 @@ hal gateway
 
 ```bash
 hal gateway
-```
-
-</details>
-
-<details>
-<summary><b>WhatsApp</b></summary>
-
-Requires **Node.js ≥18**.
-
-```bash
-hal channels login   # Scan QR with WhatsApp → Linked Devices
-hal gateway          # In another terminal
-```
-
-```json
-{
-  "channels": {
-    "whatsapp": {
-      "enabled": true,
-      "allowFrom": ["+1234567890"]
-    }
-  }
-}
 ```
 
 </details>
@@ -174,16 +155,17 @@ pip install hal-agent[feishu]
 2. Permissions: `im:message` · Events: `im.message.receive_v1` (Long Connection mode)
 3. Get **App ID** and **App Secret** → Publish the app
 
-```json
-{
-  "channels": {
-    "feishu": {
-      "enabled": true,
-      "appId": "cli_xxx",
-      "appSecret": "xxx"
-    }
-  }
-}
+```yaml
+# ~/.hal/auth.yaml
+channels:
+  feishu:
+    app_id: cli_xxx
+    app_secret: xxx
+
+# ~/.hal/config.yaml
+channels:
+  feishu:
+    enabled: true
 ```
 
 ```bash
@@ -194,7 +176,7 @@ hal gateway
 
 ## ⚙️ Configuration
 
-Config file: `~/.hal/config.json`
+Config files: `~/.hal/config.yaml` (settings) and `~/.hal/auth.yaml` (secrets / API keys)
 
 ### Providers
 
@@ -220,8 +202,8 @@ AnyRouter setup guide: `docs/anyrouter.md`
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `tools.restrictToWorkspace` | `false` | Restricts all agent tools to the workspace directory. |
-| `channels.*.allowFrom` | `[]` (allow all) | Whitelist of user IDs. |
+| `tools.restrict_to_workspace` | `false` | Restricts all agent tools to the workspace directory. |
+| `channels.*.allow_from` | `[]` (allow all) | Whitelist of user IDs. |
 
 ## CLI Reference
 
@@ -232,7 +214,6 @@ AnyRouter setup guide: `docs/anyrouter.md`
 | `hal agent` | Interactive chat mode |
 | `hal gateway` | Start the gateway |
 | `hal status` | Show status |
-| `hal channels login` | Link WhatsApp (scan QR) |
 | `hal channels status` | Show channel status |
 
 

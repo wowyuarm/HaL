@@ -39,19 +39,19 @@ Optional vector-based memory search using Milvus Lite.
 
 ### Configuration
 
-In `~/.hal/config.json` under `memorySearch`:
+In `~/.hal/config.yaml` under `memory_search`:
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `enabled` | `false` | Enable semantic memory search |
-| `embeddingModel` | `text-embedding-3-small` | Model for computing embeddings |
-| `embeddingProvider` | `null` | Provider name for embeddings (auto-detected if null) |
-| `embeddingDim` | `1536` | Embedding vector dimension |
-| `maxChunkSize` | `1000` | Maximum chunk size in characters |
-| `chunkOverlapLines` | `3` | Number of overlapping lines between chunks |
-| `milvusUri` | `~/.hal/milvus.db` | Milvus Lite database path |
-| `collectionName` | `hal_memory` | Milvus collection name |
-| `autoInjectTopK` | `3` | Number of chunks to auto-inject per request |
+| `embedding_model` | `text-embedding-3-small` | Model for computing embeddings |
+| `embedding_provider` | `null` | Provider name for embeddings (auto-detected if null) |
+| `embedding_dim` | `1536` | Embedding vector dimension |
+| `max_chunk_size` | `1000` | Maximum chunk size in characters |
+| `chunk_overlap_lines` | `3` | Number of overlapping lines between chunks |
+| `milvus_uri` | `~/.hal/milvus.db` | Milvus Lite database path |
+| `collection_name` | `hal_memory` | Milvus collection name |
+| `auto_inject_top_k` | `3` | Number of chunks to auto-inject per request |
 
 ## Data Flow
 
