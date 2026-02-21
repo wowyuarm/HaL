@@ -6,14 +6,6 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class WhatsAppConfig(BaseModel):
-    """WhatsApp channel configuration."""
-
-    enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
-    allow_from: list[str] = Field(default_factory=list)  # Allowed phone numbers
-
-
 class TelegramConfig(BaseModel):
     """Telegram channel configuration."""
 
@@ -49,7 +41,6 @@ class DiscordConfig(BaseModel):
 class ChannelsConfig(BaseModel):
     """Configuration for chat channels."""
 
-    whatsapp: WhatsAppConfig = Field(default_factory=WhatsAppConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
@@ -72,7 +63,7 @@ class HistoryConfig(BaseModel):
 class AgentDefaults(BaseModel):
     """Default agent configuration."""
 
-    workspace: str = "~/.hal/workspace"
+    workspace: str = "~/.hal"
     model: str = "anthropic/claude-opus-4-5"
     max_tokens: int = 8192
     temperature: float = 0.7

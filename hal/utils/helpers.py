@@ -20,7 +20,7 @@ def get_workspace_path(workspace: str | None = None) -> Path:
     Get the workspace path.
 
     Args:
-        workspace: Optional workspace path. Defaults to ~/.hal/workspace.
+        workspace: Optional workspace path. Defaults to ~/.hal.
 
     Returns:
         Expanded and ensured workspace path.
@@ -28,7 +28,7 @@ def get_workspace_path(workspace: str | None = None) -> Path:
     if workspace:
         path = Path(workspace).expanduser()
     else:
-        path = Path.home() / ".hal" / "workspace"
+        path = Path.home() / ".hal"
     return ensure_dir(path)
 
 

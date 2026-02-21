@@ -28,7 +28,7 @@ def test_parse_session_key_invalid_raises() -> None:
 def test_get_workspace_path_default_uses_home_and_creates(tmp_home: Path) -> None:
     ws = helpers.get_workspace_path()
     assert ws.exists()
-    assert str(ws).endswith("/.hal/workspace")
+    assert str(ws).endswith("/.hal")
 
 
 def test_get_workspace_path_custom_expands_and_creates(tmp_home: Path) -> None:
