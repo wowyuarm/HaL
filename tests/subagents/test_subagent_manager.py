@@ -199,3 +199,29 @@ def test_build_system_prompt_includes_time(tmp_path) -> None:
 
     prompt = mgr._build_system_prompt()
     assert "Current time:" in prompt
+
+
+def test_build_skills_section_uses_workspace_skill_script_path(tmp_path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+
+    skill_dir = tmp_path / "skills" / "deepwiki"
+    script_path = skill_dir / "scripts" / "deepwiki.sh"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        """---
+name: deepwiki
+description: DeepWiki helper
+---
+Run `scripts/deepwiki.sh` to inspect repository docs.
+""",
+        encoding="utf-8",
+    )
+
+    section = mgr._build_skills_section()
+
+    assert section is not None
+    assert str(script_path) in section
+    assert "`scripts/deepwiki.sh`" not in section

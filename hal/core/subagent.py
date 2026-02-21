@@ -287,19 +287,11 @@ Current time: {now}""")
     def _resolve_skill_script(self, skill_name: str, relative_path: str) -> Path | None:
         """Resolve the absolute path to a skill's script file.
 
-        Checks workspace skills first, then built-in skills.
+        Skills are resolved from workspace-only skills.
         """
-        from hal.capabilities.skills.loader import BUILTIN_SKILLS_DIR
-
-        # Workspace skills
         workspace_path = self.workspace / "skills" / skill_name / relative_path
         if workspace_path.exists():
             return workspace_path
-
-        # Built-in skills
-        builtin_path = BUILTIN_SKILLS_DIR / skill_name / relative_path
-        if builtin_path.exists():
-            return builtin_path
 
         return None
 
