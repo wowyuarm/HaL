@@ -7,6 +7,7 @@ JSONL → Markdown → Chunks → Embeddings → Milvus → Semantic Search
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import date
 from pathlib import Path
 
@@ -26,6 +27,7 @@ _SUMMARY_PENALTY = 0.75
 _SUBAGENT_PENALTY = 0.70
 _EMBED_RETRY_ATTEMPTS = 3
 _EMBED_RETRY_BASE_DELAY_S = 0.5
+_ASCII_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,}")
 
 
 class MemorySearch:
@@ -95,15 +97,25 @@ class MemorySearch:
         if not query_embedding:
             return []
 
-        # Fetch extra candidates to compensate for penalty reranking
-        fetch_k = min(top_k * 2, top_k + 5)
-        results = await self._store.search(query_embedding[0], query_text=query, top_k=fetch_k)
+        # Expand keyword query text for BM25 (e.g. dev_workflow/dev-workflow variants)
+        # and fetch a wider candidate pool for reranking.
+        query_terms = _build_keyword_terms(query)
+        keyword_query = _build_keyword_query(query, query_terms)
+        fetch_k = min(max(top_k * 5, top_k + 12), 40)
+        results = await self._store.search(
+            query_embedding[0],
+            query_text=keyword_query,
+            top_k=fetch_k,
+        )
 
-        # Apply source-type penalties and re-rank
+        # Apply source-type penalties and re-rank.
+        # For subagent chunks, keep full score when multiple query terms match
+        # literally — this avoids suppressing clearly relevant snippets.
         for r in results:
+            hit_count = _count_literal_hits(f"{r.heading}\n{r.content}", query_terms)
             if r.source_type == "summary":
                 r.score *= _SUMMARY_PENALTY
-            elif r.source_type == "subagent":
+            elif r.source_type == "subagent" and hit_count < 2:
                 r.score *= _SUBAGENT_PENALTY
         results.sort(key=lambda r: r.score, reverse=True)
         if min_score > 0:
@@ -315,3 +327,53 @@ class MemorySearch:
 
         response = await litellm.aembedding(**kwargs)
         return [item["embedding"] for item in response.data]
+
+
+def _build_keyword_terms(query: str) -> list[str]:
+    """Extract strong ASCII terms and separator variants for literal matching/BM25."""
+    q = query.lower()
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    for tok in _ASCII_TOKEN_RE.findall(q):
+        candidates: set[str] = {tok}
+        if "_" in tok:
+            candidates.add(tok.replace("_", "-"))
+            candidates.add(tok.replace("_", " "))
+        if "-" in tok:
+            candidates.add(tok.replace("-", "_"))
+            candidates.add(tok.replace("-", " "))
+
+        parts = [p for p in re.split(r"[_-]+", tok) if len(p) >= 4]
+        candidates.update(parts)
+
+        for c in candidates:
+            c_norm = re.sub(r"\s+", " ", c).strip()
+            if len(c_norm) < 4 or c_norm in seen:
+                continue
+            seen.add(c_norm)
+            terms.append(c_norm)
+
+    return terms
+
+
+def _build_keyword_query(query: str, terms: list[str]) -> str:
+    """Build BM25 query text from original query + normalized term variants."""
+    parts: list[str] = [query.strip()]
+    parts.extend(terms)
+    combined = " ".join(p for p in parts if p)
+    return combined[:512]
+
+
+def _count_literal_hits(text: str, terms: list[str]) -> int:
+    """Count literal term hits with separator-normalized matching."""
+    if not terms:
+        return 0
+    raw = text.lower()
+    normalized = re.sub(r"[_-]+", " ", raw)
+    normalized = re.sub(r"\s+", " ", normalized)
+    hits = 0
+    for t in terms:
+        if t in raw or t in normalized:
+            hits += 1
+    return hits

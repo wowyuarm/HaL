@@ -7,7 +7,7 @@ import pytest
 
 from hal.core.memory.chunker import MarkdownChunker
 from hal.core.memory.exporter import DailyExporter
-from hal.core.memory.search import MemorySearch
+from hal.core.memory.search import MemorySearch, _build_keyword_query, _build_keyword_terms
 from hal.core.memory.store import SearchResult
 
 
@@ -235,9 +235,12 @@ class TestSearch:
         ):
             await memory_search.index_date(date(2026, 2, 12))
 
+            keyword_query = _build_keyword_query(
+                "deployment", _build_keyword_terms("deployment")
+            )
             # Get raw scores from store directly (before penalty)
             raw_results = await memory_search._store.search(
-                _fake_embedding(["deployment"])[0], query_text="deployment", top_k=5
+                _fake_embedding(["deployment"])[0], query_text=keyword_query, top_k=5
             )
             summary_raw_scores = {
                 r.content: r.score for r in raw_results if r.source_type == "summary"
@@ -289,8 +292,9 @@ class TestSearch:
         ):
             await memory_search.index_date(date(2026, 2, 12))
 
+            keyword_query = _build_keyword_query("audit", _build_keyword_terms("audit"))
             raw_results = await memory_search._store.search(
-                _fake_embedding(["audit"])[0], query_text="audit", top_k=10
+                _fake_embedding(["audit"])[0], query_text=keyword_query, top_k=10
             )
             subagent_raw_scores = {
                 r.content: r.score for r in raw_results if r.source_type == "subagent"
@@ -306,6 +310,54 @@ class TestSearch:
             for content, penalized_score in subagent_penalized.items():
                 raw_score = subagent_raw_scores[content]
                 assert abs(penalized_score - raw_score * _SUBAGENT_PENALTY) < 1e-6
+
+    async def test_subagent_penalty_skipped_on_multi_term_literal_match(self, memory_search):
+        raw = SearchResult(
+            content="misc note without target terms",
+            source="a.md",
+            heading="",
+            score=0.95,
+            source_type="raw",
+        )
+        subagent = SearchResult(
+            content="Use opencontext and dev-workflow for integration tasks.",
+            source="b.md",
+            heading="Subagent Result",
+            score=1.0,
+            source_type="subagent",
+        )
+        with (
+            patch.object(
+                memory_search,
+                "_embed_texts",
+                new_callable=AsyncMock,
+                return_value=_fake_embedding(["query"]),
+            ),
+            patch.object(
+                memory_search._store,
+                "search",
+                new_callable=AsyncMock,
+                return_value=[raw, subagent],
+            ),
+        ):
+            out = await memory_search.search("opencontext与dev_workflow", top_k=2)
+            assert out[0].source_type == "subagent"
+
+    async def test_search_expands_keyword_query_terms(self, memory_search):
+        with patch.object(
+            memory_search,
+            "_embed_texts",
+            new_callable=AsyncMock,
+            return_value=_fake_embedding(["query"]),
+        ), patch.object(
+            memory_search._store, "search", new_callable=AsyncMock, return_value=[]
+        ) as mock_store_search:
+            await memory_search.search("opencontext与dev_workflow", top_k=3)
+            kwargs = mock_store_search.await_args.kwargs
+            query_text = kwargs["query_text"]
+            assert "dev_workflow" in query_text
+            assert "dev-workflow" in query_text
+            assert kwargs["top_k"] > 3
 
     async def test_search_applies_min_score_filter(self, memory_search):
         fake_results = [
