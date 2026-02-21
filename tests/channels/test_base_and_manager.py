@@ -76,7 +76,6 @@ async def test_handle_message_denies_when_not_allowed() -> None:
 
 
 def test_channel_manager_initializes_enabled_channels(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Build dummy channel classes to avoid importing real implementations.
     class DummyTelegram(BaseChannel):
         name = "telegram"
 
@@ -92,8 +91,8 @@ def test_channel_manager_initializes_enabled_channels(monkeypatch: pytest.Monkey
         async def send(self, msg) -> None:  # pragma: no cover
             pass
 
-    class DummyWhatsApp(BaseChannel):
-        name = "whatsapp"
+    class DummyDiscord(BaseChannel):
+        name = "discord"
 
         async def start(self) -> None:  # pragma: no cover
             pass
@@ -104,39 +103,31 @@ def test_channel_manager_initializes_enabled_channels(monkeypatch: pytest.Monkey
         async def send(self, msg) -> None:  # pragma: no cover
             pass
 
-    class DummyDiscord(DummyWhatsApp):
-        name = "discord"
-
-    class DummyFeishu(DummyWhatsApp):
+    class DummyFeishu(DummyDiscord):
         name = "feishu"
 
     tg_mod = types.ModuleType("hal.channels.telegram")
     tg_mod.TelegramChannel = DummyTelegram
-    wa_mod = types.ModuleType("hal.channels.whatsapp")
-    wa_mod.WhatsAppChannel = DummyWhatsApp
     dc_mod = types.ModuleType("hal.channels.discord")
     dc_mod.DiscordChannel = DummyDiscord
     fs_mod = types.ModuleType("hal.channels.feishu")
     fs_mod.FeishuChannel = DummyFeishu
 
     monkeypatch.setitem(sys.modules, "hal.channels.telegram", tg_mod)
-    monkeypatch.setitem(sys.modules, "hal.channels.whatsapp", wa_mod)
     monkeypatch.setitem(sys.modules, "hal.channels.discord", dc_mod)
     monkeypatch.setitem(sys.modules, "hal.channels.feishu", fs_mod)
 
     cfg = Config()
     cfg.channels.telegram.enabled = True
-    cfg.channels.whatsapp.enabled = True
     cfg.channels.discord.enabled = True
     cfg.channels.feishu.enabled = True
 
     mgr = ChannelManager(cfg, MessageBus())
 
-    assert set(mgr.enabled_channels) == {"telegram", "whatsapp", "discord", "feishu"}
+    assert set(mgr.enabled_channels) == {"telegram", "discord", "feishu"}
 
 
 def test_channel_manager_skips_channel_when_import_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Provide a module without TelegramChannel to force ImportError.
     tg_mod = types.ModuleType("hal.channels.telegram")
     monkeypatch.setitem(sys.modules, "hal.channels.telegram", tg_mod)
 
@@ -225,7 +216,6 @@ async def test_channel_manager_dispatch_outbound_routes_and_handles_unknown() ->
 
     await bus.publish_outbound(OutboundMessage(channel="telegram", chat_id="1", content="ok"))
 
-    # Wait for message to be routed
     for _ in range(50):
         if dummy.seen:
             break
@@ -233,7 +223,6 @@ async def test_channel_manager_dispatch_outbound_routes_and_handles_unknown() ->
 
     assert dummy.seen and dummy.seen[0].content == "ok"
 
-    # Unknown channel should be ignored (no exception)
     await bus.publish_outbound(OutboundMessage(channel="unknown", chat_id="1", content="x"))
 
     task.cancel()

@@ -25,10 +25,6 @@ def channels_status():
     table.add_column("Enabled", style="green")
     table.add_column("Configuration", style="yellow")
 
-    # WhatsApp
-    wa = config.channels.whatsapp
-    table.add_row("WhatsApp", "✓" if wa.enabled else "✗", wa.bridge_url)
-
     dc = config.channels.discord
     table.add_row("Discord", "✓" if dc.enabled else "✗", dc.gateway_url)
 

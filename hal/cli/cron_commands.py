@@ -71,7 +71,7 @@ def cron_add(
     deliver: bool = typer.Option(False, "--deliver", "-d", help="Deliver response to channel"),
     to: str = typer.Option(None, "--to", help="Recipient for delivery"),
     channel: str = typer.Option(
-        None, "--channel", help="Channel for delivery (e.g. 'telegram', 'whatsapp')"
+        None, "--channel", help="Channel for delivery (e.g. 'telegram', 'discord')"
     ),
 ):
     """Add a scheduled job."""
