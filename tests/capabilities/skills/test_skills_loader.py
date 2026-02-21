@@ -26,14 +26,22 @@ def _make_loader(tmp_path: Path) -> tuple[SkillsLoader, Path]:
 def test_list_skills_basic(tmp_path: Path) -> None:
     loader, skills = _make_loader(tmp_path)
 
-    _write_skill(skills, "weather", """---
+    _write_skill(
+        skills,
+        "weather",
+        """---
 name: weather
 description: Weather skill
----""")
-    _write_skill(skills, "github", """---
+---""",
+    )
+    _write_skill(
+        skills,
+        "github",
+        """---
 name: github
 description: GitHub skill
----""")
+---""",
+    )
 
     result = loader.list_skills(filter_unavailable=False)
     names = [s["name"] for s in result]
@@ -44,11 +52,15 @@ description: GitHub skill
 def test_list_skills_filters_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     loader, skills = _make_loader(tmp_path)
 
-    _write_skill(skills, "needcurl", """---
+    _write_skill(
+        skills,
+        "needcurl",
+        """---
 name: needcurl
 description: Needs curl
 requires_bins: ["curl"]
----""")
+---""",
+    )
 
     monkeypatch.setattr(shutil, "which", lambda _: None)
     assert loader.list_skills(filter_unavailable=True) == []
@@ -61,11 +73,15 @@ requires_bins: ["curl"]
 def test_build_skills_summary_escapes_xml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     loader, skills = _make_loader(tmp_path)
 
-    _write_skill(skills, "xml&skill", """---
+    _write_skill(
+        skills,
+        "xml&skill",
+        """---
 name: xml&skill
 description: Use <x> & y
 requires_bins: ["curl"]
----""")
+---""",
+    )
 
     monkeypatch.setattr(shutil, "which", lambda _: None)
     summary = loader.build_skills_summary()
@@ -79,10 +95,15 @@ requires_bins: ["curl"]
 def test_load_skills_for_context_strips_frontmatter(tmp_path: Path) -> None:
     loader, skills = _make_loader(tmp_path)
 
-    _write_skill(skills, "demo", """---
+    _write_skill(
+        skills,
+        "demo",
+        """---
 name: demo
 description: demo
----""", "# Demo\n\nHello\n")
+---""",
+        "# Demo\n\nHello\n",
+    )
 
     content = loader.load_skills_for_context(["demo", "missing"])
     assert "### Skill: demo" in content
@@ -90,15 +111,21 @@ description: demo
     assert "Hello" in content
 
 
-def test_get_always_skills_respects_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_always_skills_respects_requirements(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     loader, skills = _make_loader(tmp_path)
 
-    _write_skill(skills, "always_env", """---
+    _write_skill(
+        skills,
+        "always_env",
+        """---
 name: always_env
 description: needs env
 always: true
 requires_env: ["FOO"]
----""")
+---""",
+    )
 
     monkeypatch.delenv("FOO", raising=False)
     assert loader.get_always_skills() == []

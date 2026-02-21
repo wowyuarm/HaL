@@ -79,6 +79,9 @@ async def test_execute_timeout_kills_process(monkeypatch: pytest.MonkeyPatch, tm
         async def communicate(self):
             return b"", b""
 
+        async def wait(self):
+            return None
+
         def __init__(self):
             self.killed = False
 

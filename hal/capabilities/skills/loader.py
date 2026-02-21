@@ -30,7 +30,11 @@ class SkillsLoader:
                     skills.append({"name": skill_dir.name, "path": str(skill_file)})
 
         if filter_unavailable:
-            return [s for s in skills if self._check_requirements(self.get_skill_metadata(s["name"]) or {})]
+            return [
+                s
+                for s in skills
+                if self._check_requirements(self.get_skill_metadata(s["name"]) or {})
+            ]
         return skills
 
     def load_skill(self, name: str) -> str | None:
@@ -106,7 +110,7 @@ class SkillsLoader:
         if content.startswith("---"):
             match = re.match(r"^---\n.*?\n---\n", content, re.DOTALL)
             if match:
-                return content[match.end():].strip()
+                return content[match.end() :].strip()
         return content
 
     def _check_requirements(self, meta: dict) -> bool:

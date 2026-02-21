@@ -151,7 +151,7 @@ def make_memory_search(config):
         deps = ", ".join(missing)
         console.print(
             "[yellow]Memory search unavailable "
-            f"(missing dependency: {deps}). Install with `pip install -e \".[memory]\"`.[/yellow]"
+            f'(missing dependency: {deps}). Install with `pip install -e ".[memory]"`.[/yellow]'
         )
         return None
 
