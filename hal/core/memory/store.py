@@ -27,7 +27,7 @@ class SearchResult:
     source: str
     heading: str
     score: float
-    source_type: str = "raw"
+    source_type: str = "raw"  # "raw" | "summary" | "subagent"
 
 
 _OUTPUT_FIELDS = ["content", "source", "heading", "source_type"]

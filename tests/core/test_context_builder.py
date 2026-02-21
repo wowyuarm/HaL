@@ -99,6 +99,11 @@ class TestBuildSystemPrompt:
         resolved = str(workspace.expanduser().resolve())
         assert resolved in prompt
 
+    def test_mentions_artifacts_directory(self, builder: ContextBuilder) -> None:
+        prompt = builder.build_system_prompt()
+        assert "artifacts/" in prompt
+        assert "artifacts/subagent/" in prompt
+
     def test_includes_memory_from_manager(self, workspace: Path) -> None:
         mm = MagicMock()
         mm.get_context.return_value = "Remember: user likes tea."

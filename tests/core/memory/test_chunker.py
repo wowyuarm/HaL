@@ -108,6 +108,17 @@ class TestSourceType:
         assert len(chunks) == 1
         assert chunks[0].source_type == "summary"
 
+    def test_subagent_tagged(self, chunker):
+        text = (
+            "# Title\n\n"
+            "**[10:30] User**: [Subagent Result: repo-audit]\n"
+            "Found 2 issues.\n"
+            "[Subagent Artifact] /tmp/artifacts/subagent/abc.md"
+        )
+        chunks = chunker.chunk_text(text, "test.md")
+        assert len(chunks) == 1
+        assert chunks[0].source_type == "subagent"
+
     def test_mixed_raw_and_summary(self, chunker):
         text = (
             "# Title\n\n"

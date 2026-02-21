@@ -195,6 +195,7 @@ Layout:
   memory/    — MEMORY.md, daily exports, vector index
   skills/    — skill packages (each has SKILL.md)
   logs/      — daily interaction logs (JSONL)
+  artifacts/ — generated artifacts (subagent full reports under artifacts/subagent/)
   cron/      — scheduled job store
   scripts/   — reusable scripts you can create and execute
   projects/  — project working files and artifacts

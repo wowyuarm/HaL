@@ -67,8 +67,8 @@ class RecallTool(Tool):
             if r.heading:
                 header += f" — {r.heading}"
             header += f"** (score: {r.score:.3f}"
-            if r.source_type == "summary":
-                header += ", summary"
+            if r.source_type and r.source_type != "raw":
+                header += f", {r.source_type}"
             header += ")"
             parts.append(header)
             parts.append(r.content)

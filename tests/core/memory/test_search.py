@@ -252,6 +252,61 @@ class TestSearch:
                 raw_score = summary_raw_scores[content]
                 assert abs(penalized_score - raw_score * _SUMMARY_PENALTY) < 1e-6
 
+    async def test_subagent_penalty_applied(self, memory_search, daily_log, daily_dir):
+        """Subagent chunks should be tagged and mildly down-ranked."""
+        from hal.core.memory.daily_log import LogEntry
+        from hal.core.memory.search import _SUBAGENT_PENALTY
+
+        log_file = daily_log.data_dir / "2026-02-12.jsonl"
+        entries = [
+            LogEntry(
+                timestamp="2026-02-12T10:30:00",
+                channel="telegram",
+                chat_id="123",
+                role="user",
+                content="Please audit this repository and summarize findings",
+            ),
+            LogEntry(
+                timestamp="2026-02-12T10:31:00",
+                channel="telegram",
+                chat_id="123",
+                role="user",
+                content=(
+                    "[Subagent Result: repo-audit]\n"
+                    "Found 3 critical issues and 2 warnings.\n"
+                    "[Subagent Artifact] /tmp/artifacts/subagent/abc.md"
+                ),
+                entry_type="injection",
+            ),
+        ]
+        log_file.write_text("\n".join(e.model_dump_json() for e in entries) + "\n")
+
+        with patch.object(
+            memory_search,
+            "_embed_texts",
+            new_callable=AsyncMock,
+            side_effect=lambda texts: _fake_embedding(texts),
+        ):
+            await memory_search.index_date(date(2026, 2, 12))
+
+            raw_results = await memory_search._store.search(
+                _fake_embedding(["audit"])[0], query_text="audit", top_k=10
+            )
+            subagent_raw_scores = {
+                r.content: r.score for r in raw_results if r.source_type == "subagent"
+            }
+            assert subagent_raw_scores
+
+            results = await memory_search.search("audit", top_k=10)
+            subagent_penalized = {
+                r.content: r.score for r in results if r.source_type == "subagent"
+            }
+            assert subagent_penalized
+
+            for content, penalized_score in subagent_penalized.items():
+                raw_score = subagent_raw_scores[content]
+                assert abs(penalized_score - raw_score * _SUBAGENT_PENALTY) < 1e-6
+
     async def test_search_applies_min_score_filter(self, memory_search):
         fake_results = [
             SearchResult(content="high", source="a", heading="", score=0.9, source_type="raw"),
