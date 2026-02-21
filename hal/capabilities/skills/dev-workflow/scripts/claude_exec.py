@@ -38,9 +38,7 @@ def atomic_write_json(path: str, data: dict) -> None:
 
 def is_third_party_configured() -> bool:
     """Check if third-party model is configured via environment variables."""
-    return bool(
-        os.environ.get("ANTHROPIC_BASE_URL") or os.environ.get("ANTHROPIC_API_KEY")
-    )
+    return bool(os.environ.get("ANTHROPIC_BASE_URL") or os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def build_command(args: argparse.Namespace) -> list[str]:
@@ -335,21 +333,27 @@ def _run_with_output_file(cmd: list[str], args: argparse.Namespace) -> None:
             timeout=args.timeout,
         )
     except subprocess.TimeoutExpired:
-        atomic_write_json(output_path, {
-            "status": "timeout",
-            "error": f"Claude Code did not respond within {args.timeout}s",
-            "exit_code": 124,
-            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        atomic_write_json(
+            output_path,
+            {
+                "status": "timeout",
+                "error": f"Claude Code did not respond within {args.timeout}s",
+                "exit_code": 124,
+                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
         print(output_path)
         sys.exit(124)
     except FileNotFoundError:
-        atomic_write_json(output_path, {
-            "status": "error",
-            "error": "'claude' command not found",
-            "exit_code": 127,
-            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        })
+        atomic_write_json(
+            output_path,
+            {
+                "status": "error",
+                "error": "'claude' command not found",
+                "exit_code": 127,
+                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
         print(output_path)
         sys.exit(127)
 

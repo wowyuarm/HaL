@@ -12,7 +12,6 @@ from hal.channels.telegram import TelegramChannel, _markdown_to_telegram_html
 from hal.infra.config.schema import TelegramConfig
 
 
-
 def test_split_telegram_message_no_split() -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
     text = "hello"
@@ -39,6 +38,7 @@ def test_split_telegram_message_prefers_newline_then_space() -> None:
     text_with_space = "a" * 50 + " " + "b" * 50
     chunks_space = ch._split_telegram_message(text_with_space, max_length=60)
     assert chunks_space == ["a" * 50, "b" * 50]
+
 
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     md = (

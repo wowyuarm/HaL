@@ -210,7 +210,7 @@ Your result will be reported back — you do not interact with the user directly
 - If the task is ambiguous, make reasonable assumptions and state them.""")
 
         # Tool usage guide (only the tools subagent actually has)
-        parts.append(f"""\
+        parts.append("""\
 ## Tools
 
 ### fs — File Operations

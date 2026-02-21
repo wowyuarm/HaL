@@ -225,5 +225,7 @@ class TestFsToolAllowedDir:
 
     async def test_parent_traversal_blocked(self, fs_tool, tmp_path):
         """Path traversal via .. must be rejected."""
-        result = await fs_tool.execute(action="read", path=str(tmp_path / "subdir" / ".." / ".." / "etc" / "passwd"))
+        result = await fs_tool.execute(
+            action="read", path=str(tmp_path / "subdir" / ".." / ".." / "etc" / "passwd")
+        )
         assert "Error" in result

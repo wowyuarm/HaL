@@ -263,7 +263,9 @@ class TelegramChannel(BaseChannel):
                             await self._app.bot.send_document(chat_id=chat_id, document=f)
                 except Exception as e:
                     logger.error(f"Failed to send media {media_path}: {e}")
-                    await self._app.bot.send_message(chat_id=chat_id, text=f"[Failed to send file: {media_path}]")
+                    await self._app.bot.send_message(
+                        chat_id=chat_id, text=f"[Failed to send file: {media_path}]"
+                    )
 
         # Send text content if present
         if msg.content and msg.content != "[empty message]":
@@ -271,9 +273,13 @@ class TelegramChannel(BaseChannel):
             for chunk in self._split_telegram_message(msg.content):
                 try:
                     html_chunk = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(chat_id=chat_id, text=html_chunk, parse_mode="HTML")
+                    await self._app.bot.send_message(
+                        chat_id=chat_id, text=html_chunk, parse_mode="HTML"
+                    )
                 except Exception as e:
-                    logger.warning(f"HTML parse failed for one chunk, falling back to plain text: {e}")
+                    logger.warning(
+                        f"HTML parse failed for one chunk, falling back to plain text: {e}"
+                    )
                     try:
                         await self._app.bot.send_message(chat_id=chat_id, text=chunk)
                     except Exception as e2:

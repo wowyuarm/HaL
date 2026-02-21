@@ -288,9 +288,7 @@ class TestDynamicContext:
         result.score = 0.85
         result.content = "User likes Italian food"
 
-        msgs = builder.build_messages(
-            [], "What food?", memory_search_results=[result]
-        )
+        msgs = builder.build_messages([], "What food?", memory_search_results=[result])
         user_content = msgs[-1]["content"]
         assert "<relevant_memories>" in user_content
         assert "daily_log" in user_content
