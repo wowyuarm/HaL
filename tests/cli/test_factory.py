@@ -41,3 +41,35 @@ def test_make_alternate_provider_passes_resolved_provider_name(monkeypatch) -> N
     provider = factory._make_alternate_provider(config, "anthropic/claude-opus-4-6")
     assert isinstance(provider, DummyProvider)
     assert captured["provider_name"] == "anyrouter"
+
+
+def test_make_memory_search_returns_none_when_pymilvus_missing(monkeypatch) -> None:
+    config = Config()
+    calls: list[str] = []
+
+    def fake_module_available(name: str) -> bool:
+        calls.append(name)
+        return name != "pymilvus"
+
+    monkeypatch.setattr(factory, "_module_available", fake_module_available)
+
+    result = factory.make_memory_search(config)
+
+    assert result is None
+    assert "pymilvus" in calls
+
+
+def test_make_memory_search_returns_none_when_milvus_lite_missing_on_local_uri(monkeypatch) -> None:
+    config = Config()
+    calls: list[str] = []
+
+    def fake_module_available(name: str) -> bool:
+        calls.append(name)
+        return name != "milvus_lite"
+
+    monkeypatch.setattr(factory, "_module_available", fake_module_available)
+
+    result = factory.make_memory_search(config)
+
+    assert result is None
+    assert "milvus_lite" in calls

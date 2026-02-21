@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import typer
 from rich.console import Console
 
@@ -122,8 +124,37 @@ def _resolve_embedding_provider(config, ms_cfg) -> dict:
     return result
 
 
+def _module_available(module_name: str) -> bool:
+    """Whether a Python module is importable in the current environment."""
+    return importlib.util.find_spec(module_name) is not None
+
+
+def _missing_memory_deps(milvus_uri: str) -> list[str]:
+    """Detect missing optional dependencies required by memory search."""
+    missing: list[str] = []
+
+    if not _module_available("pymilvus"):
+        missing.append("pymilvus")
+
+    # Local file URIs require milvus-lite runtime.
+    is_remote_uri = "://" in milvus_uri
+    if not is_remote_uri and not _module_available("milvus_lite"):
+        missing.append("milvus-lite")
+
+    return missing
+
+
 def make_memory_search(config):
     """Create MemorySearch instance from config. Returns None if deps missing."""
+    missing = _missing_memory_deps(config.memory_search.milvus_uri)
+    if missing:
+        deps = ", ".join(missing)
+        console.print(
+            "[yellow]Memory search unavailable "
+            f"(missing dependency: {deps}). Install with `pip install -e \".[memory]\"`.[/yellow]"
+        )
+        return None
+
     try:
         from hal.core.memory.chunker import MarkdownChunker
         from hal.core.memory.exporter import DailyExporter

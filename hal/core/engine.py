@@ -110,6 +110,11 @@ class AgentEngine:
             memory_search=self._memory_search,
         )
 
+    def disable_memory_search(self) -> None:
+        """Disable memory search integration and unregister recall tool."""
+        self._memory_search = None
+        self.tools.unregister("recall")
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------

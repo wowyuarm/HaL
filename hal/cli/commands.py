@@ -430,6 +430,7 @@ def gateway(
     console.print("[green]✓[/green] Heartbeat: every 30m")
 
     async def run():
+        nonlocal memory_search
         try:
             # Initialize memory search if enabled
             if memory_search:
@@ -444,6 +445,8 @@ def gateway(
                     console.print(f"[green]✓[/green] Memory search {status}")
                 except Exception as e:
                     console.print(f"[yellow]Memory search init failed: {e}[/yellow]")
+                    agent.disable_memory_search()
+                    memory_search = None
 
             await cron.start()
             await heartbeat.start()
@@ -535,6 +538,7 @@ def agent(
                 await ms.backfill()
             except Exception as e:
                 console.print(f"[yellow]Memory search init failed: {e}[/yellow]")
+                agent_loop.disable_memory_search()
 
     if message:
         # Single message mode
