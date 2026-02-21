@@ -361,6 +361,7 @@ def gateway(
         subagent_provider=make_subagent_provider(config),
         memory_search=memory_search,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
+        recall_min_score=config.memory_search.recall_min_score,
         history_config=config.agents.defaults.history,
     )
 
@@ -528,6 +529,7 @@ def agent(
         subagent_provider=make_subagent_provider(config),
         memory_search=ms,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
+        recall_min_score=config.memory_search.recall_min_score,
         history_config=config.agents.defaults.history,
     )
 

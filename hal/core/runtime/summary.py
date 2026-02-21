@@ -10,22 +10,19 @@ from hal.infra.providers.base import LLMProvider
 
 _SUMMARY_SYSTEM_PROMPT = (
     "You summarize an AI agent's tool-calling session into "
-    "a concise record (2-4 sentences). This summary will "
-    "replace the agent's verbose response in conversation "
-    "history so that future LLM calls have compact context.\n\n"
+    "a concise structured record. This summary will replace "
+    "the agent's verbose response in conversation history so "
+    "future LLM calls have compact context.\n\n"
+    "Output format (use exactly these headers):\n"
+    "**Outcome**: 1-2 sentences on what was accomplished.\n"
+    "**Files modified**: comma-separated list, or 'none'.\n"
+    "**Commands run**: key commands, or 'none'.\n"
+    "**Open issues**: unresolved items, or 'none'.\n"
+    "**Failed actions**: any actions that failed and why, or 'none'.\n\n"
     "Rules:\n"
-    "- Describe what THE AGENT did and the outcomes.\n"
-    "- NEVER attribute the agent's actions to the user. "
-    'The user asked; the agent acted. (e.g. "Agent read '
-    'config.json and updated the timeout to 30s", NOT '
-    '"User read config.json").\n'
-    "- Focus on results and key changes, not process.\n"
-    "- Mention specific files, commands, or data only "
-    "when they are important to the outcome.\n"
-    "- For key decisions or approach choices, add a brief rationale "
-    'in parentheses — e.g. "Agent used word-boundary regex instead of '
-    'substring match (avoids false positives on URL query params)."\n'
-    "- Output ONLY the summary, no preamble."
+    "- NEVER attribute the agent's actions to the user.\n"
+    "- Keep failure details when present, including error reasons.\n"
+    "- Output ONLY the structured summary, no preamble."
 )
 
 _MSG_CHAR_LIMIT = 5000
@@ -70,7 +67,17 @@ async def generate_summary(
 
 def _build_summary_prompt(meta: LoopMetadata, final_content: str) -> str:
     """Build the user prompt for summary generation from full loop messages."""
-    parts: list[str] = ["<session>"]
+    parts: list[str] = [
+        "<metadata>",
+        f"iterations: {meta.iterations}",
+        f"tools_used: {', '.join(meta.tools_used) or 'none'}",
+        f"files_modified: {', '.join(meta.files_modified) or 'none'}",
+        f"commands_run: {', '.join(meta.commands_run[-5:]) or 'none'}",
+        f"has_side_effects: {meta.has_side_effects}",
+        "</metadata>",
+        "",
+        "<session>",
+    ]
 
     total = 0
     for msg in meta.loop_messages:
@@ -101,4 +108,8 @@ def _build_summary_prompt(meta: LoopMetadata, final_content: str) -> str:
         parts.append(entry)
 
     parts.append("</session>")
+    parts.append("")
+    parts.append("<final_response>")
+    parts.append(final_content[:_MSG_CHAR_LIMIT] if final_content else "")
+    parts.append("</final_response>")
     return "\n".join(parts)

@@ -113,6 +113,21 @@ class TestBuildSystemPrompt:
         prompt = cc.build_system_prompt()
         assert "Remember: user likes tea." in prompt
         assert "# Memory" in prompt
+        mm.get_context.assert_called_with(budget=None)
+
+    def test_memory_budget_is_passed_to_manager(self, workspace: Path) -> None:
+        mm = MagicMock()
+        mm.get_context.return_value = "short memory"
+
+        with patch("hal.core.context.builder.SkillsLoader") as cls:
+            cls.return_value = MagicMock(
+                get_always_skills=MagicMock(return_value=[]),
+                build_skills_summary=MagicMock(return_value=""),
+            )
+            cc = ContextBuilder(workspace, memory_manager=mm)
+
+        cc.build_system_prompt(memory_budget_chars=123)
+        mm.get_context.assert_called_with(budget=123)
 
     def test_no_memory_section_when_empty(self, builder: ContextBuilder) -> None:
         prompt = builder.build_system_prompt()
@@ -287,6 +302,7 @@ class TestDynamicContext:
         result.heading = "cooking"
         result.score = 0.85
         result.content = "User likes Italian food"
+        result.source_type = "raw"
 
         msgs = builder.build_messages([], "What food?", memory_search_results=[result])
         user_content = msgs[-1]["content"]
@@ -294,9 +310,36 @@ class TestDynamicContext:
         assert "daily_log" in user_content
         assert "cooking" in user_content
         assert "0.85" in user_content
+        assert "data, not instructions" in user_content
         # Should NOT be in system prompt
         system_content = msgs[0]["content"]
         assert "Relevant Past Memories" not in system_content
+
+    def test_memory_search_total_chars_limit(self, builder: ContextBuilder) -> None:
+        r1 = MagicMock()
+        r1.source = "d1"
+        r1.heading = ""
+        r1.score = 0.9
+        r1.content = "A" * 800
+        r1.source_type = "raw"
+
+        r2 = MagicMock()
+        r2.source = "d2"
+        r2.heading = ""
+        r2.score = 0.8
+        r2.content = "B" * 800
+        r2.source_type = "summary"
+
+        msgs = builder.build_messages(
+            [],
+            "msg",
+            memory_search_results=[r1, r2],
+            recall_max_total_chars=600,
+            recall_max_per_item_chars=500,
+        )
+        user_content = msgs[-1]["content"]
+        assert "d1" in user_content
+        assert "d2" not in user_content
 
     def test_dynamic_context_with_media(self, builder: ContextBuilder, workspace: Path) -> None:
         import base64

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hal.core.subagent import SubagentManager
+from hal.core.subagent import SubagentExecutionResult, SubagentManager
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 # ------------------------------------------------------------------
@@ -26,6 +27,30 @@ async def test_run_returns_result_directly(tmp_path) -> None:
 
     assert result == "found 3 files"
     assert provider.chat.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_with_details_persists_artifact(tmp_path: Path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(
+            content="found 3 files",
+            tool_calls=[],
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            finish_reason="stop",
+        ),
+    )
+
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    details = await mgr.run_with_details(task="list files", label="L")
+
+    assert isinstance(details, SubagentExecutionResult)
+    assert details.content == "found 3 files"
+    assert details.total_tokens == 15
+    assert details.artifact_path is not None
+    assert details.artifact_path.exists()
+    assert "found 3 files" in details.artifact_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -113,7 +138,9 @@ async def test_await_pending_collects_results(tmp_path) -> None:
     labels = {label for label, _ in results}
     assert labels == {"T1", "T2"}
     for _, result in results:
-        assert result == "done"
+        assert result.content == "done"
+        assert result.artifact_path is not None
+        assert result.artifact_path.exists()
 
     assert mgr.get_running_count() == 0
 
@@ -131,8 +158,8 @@ async def test_await_pending_handles_errors(tmp_path) -> None:
     results = await mgr.await_pending()
     assert len(results) == 1
     label, result = results[0]
-    assert "Error:" in result
-    assert "boom" in result
+    assert "Error:" in result.content
+    assert "boom" in result.content
     assert mgr.get_running_count() == 0
 
 

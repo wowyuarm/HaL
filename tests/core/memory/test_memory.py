@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 
-from hal.core.memory.daily_log import DailyLog, _truncate_assistant
+from hal.core.memory.daily_log import DailyLog, LogEntry, _truncate_assistant
 from hal.core.memory.long_term import LongTermMemory
 from hal.core.memory.manager import MemoryManager
 
@@ -77,6 +78,52 @@ class TestDailyLog:
         assert len(history) == 3
         # Should be the most recent 3
         assert history[0]["content"] == "msg-7"
+
+    def test_get_recent_conversation_respects_max_chars(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="short-1")
+        log.append(channel="cli", chat_id="d", role="assistant", content="short-2")
+        log.append(channel="cli", chat_id="d", role="user", content="X" * 100)
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d", max_chars=30)
+        assert len(history) == 1
+        assert history[0]["content"] == "X" * 100
+
+    def test_get_recent_conversation_reads_history_days(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+
+        today_entry = LogEntry(
+            timestamp=f"{today.isoformat()}T10:00:00",
+            channel="cli",
+            chat_id="d",
+            role="assistant",
+            content="today-msg",
+        )
+        yesterday_entry = LogEntry(
+            timestamp=f"{yesterday.isoformat()}T10:00:00",
+            channel="cli",
+            chat_id="d",
+            role="user",
+            content="yesterday-msg",
+        )
+
+        (log.data_dir / f"{today.isoformat()}.jsonl").write_text(
+            today_entry.model_dump_json() + "\n", encoding="utf-8"
+        )
+        (log.data_dir / f"{yesterday.isoformat()}.jsonl").write_text(
+            yesterday_entry.model_dump_json() + "\n", encoding="utf-8"
+        )
+
+        history_default = log.get_recent_conversation(channel="cli", chat_id="d")
+        assert len(history_default) == 1
+        assert history_default[0]["content"] == "today-msg"
+
+        history_two_days = log.get_recent_conversation(channel="cli", chat_id="d", history_days=2)
+        assert len(history_two_days) == 2
+        assert history_two_days[0]["content"] == "yesterday-msg"
+        assert history_two_days[1]["content"] == "today-msg"
 
     def test_get_stats(self, tmp_path: Path):
         log = DailyLog(tmp_path / "logs")
@@ -183,6 +230,13 @@ class TestMemoryManager:
         mgr = MemoryManager(workspace=tmp_path)
         ctx = mgr.get_context()
         assert ctx == ""
+
+    def test_get_context_respects_budget(self, tmp_path: Path):
+        mgr = MemoryManager(workspace=tmp_path)
+        mgr.long_term.update("A" * 200)
+        ctx = mgr.get_context(budget=60)
+        assert len(ctx) <= 80  # includes truncation marker
+        assert "[...truncated]" in ctx
 
     def test_record_conversation_creates_entry(self, tmp_path: Path):
         mgr = MemoryManager(workspace=tmp_path)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import platform
+import re
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -55,7 +57,7 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         # task_id -> (asyncio.Task, label)
-        self._running_tasks: dict[str, tuple[asyncio.Task[str], str]] = {}
+        self._running_tasks: dict[str, tuple[asyncio.Task[SubagentExecutionResult], str]] = {}
         # Track iteration count for the currently executing sync subagent
         self._current_iteration = 0
 
@@ -74,6 +76,18 @@ class SubagentManager:
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         logger.info(f"Subagent [{task_id}] running: {display_label}")
 
+        result = await self._execute_subagent(task_id, task)
+        return result.content
+
+    async def run_with_details(
+        self,
+        task: str,
+        label: str | None = None,
+    ) -> "SubagentExecutionResult":
+        """Execute a subagent synchronously and return result metadata."""
+        task_id = str(uuid.uuid4())[:8]
+        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        logger.info(f"Subagent [{task_id}] running with details: {display_label}")
         return await self._execute_subagent(task_id, task)
 
     async def spawn_background(
@@ -100,7 +114,7 @@ class SubagentManager:
             f"Results will be delivered when all background tasks complete."
         )
 
-    async def await_pending(self) -> list[tuple[str, str]]:
+    async def await_pending(self) -> list[tuple[str, "SubagentExecutionResult"]]:
         """
         Await all pending background subagents and return their results.
 
@@ -111,7 +125,7 @@ class SubagentManager:
         if not self._running_tasks:
             return []
 
-        results: list[tuple[str, str]] = []
+        results: list[tuple[str, SubagentExecutionResult]] = []
         for task_id, (task, label) in list(self._running_tasks.items()):
             try:
                 result = await task
@@ -119,7 +133,16 @@ class SubagentManager:
                 results.append((label, result))
             except Exception as e:
                 logger.error(f"Subagent [{task_id}] ({label}) failed: {e}")
-                results.append((label, f"Error: {e}"))
+                results.append(
+                    (
+                        label,
+                        SubagentExecutionResult(
+                            content=f"Error: {e}",
+                            artifact_path=None,
+                            total_tokens=0,
+                        ),
+                    )
+                )
 
         self._running_tasks.clear()
         return results
@@ -128,7 +151,7 @@ class SubagentManager:
     # Internal execution
     # ------------------------------------------------------------------
 
-    async def _execute_subagent(self, task_id: str, task: str) -> str:
+    async def _execute_subagent(self, task_id: str, task: str) -> "SubagentExecutionResult":
         """Run the subagent loop and return the final result string."""
         tools = self._build_tools()
         system_prompt = self._build_system_prompt()
@@ -142,7 +165,7 @@ class SubagentManager:
 
         hooks = _SubagentLoopHooks(self, task_id)
 
-        final_content, _meta = await run_tool_loop(
+        final_content, meta = await run_tool_loop(
             provider=self.provider,
             model=self.model,
             tools=tools,
@@ -154,8 +177,13 @@ class SubagentManager:
         if final_content is None:
             final_content = "Task completed but no summary was generated."
 
-        logger.info(f"Subagent [{task_id}] completed")
-        return final_content
+        artifact_path = self._persist_artifact(task_id, task, final_content, meta)
+        logger.info(f"Subagent [{task_id}] completed (artifact: {artifact_path})")
+        return SubagentExecutionResult(
+            content=final_content,
+            artifact_path=artifact_path,
+            total_tokens=meta.total_usage.get("total_tokens", 0),
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -302,6 +330,46 @@ Current time: {now}""")
     def get_last_iteration(self) -> int:
         """Return the iteration count of the most recent sync subagent execution."""
         return self._current_iteration
+
+    def _persist_artifact(
+        self,
+        task_id: str,
+        task: str,
+        result: str,
+        meta: LoopMetadata,
+    ) -> Path | None:
+        """Persist full subagent result as a markdown artifact."""
+        try:
+            artifact_dir = self.workspace / "artifacts" / "subagent"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+
+            label_slug = re.sub(r"[^\w\-]+", "_", task[:20]).strip("_") or "task"
+            ts = datetime.now().strftime("%H%M%S")
+            path = artifact_dir / f"{task_id}_{ts}_{label_slug}.md"
+            header = (
+                f"# Subagent Result: {task_id}\n\n"
+                f"**Task**: {task[:200]}\n"
+                f"**Iterations**: {meta.iterations}\n"
+                f"**Tools used**: {', '.join(meta.tools_used) or 'none'}\n"
+                f"**Side effects**: {meta.has_side_effects}\n"
+                f"**Total tokens**: {meta.total_usage.get('total_tokens', 0)}\n"
+                f"**Timestamp**: {datetime.now().isoformat()}\n\n"
+                "---\n\n"
+            )
+            path.write_text(header + result, encoding="utf-8")
+            return path
+        except Exception as e:
+            logger.warning(f"Failed to persist subagent artifact: {e}")
+            return None
+
+
+@dataclass
+class SubagentExecutionResult:
+    """Structured subagent execution result."""
+
+    content: str
+    artifact_path: Path | None
+    total_tokens: int = 0
 
 
 class _SubagentLoopHooks:

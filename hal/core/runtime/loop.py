@@ -21,7 +21,10 @@ class LoopMetadata:
     tools_used: list[str] = field(default_factory=list)
     files_modified: list[str] = field(default_factory=list)
     commands_run: list[str] = field(default_factory=list)
+    tool_call_counts: dict[str, int] = field(default_factory=dict)
     has_side_effects: bool = False
+    first_response_usage: dict[str, int] = field(default_factory=dict)
+    total_usage: dict[str, int] = field(default_factory=dict)
     loop_messages: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -177,6 +180,12 @@ async def run_tool_loop(
         response = await provider.chat(
             messages=messages, tools=tools.get_definitions(), model=model
         )
+        usage = _normalize_usage(response.usage)
+        if usage:
+            if iteration == 1 and not meta.first_response_usage:
+                meta.first_response_usage = dict(usage)
+            for key, value in usage.items():
+                meta.total_usage[key] = meta.total_usage.get(key, 0) + value
 
         if response.has_tool_calls:
             # Build assistant message with tool calls
@@ -213,6 +222,9 @@ async def run_tool_loop(
             for tool_call in response.tool_calls:
                 args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                 logger.info(f"Tool call: {tool_call.name}({args_str[:200]})")
+                meta.tool_call_counts[tool_call.name] = (
+                    meta.tool_call_counts.get(tool_call.name, 0) + 1
+                )
                 if tool_call.name not in meta.tools_used:
                     meta.tools_used.append(tool_call.name)
 
@@ -273,3 +285,25 @@ async def run_tool_loop(
     meta.loop_messages = messages[start_idx:]
 
     return final_content, meta
+
+
+def _normalize_usage(usage: dict[str, Any]) -> dict[str, int]:
+    """Normalize response usage dict into integer counters.
+
+    Only standard OpenAI fields are extracted. Cache-specific fields
+    (Anthropic's cache_creation_input_tokens / cache_read_input_tokens,
+    OpenAI's prompt_tokens_details.cached_tokens) are NOT captured here
+    because our current provider path (anyrouter bridge) does not
+    reliably forward them. Revisit when switching to a direct provider.
+    """
+    if not usage:
+        return {}
+
+    normalized: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int):
+            normalized[key] = value
+        elif isinstance(value, float):
+            normalized[key] = int(value)
+    return normalized

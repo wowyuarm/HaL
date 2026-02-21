@@ -58,6 +58,11 @@ class HistoryConfig(BaseModel):
     max_messages: int = 50  # Max messages loaded from daily log
     recent_full_turns: int = 3  # Recent assistant messages kept verbatim
     assistant_truncate_chars: int = 200  # Max chars for older assistant messages
+    max_history_chars: int = 0  # 0 = unlimited; hard cap on total history chars
+    memory_budget_chars: int = 0  # 0 = unlimited; char budget for MEMORY.md injection
+    history_days: int = 1  # 1 = today only; 2+ includes previous days
+    recall_max_total_chars: int = 2000  # Max chars injected from retrieved memory fragments
+    recall_max_per_item_chars: int = 500  # Max chars per retrieved memory fragment
 
 
 class AgentDefaults(BaseModel):
@@ -150,6 +155,7 @@ class MemorySearchConfig(BaseModel):
     collection_name: str = "hal_memory"
     embedding_dim: int = 1536
     auto_inject_top_k: int = 3
+    recall_min_score: float = 0.0
     max_chunk_size: int = 1000
     chunk_overlap_lines: int = 2
 

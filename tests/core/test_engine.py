@@ -9,7 +9,12 @@ import pytest
 
 from hal.bus.events import InboundMessage, OutboundMessage
 from hal.bus.queue import MessageBus
-from hal.core.engine import AgentEngine, LoopMetadata
+from hal.core.engine import (
+    AgentEngine,
+    LoopMetadata,
+    _build_subagent_injection,
+    _split_subagent_tool_result,
+)
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 # ------------------------------------------------------------------
@@ -668,3 +673,38 @@ class TestGenerateSummary:
             content="[System Summary]\nSummary text",
             entry_type="summary",
         )
+
+
+class TestSubagentInjectionHelpers:
+    def test_split_subagent_tool_result_extracts_metadata(self):
+        payload = "Result line\n\n[Subagent Artifact] /tmp/a.md\n\n[Subagent Total Tokens] 123"
+        content, artifact_path, total_tokens = _split_subagent_tool_result(payload)
+        assert content == "Result line"
+        assert artifact_path == "/tmp/a.md"
+        assert total_tokens == 123
+
+    def test_build_subagent_injection_truncates_success(self):
+        text = _build_subagent_injection(
+            label="task",
+            content="X" * 1200,
+            status="completed",
+            background=False,
+            artifact_path="/tmp/a.md",
+            total_tokens=88,
+        )
+        assert "[Full result saved to subagent artifact file]" in text
+        assert "[Subagent Artifact] /tmp/a.md" in text
+        assert "[Subagent Total Tokens] 88" in text
+
+    def test_build_subagent_injection_keeps_error_untruncated(self):
+        err = "Error: failed step\ntrace"
+        text = _build_subagent_injection(
+            label="task",
+            content=err,
+            status="failed",
+            background=True,
+            artifact_path=None,
+            total_tokens=0,
+        )
+        assert err in text
+        assert "[Full result saved to subagent artifact file]" not in text

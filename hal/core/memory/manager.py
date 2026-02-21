@@ -46,12 +46,19 @@ class MemoryManager:
         Assemble memory context for prompt injection.
 
         Args:
-            budget: Approximate token limit for memory section (not yet enforced).
+            budget: Approximate character budget for memory section.
         """
         lt = self.long_term.read()
-        if lt:
-            return f"## Long-term Memory\n\n{lt}"
-        return ""
+        if not lt:
+            return ""
+
+        content = f"## Long-term Memory\n\n{lt}"
+        if budget is None or budget <= 0 or len(content) <= budget:
+            return content
+
+        # Keep a valid markdown tail marker when truncation is required.
+        clipped = content[:budget].rstrip()
+        return f"{clipped}\n\n[...truncated]"
 
     def record_conversation(
         self,
@@ -98,6 +105,8 @@ class MemoryManager:
         include_tools: bool = False,
         recent_full_turns: int = 3,
         assistant_truncate_chars: int = 200,
+        max_chars: int = 0,
+        history_days: int = 1,
     ) -> list[dict[str, Any]]:
         """
         Get recent conversation history for a specific channel/chat.
@@ -120,6 +129,8 @@ class MemoryManager:
             include_tools=include_tools,
             recent_full_turns=recent_full_turns,
             assistant_truncate_chars=assistant_truncate_chars,
+            max_chars=max_chars,
+            history_days=history_days,
         )
 
     def get_conversation_stats(self) -> dict[str, Any]:

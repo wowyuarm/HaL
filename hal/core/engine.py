@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,7 @@ from hal.capabilities.tools.message import MessageTool
 from hal.capabilities.tools.schedule import CronTool
 from hal.capabilities.tools.spawn import SpawnTool
 from hal.core.context.builder import ContextBuilder, ExecutionMode
+from hal.core.context.metrics import ContextMetrics, MetricsCollector
 from hal.core.memory.manager import MemoryManager
 from hal.core.runtime.loop import LoopMetadata, run_tool_loop
 from hal.core.runtime.summary import generate_summary
@@ -59,6 +61,7 @@ class AgentEngine:
         subagent_provider: LLMProvider | None = None,
         memory_search: "MemorySearch | None" = None,
         auto_inject_top_k: int = 3,
+        recall_min_score: float = 0.0,
         history_config: "HistoryConfig | None" = None,
     ):
         from hal.infra.config.schema import ExecToolConfig, HistoryConfig
@@ -76,8 +79,10 @@ class AgentEngine:
         self._summary_provider = summary_provider
         self._memory_search = memory_search
         self._auto_inject_top_k = auto_inject_top_k
+        self._recall_min_score = recall_min_score
         self._history_config = history_config or HistoryConfig()
         self._pending_summaries: dict[str, asyncio.Task] = {}
+        self._metrics_collector = MetricsCollector(workspace / "logs" / "context_metrics.jsonl")
 
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(workspace, memory_manager=self.memory)
@@ -225,6 +230,8 @@ class AgentEngine:
             include_tools=False,
             recent_full_turns=hc.recent_full_turns,
             assistant_truncate_chars=hc.assistant_truncate_chars,
+            max_chars=hc.max_history_chars,
+            history_days=hc.history_days,
         )
 
         # Pre-fetch relevant memories via semantic search
@@ -232,7 +239,9 @@ class AgentEngine:
         if self._memory_search:
             try:
                 search_results = await self._memory_search.search(
-                    msg.content, top_k=self._auto_inject_top_k
+                    msg.content,
+                    top_k=self._auto_inject_top_k,
+                    min_score=self._recall_min_score,
                 )
             except Exception as e:
                 logger.warning(f"Memory search prefetch failed: {e}")
@@ -245,6 +254,28 @@ class AgentEngine:
             chat_id=msg.chat_id,
             mode=ExecutionMode.COLLAB,
             memory_search_results=search_results or None,
+            memory_budget_chars=(hc.memory_budget_chars or None),
+            recall_max_total_chars=hc.recall_max_total_chars,
+            recall_max_per_item_chars=hc.recall_max_per_item_chars,
+        )
+        pre_metrics = ContextMetrics(
+            timestamp=datetime.now().isoformat(),
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            mode=ExecutionMode.COLLAB.value,
+            system_prompt_chars=_content_char_len(messages[0].get("content", ""))
+            if messages
+            else 0,
+            history_message_count=len(history),
+            history_chars=sum(_content_char_len(h.get("content", "")) for h in history),
+            recall_count=len(search_results),
+            recall_scores=[float(getattr(r, "score", 0.0)) for r in search_results],
+            recall_chars=sum(
+                len(str(getattr(r, "content", ""))[: hc.recall_max_per_item_chars])
+                for r in search_results
+            ),
+            current_message_chars=len(msg.content),
+            total_input_chars=sum(_content_char_len(m.get("content", "")) for m in messages),
         )
 
         final_content, meta, injected = await self._execute_loop(
@@ -254,6 +285,15 @@ class AgentEngine:
             channel=msg.channel,
             chat_id=msg.chat_id,
         )
+        pre_metrics.first_prompt_tokens = meta.first_response_usage.get("prompt_tokens")
+        pre_metrics.first_completion_tokens = meta.first_response_usage.get("completion_tokens")
+        pre_metrics.first_total_tokens = meta.first_response_usage.get("total_tokens")
+        pre_metrics.loop_iterations = meta.iterations
+        pre_metrics.tools_used = list(meta.tools_used)
+        pre_metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)
+        pre_metrics.has_side_effects = meta.has_side_effects
+        pre_metrics.spawn_total_tokens = _extract_spawn_total_tokens(messages)
+        self._record_metrics(pre_metrics)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -314,6 +354,8 @@ class AgentEngine:
             include_tools=False,
             recent_full_turns=hc.recent_full_turns,
             assistant_truncate_chars=hc.assistant_truncate_chars,
+            max_chars=hc.max_history_chars,
+            history_days=hc.history_days,
         )
 
         messages = self.context.build_messages(
@@ -322,6 +364,25 @@ class AgentEngine:
             channel=channel,
             chat_id=chat_id,
             mode=ExecutionMode.OPERATOR,
+            memory_budget_chars=(hc.memory_budget_chars or None),
+            recall_max_total_chars=hc.recall_max_total_chars,
+            recall_max_per_item_chars=hc.recall_max_per_item_chars,
+        )
+        pre_metrics = ContextMetrics(
+            timestamp=datetime.now().isoformat(),
+            channel=channel,
+            chat_id=chat_id,
+            mode=ExecutionMode.OPERATOR.value,
+            system_prompt_chars=_content_char_len(messages[0].get("content", ""))
+            if messages
+            else 0,
+            history_message_count=len(history),
+            history_chars=sum(_content_char_len(h.get("content", "")) for h in history),
+            recall_count=0,
+            recall_scores=[],
+            recall_chars=0,
+            current_message_chars=len(prompt),
+            total_input_chars=sum(_content_char_len(m.get("content", "")) for m in messages),
         )
 
         # Operator mode uses fewer iterations
@@ -333,6 +394,15 @@ class AgentEngine:
             channel=channel,
             chat_id=chat_id,
         )
+        pre_metrics.first_prompt_tokens = meta.first_response_usage.get("prompt_tokens")
+        pre_metrics.first_completion_tokens = meta.first_response_usage.get("completion_tokens")
+        pre_metrics.first_total_tokens = meta.first_response_usage.get("total_tokens")
+        pre_metrics.loop_iterations = meta.iterations
+        pre_metrics.tools_used = list(meta.tools_used)
+        pre_metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)
+        pre_metrics.has_side_effects = meta.has_side_effects
+        pre_metrics.spawn_total_tokens = _extract_spawn_total_tokens(messages)
+        self._record_metrics(pre_metrics)
 
         if final_content is None:
             final_content = "Monitoring complete. Nothing to report."
@@ -456,6 +526,13 @@ class AgentEngine:
         if isinstance(cron_tool, CronTool):
             cron_tool.set_context(channel, chat_id)
 
+    def _record_metrics(self, metrics: ContextMetrics) -> None:
+        """Best-effort metrics recording without affecting user flows."""
+        try:
+            self._metrics_collector.record(metrics)
+        except Exception as e:
+            logger.warning(f"Failed to record context metrics: {e}")
+
     async def process_direct(
         self,
         content: str,
@@ -548,11 +625,20 @@ class _EngineLoopHooks:
             bg = arguments.get("background", False)
             if not bg:
                 label = arguments.get("label", arguments.get("task", "")[:40])
+                content, artifact_path, total_tokens = _split_subagent_tool_result(result)
+                status = "failed" if content.startswith("Error:") else "completed"
                 self._engine.memory.record_conversation(
                     channel=self._channel,
                     chat_id=self._chat_id,
                     role="user",
-                    content=f"[Subagent Result: {label}]\n\n{result}",
+                    content=_build_subagent_injection(
+                        label=label,
+                        content=content,
+                        status=status,
+                        background=False,
+                        artifact_path=artifact_path,
+                        total_tokens=total_tokens,
+                    ),
                     entry_type="injection",
                 )
 
@@ -574,9 +660,19 @@ class _EngineLoopHooks:
             [],
             reasoning_content=response.reasoning_content,
         )
-        for label, result in pending:
-            status = "failed" if result.startswith("Error:") else "completed"
-            inject = f"[Background subagent '{label}' {status}]\n\nResult:\n{result}"
+        for label, details in pending:
+            content = getattr(details, "content", str(details))
+            artifact_path = getattr(details, "artifact_path", None)
+            total_tokens = getattr(details, "total_tokens", 0)
+            status = "failed" if content.startswith("Error:") else "completed"
+            inject = _build_subagent_injection(
+                label=label,
+                content=content,
+                status=status,
+                background=True,
+                artifact_path=str(artifact_path) if artifact_path else None,
+                total_tokens=total_tokens,
+            )
             messages.append({"role": "user", "content": inject})
             logger.info(f"[inject] subagent result: {label} ({status})")
 
@@ -622,6 +718,9 @@ class _EngineLoopHooks:
 
 
 _THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.DOTALL)
+_SUBAGENT_TOKEN_RE = re.compile(r"\[Subagent Total Tokens\]\s*(\d+)")
+_SUBAGENT_ARTIFACT_RE = re.compile(r"^\[Subagent Artifact\]\s*(.+)$", re.MULTILINE)
+_SUBAGENT_MAX_CHARS = 800
 
 
 def _format_progress_message(
@@ -665,6 +764,82 @@ def _summarize_args(args: dict[str, Any] | None) -> str:
     if len(first_val) > 60:
         first_val = first_val[:57] + "..."
     return repr(first_val)
+
+
+def _content_char_len(content: Any) -> int:
+    """Estimate character length for heterogeneous message content payloads."""
+    if content is None:
+        return 0
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        return sum(_content_char_len(item) for item in content)
+    if isinstance(content, dict):
+        # Multimodal message parts store text under `text`.
+        if "text" in content and isinstance(content["text"], str):
+            return len(content["text"])
+        return sum(_content_char_len(v) for v in content.values())
+    return len(str(content))
+
+
+def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:
+    """Sum known spawn token usage tags from tool message content."""
+    total = 0
+    for msg in messages:
+        content = str(msg.get("content", ""))
+        for match in _SUBAGENT_TOKEN_RE.findall(content):
+            total += int(match)
+    return total
+
+
+def _split_subagent_tool_result(result: str) -> tuple[str, str | None, int]:
+    """Split sync spawn tool result into content + metadata markers."""
+    artifact_match = _SUBAGENT_ARTIFACT_RE.search(result)
+    artifact_path = artifact_match.group(1).strip() if artifact_match else None
+    total_tokens = 0
+    for token in _SUBAGENT_TOKEN_RE.findall(result):
+        total_tokens += int(token)
+
+    cleaned_lines: list[str] = []
+    for line in result.splitlines():
+        if line.startswith("[Subagent Artifact]"):
+            continue
+        if line.startswith("[Subagent Total Tokens]"):
+            continue
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines).strip()
+    return cleaned or result.strip(), artifact_path, total_tokens
+
+
+def _build_subagent_injection(
+    *,
+    label: str,
+    content: str,
+    status: str,
+    background: bool,
+    artifact_path: str | None,
+    total_tokens: int,
+) -> str:
+    """Build compact subagent injection content for next-loop context."""
+    is_error = status == "failed" or content.startswith("Error:")
+    body = content
+    truncated = False
+    if not is_error and len(body) > _SUBAGENT_MAX_CHARS:
+        body = body[:_SUBAGENT_MAX_CHARS].rstrip() + " [...]"
+        truncated = True
+
+    if background:
+        text = f"[Background subagent '{label}' {status}]\n\nResult:\n{body}"
+    else:
+        text = f"[Subagent Result: {label}]\n\n{body}"
+
+    if truncated:
+        text += "\n\n[Full result saved to subagent artifact file]"
+    if artifact_path:
+        text += f"\n[Subagent Artifact] {artifact_path}"
+    if total_tokens:
+        text += f"\n[Subagent Total Tokens] {total_tokens}"
+    return text
 
 
 # Backward compatibility alias

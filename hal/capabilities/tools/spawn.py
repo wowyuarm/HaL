@@ -10,7 +10,7 @@ from hal.bus.events import OutboundMessage
 from hal.capabilities.tools.base import Tool
 
 if TYPE_CHECKING:
-    from hal.core.subagent import SubagentManager
+    from hal.core.subagent import SubagentExecutionResult, SubagentManager
 
 # Interval (seconds) between progress messages for sync spawn.
 _PROGRESS_INTERVAL = 30
@@ -101,7 +101,8 @@ class SpawnTool(Tool):
             progress_task = asyncio.create_task(self._report_progress(display_label))
 
         try:
-            return await self._manager.run(task=task, label=label)
+            details = await self._manager.run_with_details(task=task, label=label)
+            return self._format_result(details)
         finally:
             if progress_task:
                 progress_task.cancel()
@@ -135,3 +136,13 @@ class SpawnTool(Tool):
                     )
         except asyncio.CancelledError:
             raise
+
+    @staticmethod
+    def _format_result(details: "SubagentExecutionResult") -> str:
+        """Encode subagent detail metadata into the tool result payload."""
+        lines = [details.content]
+        if details.artifact_path:
+            lines.append(f"[Subagent Artifact] {details.artifact_path}")
+        if details.total_tokens:
+            lines.append(f"[Subagent Total Tokens] {details.total_tokens}")
+        return "\n\n".join(lines)

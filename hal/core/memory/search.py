@@ -76,7 +76,9 @@ class MemorySearch:
 
         return total
 
-    async def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
+    async def search(
+        self, query: str, top_k: int = 5, min_score: float = 0.0
+    ) -> list[SearchResult]:
         """Hybrid search (semantic + keyword) across indexed memories.
 
         Applies a relevance penalty to summary chunks so that raw conversation
@@ -95,6 +97,8 @@ class MemorySearch:
             if r.source_type == "summary":
                 r.score *= _SUMMARY_PENALTY
         results.sort(key=lambda r: r.score, reverse=True)
+        if min_score > 0:
+            results = [r for r in results if r.score >= min_score]
         return results[:top_k]
 
     async def export_and_index_yesterday(self) -> int:

@@ -245,14 +245,32 @@ class TestSearch:
 
             # Get penalized scores via search()
             results = await memory_search.search("deployment", top_k=5)
-            summary_penalized = {
-                r.content: r.score for r in results if r.source_type == "summary"
-            }
+            summary_penalized = {r.content: r.score for r in results if r.source_type == "summary"}
 
             # Verify penalty was applied to summary chunks
             for content, penalized_score in summary_penalized.items():
                 raw_score = summary_raw_scores[content]
                 assert abs(penalized_score - raw_score * _SUMMARY_PENALTY) < 1e-6
+
+    async def test_search_applies_min_score_filter(self, memory_search):
+        fake_results = [
+            SearchResult(content="high", source="a", heading="", score=0.9, source_type="raw"),
+            SearchResult(content="low", source="b", heading="", score=0.1, source_type="raw"),
+        ]
+        with (
+            patch.object(
+                memory_search,
+                "_embed_texts",
+                new_callable=AsyncMock,
+                return_value=_fake_embedding(["query"]),
+            ),
+            patch.object(
+                memory_search._store, "search", new_callable=AsyncMock, return_value=fake_results
+            ),
+        ):
+            results = await memory_search.search("query", top_k=5, min_score=0.5)
+            assert len(results) == 1
+            assert results[0].content == "high"
 
 
 class TestExportAndIndexYesterday:

@@ -5,7 +5,7 @@ Each day's conversations are stored in a separate JSONL file (YYYY-MM-DD.jsonl).
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -121,11 +121,13 @@ class DailyLog:
         include_tools: bool = False,
         recent_full_turns: int = 3,
         assistant_truncate_chars: int = 200,
+        max_chars: int = 0,
+        history_days: int = 1,
     ) -> list[dict[str, Any]]:
         """
         Get recent conversation history for a specific channel/chat.
 
-        Only reads today's file — conversations don't span days.
+        Reads recent daily files based on ``history_days``.
 
         To reduce in-context learning contamination (where the model picks up
         formatting/style from its own earlier outputs), assistant messages beyond
@@ -140,15 +142,21 @@ class DailyLog:
             recent_full_turns: Number of recent assistant messages to keep
                 verbatim. Older assistant messages are truncated.
             assistant_truncate_chars: Max characters for older assistant messages.
+            max_chars: Hard cap on total output chars (0 = unlimited).
+            history_days: Number of days to include, counting today.
 
         Returns:
             List of messages in LLM format (role, content)
         """
         entries: list[LogEntry] = []
 
-        today_file = self._get_today_file()
-        if today_file.exists():
-            entries.extend(self._read_file(today_file))
+        days = max(history_days, 1)
+        today = date.today()
+        for offset in range(days - 1, -1, -1):
+            day = today - timedelta(days=offset)
+            day_file = self._get_file_for_date(day)
+            if day_file.exists():
+                entries.extend(self._read_file(day_file))
 
         # Filter by channel and chat_id
         filtered = [
@@ -214,6 +222,19 @@ class DailyLog:
                     # Inside recent full turns: skip paired summary (already in skip_indices)
                     pass
             messages.append({"role": entry.role, "content": content})
+
+        if max_chars > 0 and messages:
+            total = 0
+            cutoff = 0
+            for i in range(len(messages) - 1, -1, -1):
+                total += len(str(messages[i].get("content", "")))
+                if total > max_chars:
+                    cutoff = i + 1
+                    break
+            if cutoff >= len(messages):
+                messages = [messages[-1]]
+            elif cutoff > 0:
+                messages = messages[cutoff:]
 
         return messages
 
