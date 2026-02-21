@@ -22,6 +22,9 @@ _SUMMARY_SYSTEM_PROMPT = (
     "- Focus on results and key changes, not process.\n"
     "- Mention specific files, commands, or data only "
     "when they are important to the outcome.\n"
+    "- For key decisions or approach choices, add a brief rationale "
+    'in parentheses — e.g. "Agent used word-boundary regex instead of '
+    'substring match (avoids false positives on URL query params)."\n'
     "- Output ONLY the summary, no preamble."
 )
 

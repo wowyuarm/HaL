@@ -42,6 +42,7 @@ class FakeVectorStore:
                     source=chunk["source"],
                     heading=chunk.get("heading", ""),
                     score=score,
+                    source_type=chunk.get("source_type", "raw"),
                 )
             )
         results.sort(key=lambda r: r.score, reverse=True)
@@ -197,6 +198,61 @@ class TestSearch:
         ):
             results = await memory_search.search("anything")
             assert results == []
+
+    async def test_summary_penalty_applied(self, memory_search, daily_log, daily_dir):
+        """Summary chunks should have their scores reduced by the penalty factor."""
+        from hal.core.memory.daily_log import LogEntry
+        from hal.core.memory.search import _SUMMARY_PENALTY
+
+        log_file = daily_log.data_dir / "2026-02-12.jsonl"
+        entries = [
+            LogEntry(
+                timestamp="2026-02-12T10:30:00",
+                channel="telegram",
+                chat_id="123",
+                role="user",
+                content="Discuss the deployment strategy for production",
+            ),
+            LogEntry(
+                timestamp="2026-02-12T10:31:00",
+                channel="telegram",
+                chat_id="123",
+                role="user",
+                content=(
+                    "[System Summary]\n"
+                    "Agent deployed the app to production using blue-green strategy."
+                ),
+                entry_type="summary",
+            ),
+        ]
+        log_file.write_text("\n".join(e.model_dump_json() for e in entries) + "\n")
+
+        with patch.object(
+            memory_search,
+            "_embed_texts",
+            new_callable=AsyncMock,
+            side_effect=lambda texts: _fake_embedding(texts),
+        ):
+            await memory_search.index_date(date(2026, 2, 12))
+
+            # Get raw scores from store directly (before penalty)
+            raw_results = await memory_search._store.search(
+                _fake_embedding(["deployment"])[0], query_text="deployment", top_k=5
+            )
+            summary_raw_scores = {
+                r.content: r.score for r in raw_results if r.source_type == "summary"
+            }
+
+            # Get penalized scores via search()
+            results = await memory_search.search("deployment", top_k=5)
+            summary_penalized = {
+                r.content: r.score for r in results if r.source_type == "summary"
+            }
+
+            # Verify penalty was applied to summary chunks
+            for content, penalized_score in summary_penalized.items():
+                raw_score = summary_raw_scores[content]
+                assert abs(penalized_score - raw_score * _SUMMARY_PENALTY) < 1e-6
 
 
 class TestExportAndIndexYesterday:

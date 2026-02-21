@@ -27,9 +27,10 @@ class SearchResult:
     source: str
     heading: str
     score: float
+    source_type: str = "raw"
 
 
-_OUTPUT_FIELDS = ["content", "source", "heading"]
+_OUTPUT_FIELDS = ["content", "source", "heading", "source_type"]
 
 
 class VectorStore:
@@ -57,7 +58,17 @@ class VectorStore:
         self._client = MilvusClient(uri=str(uri_path))
 
         if self._client.has_collection(self._collection_name):
-            return
+            # Migrate: drop collection if schema is missing source_type field
+            info = self._client.describe_collection(self._collection_name)
+            field_names = {f["name"] for f in info.get("fields", [])}
+            if "source_type" not in field_names:
+                logger.info(
+                    f"Migrating collection '{self._collection_name}': "
+                    "adding source_type (drop + recreate)"
+                )
+                self._client.drop_collection(self._collection_name)
+            else:
+                return
 
         schema = self._client.create_schema()
         schema.add_field(
@@ -78,6 +89,12 @@ class VectorStore:
         schema.add_field(field_name="heading_level", datatype=DataType.INT16)
         schema.add_field(field_name="start_line", datatype=DataType.INT32)
         schema.add_field(field_name="end_line", datatype=DataType.INT32)
+        schema.add_field(
+            field_name="source_type",
+            datatype=DataType.VARCHAR,
+            max_length=32,
+            default_value="raw",
+        )
 
         # BM25 auto-generates sparse_vector from content
         schema.add_function(
@@ -154,6 +171,7 @@ class VectorStore:
                         source=entity.get("source", ""),
                         heading=entity.get("heading", ""),
                         score=hit.get("distance", 0.0),
+                        source_type=entity.get("source_type", "raw"),
                     )
                 )
         return results

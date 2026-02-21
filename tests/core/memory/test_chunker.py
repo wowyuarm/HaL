@@ -93,3 +93,31 @@ class TestLineNumbers:
         chunks = chunker.chunk_text(text, "test.md")
         assert chunks[0].start_line == 0
         assert chunks[1].start_line == 5
+
+
+class TestSourceType:
+    def test_raw_by_default(self, chunker):
+        text = "# Title\n\nRegular conversation content"
+        chunks = chunker.chunk_text(text, "test.md")
+        assert len(chunks) == 1
+        assert chunks[0].source_type == "raw"
+
+    def test_summary_tagged(self, chunker):
+        text = "# Title\n\n**[10:30] User**: [System Summary]\nAgent did something."
+        chunks = chunker.chunk_text(text, "test.md")
+        assert len(chunks) == 1
+        assert chunks[0].source_type == "summary"
+
+    def test_mixed_raw_and_summary(self, chunker):
+        text = (
+            "# Title\n\n"
+            "**[10:30] User**: Hello\n\n"
+            "# Summary Section\n\n"
+            "**[10:35] User**: [System Summary]\nAgent fixed a bug."
+        )
+        chunks = chunker.chunk_text(text, "test.md")
+        assert len(chunks) == 2
+        raw_chunks = [c for c in chunks if c.source_type == "raw"]
+        summary_chunks = [c for c in chunks if c.source_type == "summary"]
+        assert len(raw_chunks) == 1
+        assert len(summary_chunks) == 1

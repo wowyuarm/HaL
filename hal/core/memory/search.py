@@ -16,6 +16,10 @@ from hal.core.memory.chunker import MarkdownChunker, compute_chunk_id
 from hal.core.memory.exporter import DailyExporter
 from hal.core.memory.store import SearchResult, VectorStore
 
+# Score multiplier applied to summary chunks during retrieval.
+# Demotes summaries so raw conversation chunks are preferred (raw-first strategy).
+_SUMMARY_PENALTY = 0.75
+
 
 class MemorySearch:
     """Orchestrates the full memory search pipeline."""
@@ -73,11 +77,25 @@ class MemorySearch:
         return total
 
     async def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
-        """Hybrid search (semantic + keyword) across indexed memories."""
+        """Hybrid search (semantic + keyword) across indexed memories.
+
+        Applies a relevance penalty to summary chunks so that raw conversation
+        chunks are preferred when scores are close (raw-first strategy).
+        """
         query_embedding = await self._embed_texts([query])
         if not query_embedding:
             return []
-        return await self._store.search(query_embedding[0], query_text=query, top_k=top_k)
+
+        # Fetch extra candidates to compensate for penalty reranking
+        fetch_k = min(top_k * 2, top_k + 5)
+        results = await self._store.search(query_embedding[0], query_text=query, top_k=fetch_k)
+
+        # Apply penalty to summary chunks and re-rank
+        for r in results:
+            if r.source_type == "summary":
+                r.score *= _SUMMARY_PENALTY
+        results.sort(key=lambda r: r.score, reverse=True)
+        return results[:top_k]
 
     async def export_and_index_yesterday(self) -> int:
         """Convenience: export yesterday's log and index it."""
@@ -172,6 +190,7 @@ class MemorySearch:
                 "heading_level": chunk.heading_level,
                 "start_line": chunk.start_line,
                 "end_line": chunk.end_line,
+                "source_type": chunk.source_type,
             }
             for chunk, emb in zip(to_add, embeddings)
         ]

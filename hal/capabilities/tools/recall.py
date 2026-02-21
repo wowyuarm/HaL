@@ -66,7 +66,10 @@ class RecallTool(Tool):
             header = f"**[{i}] {r.source}"
             if r.heading:
                 header += f" — {r.heading}"
-            header += f"** (score: {r.score:.3f})"
+            header += f"** (score: {r.score:.3f}"
+            if r.source_type == "summary":
+                header += ", summary"
+            header += ")"
             parts.append(header)
             parts.append(r.content)
             parts.append("")

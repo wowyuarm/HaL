@@ -24,6 +24,7 @@ class Chunk:
     heading_level: int  # 0 = preamble (before first heading), 1-6 for h1-h6
     start_line: int
     end_line: int
+    source_type: str = "raw"  # "raw" | "summary"
     content_hash: str = field(default="", repr=False)
 
     def __post_init__(self):
@@ -103,11 +104,33 @@ class MarkdownChunker:
                     )
                 )
 
-        return chunks
+        return self._tag_source_types(chunks)
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tag_source_types(chunks: list[Chunk]) -> list[Chunk]:
+        """Tag chunks containing [System Summary] as source_type='summary'."""
+        result: list[Chunk] = []
+        for c in chunks:
+            if "[System Summary]" in c.content:
+                result.append(
+                    Chunk(
+                        content=c.content,
+                        source=c.source,
+                        heading=c.heading,
+                        heading_level=c.heading_level,
+                        start_line=c.start_line,
+                        end_line=c.end_line,
+                        source_type="summary",
+                        content_hash=c.content_hash,
+                    )
+                )
+            else:
+                result.append(c)
+        return result
 
     @staticmethod
     def _split_into_sections(
