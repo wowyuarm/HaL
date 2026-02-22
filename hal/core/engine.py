@@ -596,38 +596,60 @@ class AgentEngine:
         token_estimate = _estimate_prompt_tokens(self.model, messages, tools)
         history_window = self._inspect_history_window(hc.history_days)
 
+        # Deduplicate recall items at engine layer (by source+heading+source_type).
+        seen_recall: set[tuple[str, str, str]] = set()
+        recall_items: list[dict[str, Any]] = []
+        for r in search_results:
+            key = (
+                getattr(r, "source", ""),
+                getattr(r, "heading", ""),
+                getattr(r, "source_type", "raw"),
+            )
+            if key in seen_recall:
+                continue
+            seen_recall.add(key)
+            recall_items.append(
+                {
+                    "source": key[0],
+                    "heading": key[1],
+                    "score": float(getattr(r, "score", 0.0)),
+                    "source_type": key[2],
+                }
+            )
+
+        # Build per-message summaries (role + char count + short preview).
+        preview_len = 80
+        message_summaries: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content", "")
+            chars = _content_char_len(content)
+            preview_src = content if isinstance(content, str) else str(content)
+            preview = preview_src[:preview_len].replace("\n", " ")
+            if len(preview_src) > preview_len:
+                preview += "…"
+            message_summaries.append(
+                {"role": msg.get("role", ""), "chars": chars, "preview": preview}
+            )
+
+        sys_chars = _content_char_len(messages[0].get("content", "")) if messages else 0
+
         return {
             "channel": channel,
             "chat_id": chat_id,
             "mode": ExecutionMode.COLLAB.value,
             "model": self.model,
             "messages": messages,
+            "message_summaries": message_summaries,
             "history_message_count": len(history),
             "history_chars": sum(_content_char_len(h.get("content", "")) for h in history),
-            "recall_count": len(search_results),
-            "recall_items": [
-                {
-                    "source": getattr(r, "source", ""),
-                    "heading": getattr(r, "heading", ""),
-                    "score": float(getattr(r, "score", 0.0)),
-                    "source_type": getattr(r, "source_type", "raw"),
-                }
-                for r in search_results
-            ],
-            "current_message_chars": len(current_message),
-            "system_prompt_chars": _content_char_len(messages[0].get("content", ""))
-            if messages
-            else 0,
+            "recall_count": len(recall_items),
+            "recall_items": recall_items,
+            "system_prompt_chars": sys_chars,
             "total_input_chars": sum(_content_char_len(m.get("content", "")) for m in messages),
             "history_config": {
-                "max_messages": hc.max_messages,
-                "recent_full_turns": hc.recent_full_turns,
-                "assistant_truncate_chars": hc.assistant_truncate_chars,
-                "max_history_chars": hc.max_history_chars,
-                "memory_budget_chars": hc.memory_budget_chars,
                 "history_days": hc.history_days,
-                "recall_max_total_chars": hc.recall_max_total_chars,
-                "recall_max_per_item_chars": hc.recall_max_per_item_chars,
+                "max_messages": hc.max_messages,
+                "max_history_chars": hc.max_history_chars,
             },
             "history_window": history_window,
             "token_estimate": token_estimate,

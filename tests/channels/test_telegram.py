@@ -58,6 +58,7 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
             "history_message_count": 1,
             "history_chars": 12,
             "recall_count": 0,
+            "recall_items": [],
             "system_prompt_chars": 5000,
             "total_input_chars": 5200,
             "token_estimate": {
@@ -70,19 +71,22 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
                 "history_days": 1,
                 "max_messages": 50,
                 "max_history_chars": 0,
-                "recent_full_turns": 3,
-                "assistant_truncate_chars": 200,
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [
                 {"role": "system", "content": "S" * 4000},
                 {"role": "user", "content": "hello"},
             ],
+            "message_summaries": [
+                {"role": "system", "chars": 4000, "preview": "S" * 80 + "…"},
+                {"role": "user", "chars": 5, "preview": "hello"},
+            ],
         },
-        "[context inspection]",
     )
-    assert "(system prompt compressed, sha1=" in report
-    assert "[0] role=system chars=4000" in report
+    # Compact mode: shows summaries, not full messages
+    assert "<b>HaL Context Inspector</b>" in report
+    assert "system" in report
+    assert "5,200" in report  # total_input_chars with thousands separator
 
 
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
@@ -459,6 +463,9 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
             "history_message_count": 2,
             "history_chars": 10,
             "recall_count": 1,
+            "recall_items": [
+                {"source": "2026-02-22.md", "heading": "chat", "score": 0.8, "source_type": "raw"}
+            ],
             "system_prompt_chars": 20,
             "total_input_chars": 30,
             "token_estimate": {
@@ -471,8 +478,6 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
                 "history_days": 1,
                 "max_messages": 50,
                 "max_history_chars": 0,
-                "recent_full_turns": 3,
-                "assistant_truncate_chars": 200,
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "latest_metrics": {
@@ -487,6 +492,10 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
             "messages": [
                 {"role": "system", "content": "sys"},
                 {"role": "user", "content": "hi"},
+            ],
+            "message_summaries": [
+                {"role": "system", "chars": 3, "preview": "sys"},
+                {"role": "user", "chars": 2, "preview": "hi"},
             ],
         }
     )
@@ -508,9 +517,12 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
         current_message="ping",
     )
     assert msg.reply_text.await_count >= 1
-    first_chunk = msg.reply_text.await_args_list[0].args[0]
+    first_call = msg.reply_text.await_args_list[0]
+    first_chunk = first_call.args[0]
     assert "HaL Context Inspector" in first_chunk
-    assert "Token Estimate" in first_chunk
+    assert "Context Size" in first_chunk
+    # Verify HTML parse_mode is used
+    assert first_call.kwargs.get("parse_mode") == "HTML"
 
 
 @pytest.mark.asyncio
@@ -524,6 +536,7 @@ async def test_on_context_full_mode_parses_message() -> None:
             "history_message_count": 0,
             "history_chars": 0,
             "recall_count": 0,
+            "recall_items": [],
             "system_prompt_chars": 3,
             "total_input_chars": 5,
             "token_estimate": {
@@ -536,11 +549,10 @@ async def test_on_context_full_mode_parses_message() -> None:
                 "history_days": 1,
                 "max_messages": 50,
                 "max_history_chars": 0,
-                "recent_full_turns": 3,
-                "assistant_truncate_chars": 200,
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [{"role": "system", "content": "sys"}],
+            "message_summaries": [{"role": "system", "chars": 3, "preview": "sys"}],
         }
     )
     ch = TelegramChannel(
@@ -561,7 +573,7 @@ async def test_on_context_full_mode_parses_message() -> None:
         current_message="ping",
     )
     first_chunk = msg.reply_text.await_args_list[0].args[0]
-    assert "view: full" in first_chunk
+    assert "(full)" in first_chunk
 
 
 @pytest.mark.asyncio
