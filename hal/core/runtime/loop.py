@@ -22,6 +22,7 @@ class LoopMetadata:
     files_modified: list[str] = field(default_factory=list)
     commands_run: list[str] = field(default_factory=list)
     tool_call_counts: dict[str, int] = field(default_factory=dict)
+    total_tool_calls: int = 0
     has_side_effects: bool = False
     first_response_usage: dict[str, int] = field(default_factory=dict)
     total_usage: dict[str, int] = field(default_factory=dict)
@@ -227,6 +228,8 @@ async def run_tool_loop(
                 )
                 if tool_call.name not in meta.tools_used:
                     meta.tools_used.append(tool_call.name)
+
+                meta.total_tool_calls += 1
 
                 # Track side effects via tool interface
                 tool_obj = tools.get(tool_call.name)

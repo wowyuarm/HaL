@@ -277,7 +277,9 @@ class MemorySearch:
         if not md_path.exists():
             return True
 
-        expected = {self._chunk_id(c) for c in self._chunker.chunk_file(md_path, base_path=self._daily_dir)}
+        expected = {
+            self._chunk_id(c) for c in self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+        }
         existing = await self._store.get_chunk_ids_by_source(source_name)
         return expected != existing
 

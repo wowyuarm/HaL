@@ -687,6 +687,17 @@ class _EngineLoopHooks:
     background subagent result collection.
     """
 
+    # System reminder injected periodically to keep HaL in manager mindset.
+    _REMINDER = (
+        "[System Reminder]\n"
+        "You are a strategist, not an executor.\n"
+        "Is the current direction correct? Is there a better approach?\n"
+        "If unsure, pause and reassess or ask the user before continuing.\n"
+        "Do not respond to this reminder — it is automatic."
+    )
+
+    _REMINDER_INTERVAL = 5  # inject every N total tool calls
+
     def __init__(
         self,
         engine: AgentEngine,
@@ -699,24 +710,39 @@ class _EngineLoopHooks:
         self._channel = channel
         self._chat_id = chat_id
         self.injected: list[InboundMessage] = []
+        self._last_reminder_at: int = 0
 
     def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
-        """Inject any messages that arrived mid-execution."""
-        if not self._session_key:
-            return
-        for pending in self._engine._drain_pending_for_session(self._session_key):
-            prefixed = f"[User follow-up while you are working] {pending.content}"
-            messages.append({"role": "user", "content": prefixed})
-            self.injected.append(pending)
-            logger.info(f"[inject] mid-loop message from {pending.sender_id}")
+        """Inject pending user messages and periodic system reminders."""
+        # Inject mid-loop user messages
+        if self._session_key:
+            for pending in self._engine._drain_pending_for_session(self._session_key):
+                prefixed = f"[User follow-up while you are working] {pending.content}"
+                messages.append({"role": "user", "content": prefixed})
+                self.injected.append(pending)
+                logger.info(f"[inject] mid-loop message from {pending.sender_id}")
 
-            if self._channel and self._chat_id:
-                self._engine.memory.record_conversation(
-                    channel=self._channel,
-                    chat_id=self._chat_id,
-                    role="user",
-                    content=prefixed,
-                )
+                if self._channel and self._chat_id:
+                    self._engine.memory.record_conversation(
+                        channel=self._channel,
+                        chat_id=self._chat_id,
+                        role="user",
+                        content=prefixed,
+                    )
+
+        # Inject system reminder when interval is reached
+        if self._should_inject_reminder(meta):
+            messages.append({"role": "user", "content": self._REMINDER})
+            self._last_reminder_at = meta.total_tool_calls
+
+    def _should_inject_reminder(self, meta: LoopMetadata) -> bool:
+        """Check if a system reminder should be injected."""
+        if meta.total_tool_calls == 0:
+            return False
+        return (
+            meta.total_tool_calls % self._REMINDER_INTERVAL == 0
+            and meta.total_tool_calls > self._last_reminder_at
+        )
 
     def on_tool_result(
         self,
