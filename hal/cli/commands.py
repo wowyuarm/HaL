@@ -417,7 +417,12 @@ def gateway(
     )
 
     # Create channel manager
-    channels = ChannelManager(config, bus, memory_manager=agent.memory)
+    channels = ChannelManager(
+        config,
+        bus,
+        memory_manager=agent.memory,
+        context_inspector=agent.inspect_context,
+    )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")

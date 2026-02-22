@@ -40,6 +40,51 @@ def test_split_telegram_message_prefers_newline_then_space() -> None:
     assert chunks_space == ["a" * 50, "b" * 50]
 
 
+def test_compress_context_output_respects_max_chars() -> None:
+    text = "abcdefghij" * 100
+    out = TelegramChannel._compress_context_output(text, max_chars=120)
+    assert len(out) <= 120
+    assert "omitted" in out
+
+
+def test_format_context_report_compacts_system_prompt_by_default() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    report = ch._format_context_report(
+        {
+            "channel": "telegram",
+            "chat_id": "1",
+            "model": "test-model",
+            "mode": "collab",
+            "history_message_count": 1,
+            "history_chars": 12,
+            "recall_count": 0,
+            "system_prompt_chars": 5000,
+            "total_input_chars": 5200,
+            "token_estimate": {
+                "method": "chars_div_4",
+                "messages_only": 1000,
+                "with_tools": 1200,
+                "tools_only": 200,
+            },
+            "history_config": {
+                "history_days": 1,
+                "max_messages": 50,
+                "max_history_chars": 0,
+                "recent_full_turns": 3,
+                "assistant_truncate_chars": 200,
+            },
+            "history_window": [{"date": "2026-02-22", "exists": True}],
+            "messages": [
+                {"role": "system", "content": "S" * 4000},
+                {"role": "user", "content": "hello"},
+            ],
+        },
+        "[context inspection]",
+    )
+    assert "(system prompt compressed, sha1=" in report
+    assert "[0] role=system chars=4000" in report
+
+
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     md = (
         "# Title\n"
@@ -372,3 +417,165 @@ async def test_stop_cancels_typing_tasks_and_shuts_down_app() -> None:
 
     assert ch._app is None
     assert ch._typing_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_on_reset_clears_history_without_session_key() -> None:
+    memory = MagicMock()
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus(), memory_manager=memory)
+
+    msg = _Message(chat_id=123, text="/reset")
+    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
+    update = _Update(message=msg, user=_User(1))
+
+    await ch._on_reset(update, context=None)  # type: ignore[arg-type]
+
+    memory.clear_conversation_history.assert_called_once_with(channel="telegram", chat_id="123")
+    msg.reply_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_context_without_inspector_replies_warning() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+
+    msg = _Message(chat_id=123, text="/context")
+    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
+    update = _Update(message=msg, user=_User(1))
+
+    await ch._on_context(update, context=None)  # type: ignore[arg-type]
+
+    msg.reply_text.assert_awaited_once()
+    assert "not configured" in msg.reply_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_on_context_uses_inspector_and_sends_report() -> None:
+    inspector = AsyncMock(
+        return_value={
+            "channel": "telegram",
+            "chat_id": "123",
+            "model": "test-model",
+            "mode": "collab",
+            "history_message_count": 2,
+            "history_chars": 10,
+            "recall_count": 1,
+            "system_prompt_chars": 20,
+            "total_input_chars": 30,
+            "token_estimate": {
+                "method": "litellm.token_counter",
+                "messages_only": 11,
+                "with_tools": 22,
+                "tools_only": 11,
+            },
+            "history_config": {
+                "history_days": 1,
+                "max_messages": 50,
+                "max_history_chars": 0,
+                "recent_full_turns": 3,
+                "assistant_truncate_chars": 200,
+            },
+            "history_window": [{"date": "2026-02-22", "exists": True}],
+            "latest_metrics": {
+                "timestamp": "2026-02-22T10:00:00",
+                "first_prompt_tokens": 100,
+                "first_completion_tokens": 20,
+                "first_total_tokens": 120,
+                "loop_iterations": 2,
+                "tools_used": ["fs"],
+                "spawn_total_tokens": 0,
+            },
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+            ],
+        }
+    )
+    ch = TelegramChannel(
+        TelegramConfig(enabled=True, token="t"),
+        MessageBus(),
+        context_inspector=inspector,
+    )
+
+    msg = _Message(chat_id=123, text="/context ping")
+    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
+    update = _Update(message=msg, user=_User(1))
+
+    await ch._on_context(update, context=None)  # type: ignore[arg-type]
+
+    inspector.assert_awaited_once_with(
+        channel="telegram",
+        chat_id="123",
+        current_message="ping",
+    )
+    assert msg.reply_text.await_count >= 1
+    first_chunk = msg.reply_text.await_args_list[0].args[0]
+    assert "HaL Context Inspector" in first_chunk
+    assert "Token Estimate" in first_chunk
+
+
+@pytest.mark.asyncio
+async def test_on_context_full_mode_parses_message() -> None:
+    inspector = AsyncMock(
+        return_value={
+            "channel": "telegram",
+            "chat_id": "123",
+            "model": "test-model",
+            "mode": "collab",
+            "history_message_count": 0,
+            "history_chars": 0,
+            "recall_count": 0,
+            "system_prompt_chars": 3,
+            "total_input_chars": 5,
+            "token_estimate": {
+                "method": "chars_div_4",
+                "messages_only": 1,
+                "with_tools": 1,
+                "tools_only": 0,
+            },
+            "history_config": {
+                "history_days": 1,
+                "max_messages": 50,
+                "max_history_chars": 0,
+                "recent_full_turns": 3,
+                "assistant_truncate_chars": 200,
+            },
+            "history_window": [{"date": "2026-02-22", "exists": True}],
+            "messages": [{"role": "system", "content": "sys"}],
+        }
+    )
+    ch = TelegramChannel(
+        TelegramConfig(enabled=True, token="t"),
+        MessageBus(),
+        context_inspector=inspector,
+    )
+
+    msg = _Message(chat_id=123, text="/context full ping")
+    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
+    update = _Update(message=msg, user=_User(1))
+
+    await ch._on_context(update, context=None)  # type: ignore[arg-type]
+
+    inspector.assert_awaited_once_with(
+        channel="telegram",
+        chat_id="123",
+        current_message="ping",
+    )
+    first_chunk = msg.reply_text.await_args_list[0].args[0]
+    assert "view: full" in first_chunk
+
+
+@pytest.mark.asyncio
+async def test_on_context_denies_disallowed_sender() -> None:
+    inspector = AsyncMock(return_value={})
+    cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
+    ch = TelegramChannel(cfg, MessageBus(), context_inspector=inspector)
+
+    msg = _Message(chat_id=123, text="/context hello")
+    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
+    update = _Update(message=msg, user=_User(1))
+
+    await ch._on_context(update, context=None)  # type: ignore[arg-type]
+
+    inspector.assert_not_awaited()
+    msg.reply_text.assert_awaited_once()
+    assert "not allowed" in msg.reply_text.await_args.args[0].lower()

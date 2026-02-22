@@ -35,10 +35,11 @@ No fixed coverage threshold is configured; add regression tests for bug fixes.
 
 ## Commit & Pull Request Guidelines
 Follow observed commit style: `type(scope): imperative summary` (for example `feat(memory): ...`, `fix(exec): ...`, `refactor(cli): ...`).  
-For non-trivial changes, commit messages must include a body (not only a title) describing why, what changed, and verification.
+For non-trivial changes, include a short body using concise prose or `-` bullet points (match recent repository history style).
 Example:
-`feat(memory): improve recall ranking`  
-`why/what/test: reduce summary bias; keep index compatibility; pytest tests/core/memory/test_search.py`
+`feat(memory): clarify RRF scoring and harden recall indexing pipeline`  
+`- Label retrieval values as rrf_score in output and context blocks`  
+`- Add chunk_heading_max_level config to reduce over-fragmentation`
 Keep commits focused and runnable. Before opening a PR, run `pytest tests/` and `ruff check hal/ && ruff format hal/`.  
 PRs should include purpose, key files changed, config/migration notes, and verification steps (commands plus short output snippets). Link related issues when applicable.
 

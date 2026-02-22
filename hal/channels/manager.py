@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -26,11 +27,16 @@ class ChannelManager:
     """
 
     def __init__(
-        self, config: Config, bus: MessageBus, memory_manager: "MemoryManager | None" = None
+        self,
+        config: Config,
+        bus: MessageBus,
+        memory_manager: "MemoryManager | None" = None,
+        context_inspector: Callable[[str, str, str], Awaitable[dict[str, Any]]] | None = None,
     ):
         self.config = config
         self.bus = bus
         self.memory_manager = memory_manager
+        self.context_inspector = context_inspector
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -44,11 +50,17 @@ class ChannelManager:
             try:
                 from hal.channels.telegram import TelegramChannel
 
+                kwargs: dict[str, Any] = {
+                    "groq_api_key": self.config.providers.groq.api_key,
+                    "memory_manager": self.memory_manager,
+                }
+                if self.context_inspector is not None:
+                    kwargs["context_inspector"] = self.context_inspector
+
                 self.channels["telegram"] = TelegramChannel(
                     self.config.channels.telegram,
                     self.bus,
-                    groq_api_key=self.config.providers.groq.api_key,
-                    memory_manager=self.memory_manager,
+                    **kwargs,
                 )
                 logger.info("Telegram channel enabled")
             except ImportError as e:

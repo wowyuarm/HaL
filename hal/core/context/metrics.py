@@ -98,6 +98,25 @@ class MetricsCollector:
             }
         return result
 
+    def get_latest(
+        self,
+        *,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the latest row optionally filtered by channel/chat/mode."""
+        rows = self._load_recent(0)
+        for row in reversed(rows):
+            if channel and row.get("channel") != channel:
+                continue
+            if chat_id and row.get("chat_id") != chat_id:
+                continue
+            if mode and row.get("mode") != mode:
+                continue
+            return row
+        return None
+
     def _load_recent(self, last_n: int) -> list[dict[str, Any]]:
         if not self._log_path.exists():
             return []

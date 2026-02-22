@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -533,6 +533,107 @@ class AgentEngine:
         except Exception as e:
             logger.warning(f"Failed to record context metrics: {e}")
 
+    def _inspect_history_window(self, history_days: int) -> list[dict[str, Any]]:
+        """Build a lightweight debug view of daily log files scanned for history."""
+        days = max(history_days, 1)
+        today = date.today()
+        log_dir = self.memory.daily_log.data_dir
+        window: list[dict[str, Any]] = []
+        for offset in range(days - 1, -1, -1):
+            day = today - timedelta(days=offset)
+            day_str = day.isoformat()
+            path = log_dir / f"{day_str}.jsonl"
+            window.append({"date": day_str, "exists": path.exists()})
+        return window
+
+    async def inspect_context(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        current_message: str,
+    ) -> dict[str, Any]:
+        """Build the current COLLAB context and return debug-friendly metadata.
+
+        This does not mutate memory or execute any LLM/tool calls.
+        """
+        hc = self._history_config
+        history = self.memory.get_conversation_history(
+            channel=channel,
+            chat_id=chat_id,
+            max_messages=hc.max_messages,
+            include_tools=False,
+            recent_full_turns=hc.recent_full_turns,
+            assistant_truncate_chars=hc.assistant_truncate_chars,
+            max_chars=hc.max_history_chars,
+            history_days=hc.history_days,
+        )
+
+        search_results = []
+        if self._memory_search and current_message.strip():
+            try:
+                search_results = await self._memory_search.search(
+                    current_message,
+                    top_k=self._auto_inject_top_k,
+                    min_score=self._recall_min_score,
+                )
+            except Exception as e:
+                logger.warning(f"Memory search prefetch failed during inspect: {e}")
+
+        messages = self.context.build_messages(
+            history=history,
+            current_message=current_message,
+            channel=channel,
+            chat_id=chat_id,
+            mode=ExecutionMode.COLLAB,
+            memory_search_results=search_results or None,
+            memory_budget_chars=(hc.memory_budget_chars or None),
+            recall_max_total_chars=hc.recall_max_total_chars,
+            recall_max_per_item_chars=hc.recall_max_per_item_chars,
+        )
+
+        tools = self.tools.get_definitions()
+        token_estimate = _estimate_prompt_tokens(self.model, messages, tools)
+        history_window = self._inspect_history_window(hc.history_days)
+
+        return {
+            "channel": channel,
+            "chat_id": chat_id,
+            "mode": ExecutionMode.COLLAB.value,
+            "model": self.model,
+            "messages": messages,
+            "history_message_count": len(history),
+            "history_chars": sum(_content_char_len(h.get("content", "")) for h in history),
+            "recall_count": len(search_results),
+            "recall_items": [
+                {
+                    "source": getattr(r, "source", ""),
+                    "heading": getattr(r, "heading", ""),
+                    "score": float(getattr(r, "score", 0.0)),
+                    "source_type": getattr(r, "source_type", "raw"),
+                }
+                for r in search_results
+            ],
+            "current_message_chars": len(current_message),
+            "system_prompt_chars": _content_char_len(messages[0].get("content", ""))
+            if messages
+            else 0,
+            "total_input_chars": sum(_content_char_len(m.get("content", "")) for m in messages),
+            "history_config": {
+                "max_messages": hc.max_messages,
+                "recent_full_turns": hc.recent_full_turns,
+                "assistant_truncate_chars": hc.assistant_truncate_chars,
+                "max_history_chars": hc.max_history_chars,
+                "memory_budget_chars": hc.memory_budget_chars,
+                "history_days": hc.history_days,
+                "recall_max_total_chars": hc.recall_max_total_chars,
+                "recall_max_per_item_chars": hc.recall_max_per_item_chars,
+            },
+            "history_window": history_window,
+            "token_estimate": token_estimate,
+            "latest_metrics": self._metrics_collector.get_latest(channel=channel, chat_id=chat_id),
+        }
+
     async def process_direct(
         self,
         content: str,
@@ -780,6 +881,43 @@ def _content_char_len(content: Any) -> int:
             return len(content["text"])
         return sum(_content_char_len(v) for v in content.values())
     return len(str(content))
+
+
+def _estimate_prompt_tokens(
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Estimate input token usage for context inspection output.
+
+    Prefers ``litellm.token_counter`` for model-aware counting and falls back
+    to a rough chars/4 estimate when unavailable.
+    """
+    msg_chars = sum(_content_char_len(m.get("content", "")) for m in messages)
+    tools_chars = len(json.dumps(tools, ensure_ascii=False))
+    fallback = {
+        "method": "chars_div_4",
+        "messages_only": msg_chars // 4,
+        "with_tools": (msg_chars + tools_chars) // 4,
+        "tools_only": tools_chars // 4,
+        "error": None,
+    }
+
+    try:
+        import litellm
+
+        messages_only = int(litellm.token_counter(model=model, messages=messages))
+        with_tools = int(litellm.token_counter(model=model, messages=messages, tools=tools))
+        return {
+            "method": "litellm.token_counter",
+            "messages_only": messages_only,
+            "with_tools": with_tools,
+            "tools_only": max(with_tools - messages_only, 0),
+            "error": None,
+        }
+    except Exception as e:
+        fallback["error"] = str(e)
+        return fallback
 
 
 def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:

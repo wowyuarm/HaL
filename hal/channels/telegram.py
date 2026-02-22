@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 from telegram import BotCommand, Update
@@ -97,6 +99,7 @@ class TelegramChannel(BaseChannel):
     BOT_COMMANDS = [
         BotCommand("start", "Start the bot"),
         BotCommand("reset", "Reset conversation history"),
+        BotCommand("context", "Show current LLM context"),
         BotCommand("help", "Show available commands"),
     ]
 
@@ -106,11 +109,13 @@ class TelegramChannel(BaseChannel):
         bus: MessageBus,
         groq_api_key: str = "",
         memory_manager: MemoryManager | None = None,
+        context_inspector: Callable[[str, str, str], Awaitable[dict[str, Any]]] | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
         self.memory_manager = memory_manager
+        self._context_inspector = context_inspector
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}  # Map sender_id to chat_id for replies
         self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
@@ -132,6 +137,7 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("reset", self._on_reset))
+        self._app.add_handler(CommandHandler("context", self._on_context))
         self._app.add_handler(CommandHandler("help", self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -221,6 +227,199 @@ class TelegramChannel(BaseChannel):
 
         return chunks
 
+    async def _reply_long_text(self, update: Update, text: str) -> None:
+        """Reply in multiple chunks when text exceeds Telegram limits."""
+        if not update.message:
+            return
+        for chunk in self._split_telegram_message(text, max_length=4000):
+            await update.message.reply_text(chunk)
+
+    @staticmethod
+    def _sender_id_for_allowlist(user: Any) -> str:
+        """Build sender ID compatible with BaseChannel allowlist checks."""
+        sender_id = str(getattr(user, "id", ""))
+        username = getattr(user, "username", None)
+        if username:
+            sender_id = f"{sender_id}|{username}"
+        return sender_id
+
+    @staticmethod
+    def _stringify_message_content(content: Any) -> str:
+        """Render heterogeneous message content to text for debug output."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, (list, dict)):
+            return json.dumps(content, ensure_ascii=False, indent=2)
+        if content is None:
+            return ""
+        return str(content)
+
+    @staticmethod
+    def _compress_head_tail(text: str, max_chars: int) -> str:
+        """Compress text by keeping head+tail within a hard character budget."""
+        if max_chars <= 0 or len(text) <= max_chars:
+            return text
+
+        marker_tpl = "\n\n...[omitted {} chars for readability]...\n\n"
+        marker = marker_tpl.format(0)
+        budget = max_chars - len(marker)
+        if budget <= 40:
+            return text[:max_chars]
+
+        head = int(budget * 0.65)
+        tail = max(budget - head, 0)
+        omitted = max(len(text) - head - tail, 0)
+        marker = marker_tpl.format(omitted)
+
+        # Recalculate once with the actual marker length so the hard cap still holds.
+        budget = max(max_chars - len(marker), 0)
+        if budget <= 40:
+            return text[:max_chars]
+
+        head = int(budget * 0.65)
+        tail = max(budget - head, 0)
+        omitted = max(len(text) - head - tail, 0)
+        marker = marker_tpl.format(omitted)
+
+        head_text = text[:head].rstrip()
+        tail_text = text[-tail:].lstrip() if tail > 0 else ""
+        if not tail_text:
+            return (head_text + marker).strip()[:max_chars]
+        return (head_text + marker + tail_text)[:max_chars]
+
+    @staticmethod
+    def _compress_context_output(text: str, max_chars: int = 12000) -> str:
+        """Keep head+tail when context dump is too long for chat UX."""
+        if len(text) <= max_chars:
+            return text
+
+        return TelegramChannel._compress_head_tail(text, max_chars=max_chars)
+
+    def _format_context_report(
+        self,
+        data: dict[str, Any],
+        inspect_message: str,
+        *,
+        full_messages: bool = False,
+    ) -> str:
+        """Format inspect_context() payload for Telegram output."""
+        history_config = data.get("history_config") or {}
+        history_window = data.get("history_window") or []
+        scanned_days = ", ".join(
+            f"{item.get('date', '?')}:{'yes' if item.get('exists') else 'no'}"
+            for item in history_window
+        )
+        lines: list[str] = [
+            "HaL Context Inspector",
+            f"session: {data.get('channel', self.name)}:{data.get('chat_id', '')}",
+            f"model: {data.get('model', '')}",
+            f"mode: {data.get('mode', 'collab')}",
+            f"view: {'full' if full_messages else 'compact'}",
+            "",
+            "Input Snapshot",
+            f"- inspect_message_chars: {len(inspect_message)}",
+            f"- history_messages: {data.get('history_message_count', 0)}",
+            f"- history_chars: {data.get('history_chars', 0)}",
+            f"- recall_count: {data.get('recall_count', 0)}",
+            f"- system_prompt_chars: {data.get('system_prompt_chars', 0)}",
+            f"- total_input_chars: {data.get('total_input_chars', 0)}",
+        ]
+
+        token_estimate = data.get("token_estimate") or {}
+        lines.extend(
+            [
+                "",
+                "Token Estimate",
+                f"- method: {token_estimate.get('method', 'unknown')}",
+                f"- messages_only: {token_estimate.get('messages_only', 0)}",
+                f"- with_tools: {token_estimate.get('with_tools', 0)}",
+                f"- tools_only: {token_estimate.get('tools_only', 0)}",
+            ]
+        )
+
+        lines.extend(
+            [
+                "",
+                "History Build",
+                f"- history_days: {history_config.get('history_days', 1)}",
+                f"- max_messages: {history_config.get('max_messages', 0)}",
+                f"- max_history_chars: {history_config.get('max_history_chars', 0)}",
+                f"- recent_full_turns: {history_config.get('recent_full_turns', 0)}",
+                f"- assistant_truncate_chars: {history_config.get('assistant_truncate_chars', 0)}",
+            ]
+        )
+        if scanned_days:
+            lines.append(f"- scanned_days(date:file_exists): {scanned_days}")
+
+        latest_metrics = data.get("latest_metrics")
+        lines.append("")
+        lines.append("Latest Actual Usage")
+        if isinstance(latest_metrics, dict):
+            lines.extend(
+                [
+                    f"- timestamp: {latest_metrics.get('timestamp', '')}",
+                    f"- first_prompt_tokens: {latest_metrics.get('first_prompt_tokens')}",
+                    f"- first_completion_tokens: {latest_metrics.get('first_completion_tokens')}",
+                    f"- first_total_tokens: {latest_metrics.get('first_total_tokens')}",
+                    f"- loop_iterations: {latest_metrics.get('loop_iterations', 0)}",
+                    f"- tools_used: {', '.join(latest_metrics.get('tools_used', [])) or 'none'}",
+                    f"- spawn_total_tokens: {latest_metrics.get('spawn_total_tokens', 0)}",
+                ]
+            )
+        else:
+            lines.append("- none (no previous completed loop for this session)")
+
+        recall_items = data.get("recall_items") or []
+        if recall_items:
+            unique_recall_items: list[dict[str, Any]] = []
+            seen: set[tuple[str, str, str, str]] = set()
+            for item in recall_items:
+                key = (
+                    str(item.get("source", "")),
+                    str(item.get("heading", "")),
+                    str(item.get("source_type", "raw")),
+                    f"{float(item.get('score', 0.0)):.4f}",
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_recall_items.append(item)
+
+            lines.append("")
+            lines.append("Recall Hits")
+            if len(unique_recall_items) < len(recall_items):
+                lines.append(
+                    f"- deduplicated: {len(unique_recall_items)} unique from {len(recall_items)} raw hits"
+                )
+            for item in unique_recall_items:
+                source = item.get("source", "")
+                heading = item.get("heading", "")
+                score = item.get("score", 0.0)
+                source_type = item.get("source_type", "raw")
+                lines.append(f"- {source} | {heading} | score={score:.2f} | type={source_type}")
+
+        lines.append("")
+        lines.append("Messages Sent To LLM")
+        for idx, msg in enumerate(data.get("messages", [])):
+            role = msg.get("role", "unknown")
+            content = self._stringify_message_content(msg.get("content", ""))
+            char_count = len(content)
+            lines.append("")
+            lines.append(f"[{idx}] role={role} chars={char_count}")
+
+            if full_messages:
+                lines.append(content)
+                continue
+
+            if role == "system":
+                digest = hashlib.sha1(content.encode("utf-8")).hexdigest()[:12]
+                lines.append(f"(system prompt compressed, sha1={digest})")
+                lines.append(self._compress_head_tail(content, max_chars=2400))
+            else:
+                lines.append(self._compress_head_tail(content, max_chars=900))
+
+        return self._compress_context_output("\n".join(lines))
+
     def _get_media_type(self, path: str) -> str:
         """Infer Telegram media type from file extension."""
         path = path.lower()
@@ -302,6 +501,11 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
 
+        sender_id = self._sender_id_for_allowlist(update.effective_user)
+        if not self.is_allowed(sender_id):
+            await update.message.reply_text("⛔ You are not allowed to use this bot.")
+            return
+
         chat_id = str(update.message.chat_id)
         session_key = f"{self.name}:{chat_id}"
 
@@ -314,7 +518,6 @@ class TelegramChannel(BaseChannel):
         self.memory_manager.clear_conversation_history(
             channel=self.name,
             chat_id=chat_id,
-            session_key=session_key,
         )
 
         logger.info(f"Conversation reset for {session_key}")
@@ -329,10 +532,65 @@ class TelegramChannel(BaseChannel):
             "🔴 <b>HaL commands</b>\n\n"
             "/start — Start the bot\n"
             "/reset — Reset conversation history\n"
+            "/context [message] — Inspect current LLM context (compact)\n"
+            "/context full [message] — Inspect with raw messages\n"
             "/help — Show this help message\n\n"
             "Just send me a text message to chat!"
         )
         await update.message.reply_text(help_text, parse_mode="HTML")
+
+    async def _on_context(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /context command — dump current LLM input context."""
+        if not update.message or not update.effective_user:
+            return
+
+        if not self._context_inspector:
+            await update.message.reply_text("⚠️ Context inspector is not configured.")
+            return
+
+        sender_id = self._sender_id_for_allowlist(update.effective_user)
+        if not self.is_allowed(sender_id):
+            await update.message.reply_text("⛔ You are not allowed to use this bot.")
+            return
+
+        chat_id = str(update.message.chat_id)
+        inspect_message = "[context inspection]"
+        full_messages = False
+        raw = (update.message.text or "").strip()
+        if raw:
+            parts = raw.split(maxsplit=1)
+            if len(parts) > 1:
+                args = parts[1].strip()
+                if args == "full":
+                    full_messages = True
+                    args = ""
+                elif args.startswith("full "):
+                    full_messages = True
+                    args = args[5:].strip()
+                elif args == "--full":
+                    full_messages = True
+                    args = ""
+                elif args.startswith("--full "):
+                    full_messages = True
+                    args = args[7:].strip()
+                if args:
+                    inspect_message = args
+
+        try:
+            payload = await self._context_inspector(
+                channel=self.name,
+                chat_id=chat_id,
+                current_message=inspect_message,
+            )
+            report = self._format_context_report(
+                payload,
+                inspect_message,
+                full_messages=full_messages,
+            )
+            await self._reply_long_text(update, report)
+        except Exception as e:
+            logger.warning(f"/context failed: {e}")
+            await update.message.reply_text("⚠️ Failed to build context snapshot.")
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""

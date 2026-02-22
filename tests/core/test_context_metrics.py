@@ -61,6 +61,32 @@ def test_metrics_collector_summary_returns_stats(tmp_path: Path) -> None:
     assert summary["fields"]["loop_iterations"]["p90"] == pytest.approx(6.8)
 
 
+def test_metrics_collector_get_latest_with_filters(tmp_path: Path) -> None:
+    path = tmp_path / "logs" / "context_metrics.jsonl"
+    collector = MetricsCollector(path)
+
+    collector.record(
+        ContextMetrics.create(channel="cli", chat_id="a", mode="collab", total_input_chars=10)
+    )
+    collector.record(
+        ContextMetrics.create(channel="telegram", chat_id="1", mode="collab", total_input_chars=20)
+    )
+    collector.record(
+        ContextMetrics.create(channel="telegram", chat_id="2", mode="operator", total_input_chars=30)
+    )
+
+    latest_tg = collector.get_latest(channel="telegram")
+    assert latest_tg is not None
+    assert latest_tg["chat_id"] == "2"
+
+    latest_tg_collab = collector.get_latest(channel="telegram", mode="collab")
+    assert latest_tg_collab is not None
+    assert latest_tg_collab["chat_id"] == "1"
+
+    none_match = collector.get_latest(channel="discord")
+    assert none_match is None
+
+
 @pytest.mark.asyncio
 async def test_run_tool_loop_records_first_response_usage() -> None:
     provider = MagicMock(spec=LLMProvider)
