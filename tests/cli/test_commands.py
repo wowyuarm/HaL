@@ -225,4 +225,5 @@ def test_anyrouter_bridge_invokes_node_process(
     assert "--use-env-proxy" in called["cmd"]
     assert called["check"] is True
     assert called["env"]["ANYROUTER_BRIDGE_PORT"] == "4318"
+    assert called["env"]["ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM"] == "true"
     assert called["env"]["ANYROUTER_VERBOSE"] == "true"

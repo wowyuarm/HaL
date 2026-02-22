@@ -77,6 +77,8 @@ To force AnyRouter, keep `providers.anyrouter.api_key` enabled and set model to 
 
 ## Notes
 
-- The bridge defaults to injecting Claude Code headers and forcing `stream=true`.
-- `--no-inject-system` and `--no-force-stream` are available for debugging behavior changes.
+- The bridge defaults to injecting Claude Code system prefix and forcing `stream=true`.
+- **System prefix injection is required.** AnyRouter validates the Claude Code system prompt prefix; requests without it are rejected as `"invalid claude code request"`. Do not disable `--inject-system` in production.
+- `--no-inject-system` and `--no-force-stream` are available for debugging only.
+- The bridge can inject a default thinking budget (`--default-thinking / ANYROUTER_DEFAULT_THINKING`). Disabled by default; when enabled, uses a 2048-token budget unless the request already specifies thinking.
 - Keep the bridge on localhost only.

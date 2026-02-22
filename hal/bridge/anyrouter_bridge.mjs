@@ -10,6 +10,8 @@ const DEFAULT_USER_AGENT = "claude-cli/2.1.2 (external, cli)";
 const DEFAULT_BETA =
   "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14";
 const DEFAULT_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
+const MIN_THINKING_BUDGET = 1024;
+const DEFAULT_THINKING_BUDGET = 2048;
 
 const HOP_HEADERS = new Set([
   "connection",
@@ -41,6 +43,18 @@ function envBool(name, fallback) {
     return fallback;
   }
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
+
+function envInt(name, fallback) {
+  const value = process.env[name];
+  if (value === undefined) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
 }
 
 function getFirstHeaderValue(value) {
@@ -103,6 +117,35 @@ function ensureClaudeCodeSystem(body) {
   ];
 }
 
+function normalizeThinkingBudget(maxTokens, preferredBudget) {
+  if (!Number.isInteger(preferredBudget) || preferredBudget < MIN_THINKING_BUDGET) {
+    return null;
+  }
+
+  if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
+    return preferredBudget;
+  }
+
+  // Anthropic requires: budget_tokens < max_tokens, and minimum is 1024.
+  if (maxTokens <= MIN_THINKING_BUDGET) {
+    return null;
+  }
+  const capped = Math.min(preferredBudget, maxTokens - 1);
+  return capped >= MIN_THINKING_BUDGET ? capped : null;
+}
+
+function ensureDefaultThinking(body, preferredBudget) {
+  if (body.thinking !== undefined && body.thinking !== null) {
+    return;
+  }
+  const maxTokens = Number.isInteger(body.max_tokens) ? body.max_tokens : null;
+  const budget = normalizeThinkingBudget(maxTokens, preferredBudget);
+  if (!budget) {
+    return;
+  }
+  body.thinking = { type: "enabled", budget_tokens: budget };
+}
+
 function copyResponseHeaders(source, target) {
   for (const [name, value] of source.entries()) {
     const lower = name.toLowerCase();
@@ -131,6 +174,8 @@ const betaHeader = process.env.ANYROUTER_ANTHROPIC_BETA || DEFAULT_BETA;
 const allowBrowserAccess = envBool("ANYROUTER_DIRECT_BROWSER_ACCESS", true);
 const forceStream = envBool("ANYROUTER_FORCE_STREAM", true);
 const injectClaudeCodeSystem = envBool("ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM", true);
+const defaultThinking = envBool("ANYROUTER_DEFAULT_THINKING", true);
+const defaultThinkingBudget = envInt("ANYROUTER_DEFAULT_THINKING_BUDGET", DEFAULT_THINKING_BUDGET);
 const verboseLogs = envBool("ANYROUTER_VERBOSE", false);
 let requestCounter = 0;
 
@@ -197,13 +242,20 @@ const server = http.createServer(async (req, res) => {
       if (injectClaudeCodeSystem) {
         ensureClaudeCodeSystem(payload);
       }
+      if (defaultThinking) {
+        ensureDefaultThinking(payload, defaultThinkingBudget);
+      }
       upstreamBody = Buffer.from(JSON.stringify(payload));
       logDebug(
         `#${reqId} payload model=${payload.model || "-"} messages=${
           Array.isArray(payload.messages) ? payload.messages.length : 0
         } tools=${Array.isArray(payload.tools) ? payload.tools.length : 0} stream=${Boolean(
           payload.stream,
-        )}`,
+        )} thinking=${
+          payload.thinking && typeof payload.thinking === "object"
+            ? JSON.stringify(payload.thinking)
+            : "none"
+        }`,
       );
     }
 
