@@ -7,6 +7,7 @@ import hashlib
 import html as html_mod
 import json
 import re
+import subprocess
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -186,6 +187,9 @@ class TelegramChannel(BaseChannel):
             drop_pending_updates=True,  # Ignore old messages on startup
         )
 
+        # Send startup notification to the first allowed user
+        await self._send_startup_notification()
+
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
@@ -204,6 +208,31 @@ class TelegramChannel(BaseChannel):
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
+
+    async def _send_startup_notification(self) -> None:
+        """Send a startup notification to the first allowed user."""
+        allow_list = getattr(self.config, "allow_from", [])
+        owner_id = next((uid for uid in allow_list if uid.isdigit()), None)
+        if not owner_id or not self._app:
+            return
+
+        try:
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%h %s"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            commit_info = result.stdout.strip() if result.returncode == 0 else "unknown"
+        except Exception:
+            commit_info = "unknown"
+
+        text = f"\U0001f534 HaL online — {commit_info}"
+        try:
+            await self._app.bot.send_message(chat_id=int(owner_id), text=text)
+            logger.info(f"Startup notification sent to {owner_id}")
+        except Exception as e:
+            logger.warning(f"Failed to send startup notification: {e}")
 
     def _split_telegram_message(self, text: str, max_length: int = 4000) -> list[str]:
         """
