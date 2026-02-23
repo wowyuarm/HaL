@@ -24,6 +24,7 @@ class LoopMetadata:
     tool_call_counts: dict[str, int] = field(default_factory=dict)
     total_tool_calls: int = 0
     has_side_effects: bool = False
+    skipped_tool_calls: int = 0
     first_response_usage: dict[str, int] = field(default_factory=dict)
     total_usage: dict[str, int] = field(default_factory=dict)
     loop_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -74,8 +75,12 @@ class LoopHooks(Protocol):
         tool_calls: list[Any],
         assistant_content: str | None,
         meta: LoopMetadata,
-    ) -> None:
-        """Called before tool execution begins. Used for progress notifications."""
+    ) -> bool | None:
+        """Called before tool execution begins.
+
+        Return True to skip tool execution (e.g. user interrupt).
+        Return None or False to proceed normally.
+        """
         ...
 
     async def on_loop_exhausted(
@@ -121,7 +126,7 @@ class _NoOpHooks:
         assistant_content: str | None,
         meta: LoopMetadata,
     ) -> None:
-        pass
+        return None
 
     async def on_loop_exhausted(
         self,
@@ -244,8 +249,37 @@ async def run_tool_loop(
                             if cmd:
                                 meta.commands_run.append(cmd)
 
-            # Hook: notify progress before execution
-            await h.on_tool_calls_start(response.tool_calls, response.content, meta)
+            # Hook: notify progress before execution, or signal skip
+            skip = await h.on_tool_calls_start(response.tool_calls, response.content, meta)
+
+            if skip:
+                # User interrupt: skip tool execution, provide placeholder results
+                skip_msg = (
+                    "[Tool execution skipped: user sent new messages. "
+                    "Re-evaluate direction before continuing.]"
+                )
+                meta.skipped_tool_calls += len(response.tool_calls)
+                for tool_call in response.tool_calls:
+                    if add_tool_result:
+                        messages = add_tool_result(messages, tool_call.id, tool_call.name, skip_msg)
+                    else:
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.name,
+                                "content": skip_msg,
+                            }
+                        )
+                    h.on_tool_result(
+                        tool_call.name,
+                        tool_call.id,
+                        tool_call.arguments,
+                        skip_msg,
+                        messages,
+                        meta,
+                    )
+                continue
 
             # Execute tools in parallel
             results = await asyncio.gather(

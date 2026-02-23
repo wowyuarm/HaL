@@ -423,6 +423,135 @@ class TestMidLoopInjection:
         result = engine._drain_pending_for_session("telegram:c1")
         assert result == []
 
+    async def test_interrupt_skips_tool_execution(self, engine, bus, mock_provider):
+        """When >= 3 queued messages, tool calls are skipped with placeholder results."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."}),
+            ToolCallRequest(id="t2", name="exec", arguments={"command": "ls"}),
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        call_count = 0
+
+        async def chat_side_effect(messages, tools, model):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Enqueue 3 messages to trigger interrupt
+                for i in range(3):
+                    await bus.publish_inbound(
+                        InboundMessage(
+                            channel="telegram",
+                            sender_id="alice",
+                            chat_id="c1",
+                            content=f"stop msg {i}",
+                        )
+                    )
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            # Second call: LLM sees skipped results + user messages, returns final
+            return LLMResponse(content="adjusted direction", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        final, meta, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_key="telegram:c1",
+        )
+
+        assert final == "adjusted direction"
+        # Tools should NOT have been executed
+        engine.tools.execute.assert_not_awaited()
+        # 3 user messages should be injected
+        assert len(injected) == 3
+        # Skipped tool calls tracked in metadata
+        assert meta.skipped_tool_calls == 2
+
+    async def test_no_interrupt_below_threshold(self, engine, bus, mock_provider):
+        """When < 3 queued messages, tools execute normally."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        call_count = 0
+
+        async def chat_side_effect(messages, tools, model):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Only 2 messages — below threshold
+                for i in range(2):
+                    await bus.publish_inbound(
+                        InboundMessage(
+                            channel="telegram",
+                            sender_id="alice",
+                            chat_id="c1",
+                            content=f"msg {i}",
+                        )
+                    )
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            return LLMResponse(content="final", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        final, meta, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_key="telegram:c1",
+        )
+
+        assert final == "final"
+        # Tools SHOULD have been executed
+        engine.tools.execute.assert_awaited_once()
+        assert meta.skipped_tool_calls == 0
+        # 2 messages still injected (via buffered + before_llm_call)
+        assert len(injected) == 2
+
+    async def test_no_progress_on_interrupt(self, engine, bus, mock_provider):
+        """No progress notification sent when interrupt triggers."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        outbound_messages: list[OutboundMessage] = []
+
+        async def capture_outbound(msg: OutboundMessage) -> None:
+            outbound_messages.append(msg)
+
+        engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
+
+        call_count = 0
+
+        async def chat_side_effect(messages, tools, model):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                for i in range(3):
+                    await bus.publish_inbound(
+                        InboundMessage(
+                            channel="telegram",
+                            sender_id="alice",
+                            chat_id="c1",
+                            content=f"stop {i}",
+                        )
+                    )
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            return LLMResponse(content="done", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_key="telegram:c1",
+        )
+
+        # No progress messages should have been sent
+        progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
+        assert len(progress_msgs) == 0
+
 
 class TestRunLoop:
     async def test_run_publishes_dispatch_response(self, engine):

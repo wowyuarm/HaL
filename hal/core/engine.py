@@ -697,6 +697,7 @@ class _EngineLoopHooks:
     )
 
     _REMINDER_INTERVAL = 5  # inject every N total tool calls
+    _INTERRUPT_THRESHOLD = 3  # skip tool execution when N+ user messages queued
 
     def __init__(
         self,
@@ -711,24 +712,38 @@ class _EngineLoopHooks:
         self._chat_id = chat_id
         self.injected: list[InboundMessage] = []
         self._last_reminder_at: int = 0
+        self._buffered_pending: list[InboundMessage] = []
+
+    def _inject_pending(
+        self, messages: list[dict[str, Any]], pending_msgs: list[InboundMessage]
+    ) -> None:
+        """Inject pending user messages into the conversation."""
+        for pending in pending_msgs:
+            prefixed = f"[User follow-up while you are working] {pending.content}"
+            messages.append({"role": "user", "content": prefixed})
+            self.injected.append(pending)
+            logger.info(f"[inject] mid-loop message from {pending.sender_id}")
+
+            if self._channel and self._chat_id:
+                self._engine.memory.record_conversation(
+                    channel=self._channel,
+                    chat_id=self._chat_id,
+                    role="user",
+                    content=prefixed,
+                )
 
     def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
         """Inject pending user messages and periodic system reminders."""
-        # Inject mid-loop user messages
-        if self._session_key:
-            for pending in self._engine._drain_pending_for_session(self._session_key):
-                prefixed = f"[User follow-up while you are working] {pending.content}"
-                messages.append({"role": "user", "content": prefixed})
-                self.injected.append(pending)
-                logger.info(f"[inject] mid-loop message from {pending.sender_id}")
+        # First: inject buffered messages from interrupt detection
+        if self._buffered_pending:
+            self._inject_pending(messages, self._buffered_pending)
+            self._buffered_pending.clear()
 
-                if self._channel and self._chat_id:
-                    self._engine.memory.record_conversation(
-                        channel=self._channel,
-                        chat_id=self._chat_id,
-                        role="user",
-                        content=prefixed,
-                    )
+        # Then: drain fresh messages
+        if self._session_key:
+            fresh = self._engine._drain_pending_for_session(self._session_key)
+            if fresh:
+                self._inject_pending(messages, fresh)
 
         # Inject system reminder when interval is reached
         if self._should_inject_reminder(meta):
@@ -847,14 +862,28 @@ class _EngineLoopHooks:
         tool_calls: list[Any],
         assistant_content: str | None,
         meta: LoopMetadata,
-    ) -> None:
-        """Send a fire-and-forget progress message to the user."""
+    ) -> bool | None:
+        """Check for user interrupt, then optionally send progress."""
+        # Drain and buffer pending messages for interrupt detection
+        if self._session_key:
+            fresh = self._engine._drain_pending_for_session(self._session_key)
+            self._buffered_pending.extend(fresh)
+
+        # If buffered messages reach threshold, skip tool execution
+        if len(self._buffered_pending) >= self._INTERRUPT_THRESHOLD:
+            count = len(self._buffered_pending)
+            logger.info(
+                f"[interrupt] skipping {len(tool_calls)} tool calls: {count} user messages buffered"
+            )
+            return True
+
+        # Normal path: send progress notification
         if not (self._channel and self._chat_id):
-            return
+            return None
 
         text = _format_progress_message(assistant_content, tool_calls)
         if not text:
-            return
+            return None
 
         await self._engine.bus.publish_outbound(
             OutboundMessage(
@@ -864,6 +893,7 @@ class _EngineLoopHooks:
                 metadata={"progress": True},
             )
         )
+        return None
 
 
 _THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.DOTALL)
