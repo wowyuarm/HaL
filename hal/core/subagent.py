@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import platform
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,8 @@ from hal.infra.providers.base import LLMProvider
 if TYPE_CHECKING:
     from hal.capabilities.tools.registry import ToolRegistry
     from hal.infra.config.schema import ExecToolConfig
+
+_ARTIFACT_PATH_RE = re.compile(r"(/[^`'\"<>\s)]+\.md)\b")
 
 
 class SubagentManager:
@@ -76,7 +79,7 @@ class SubagentManager:
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         logger.info(f"Subagent [{task_id}] running: {display_label}")
 
-        result = await self._execute_subagent(task_id, task)
+        result = await self._execute_subagent(task_id, task, label=label)
         return result.content
 
     async def run_with_details(
@@ -88,7 +91,7 @@ class SubagentManager:
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         logger.info(f"Subagent [{task_id}] running with details: {display_label}")
-        return await self._execute_subagent(task_id, task)
+        return await self._execute_subagent(task_id, task, label=label)
 
     async def spawn_background(
         self,
@@ -105,7 +108,7 @@ class SubagentManager:
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
 
-        bg_task = asyncio.create_task(self._execute_subagent(task_id, task))
+        bg_task = asyncio.create_task(self._execute_subagent(task_id, task, label=label))
         self._running_tasks[task_id] = (bg_task, display_label)
 
         logger.info(f"Spawned background subagent [{task_id}]: {display_label}")
@@ -151,7 +154,12 @@ class SubagentManager:
     # Internal execution
     # ------------------------------------------------------------------
 
-    async def _execute_subagent(self, task_id: str, task: str) -> "SubagentExecutionResult":
+    async def _execute_subagent(
+        self,
+        task_id: str,
+        task: str,
+        label: str | None = None,
+    ) -> "SubagentExecutionResult":
         """Run the subagent loop and return the final result string."""
         tools = self._build_tools()
         system_prompt = self._build_system_prompt()
@@ -177,12 +185,25 @@ class SubagentManager:
         if final_content is None:
             final_content = "Task completed but no summary was generated."
 
-        artifact_path = self._persist_artifact(task_id, task, final_content, meta)
-        logger.info(f"Subagent [{task_id}] completed (artifact: {artifact_path})")
+        artifacts = self._extract_artifact_paths(final_content)
+        log_path = self._append_execution_log(
+            task_id=task_id,
+            label=label,
+            task=task,
+            result=final_content,
+            meta=meta,
+            artifacts=artifacts,
+            status="completed",
+        )
+        artifact_path = artifacts[0] if artifacts else log_path
+        logger.info(f"Subagent [{task_id}] completed (log: {log_path})")
         return SubagentExecutionResult(
             content=final_content,
             artifact_path=artifact_path,
             total_tokens=meta.total_usage.get("total_tokens", 0),
+            record_id=task_id,
+            artifacts=artifacts,
+            log_path=log_path,
         )
 
     # ------------------------------------------------------------------
@@ -331,36 +352,55 @@ Current time: {now}""")
         """Return the iteration count of the most recent sync subagent execution."""
         return self._current_iteration
 
-    def _persist_artifact(
+    def _append_execution_log(
         self,
         task_id: str,
+        label: str | None,
         task: str,
         result: str,
         meta: LoopMetadata,
+        artifacts: list[Path],
+        status: str,
     ) -> Path | None:
-        """Persist full subagent result as a markdown artifact."""
+        """Append full subagent execution details to artifacts/subagent/subagent-log.jsonl."""
         try:
             artifact_dir = self.workspace / "artifacts" / "subagent"
             artifact_dir.mkdir(parents=True, exist_ok=True)
-
-            label_slug = re.sub(r"[^\w\-]+", "_", task[:20]).strip("_") or "task"
-            ts = datetime.now().strftime("%H%M%S")
-            path = artifact_dir / f"{task_id}_{ts}_{label_slug}.md"
-            header = (
-                f"# Subagent Result: {task_id}\n\n"
-                f"**Task**: {task[:200]}\n"
-                f"**Iterations**: {meta.iterations}\n"
-                f"**Tools used**: {', '.join(meta.tools_used) or 'none'}\n"
-                f"**Side effects**: {meta.has_side_effects}\n"
-                f"**Total tokens**: {meta.total_usage.get('total_tokens', 0)}\n"
-                f"**Timestamp**: {datetime.now().isoformat()}\n\n"
-                "---\n\n"
-            )
-            path.write_text(header + result, encoding="utf-8")
-            return path
+            log_path = artifact_dir / "subagent-log.jsonl"
+            display_label = label or task[:40] + ("..." if len(task) > 40 else "")
+            record = {
+                "id": task_id,
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "label": display_label,
+                "task": task,
+                "iterations": meta.iterations,
+                "tools_used": meta.tools_used,
+                "tokens": meta.total_usage.get("total_tokens", 0),
+                "result": result,
+                "artifacts": [str(path) for path in artifacts],
+                "status": status,
+            }
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            return log_path
         except Exception as e:
-            logger.warning(f"Failed to persist subagent artifact: {e}")
+            logger.warning(f"Failed to append subagent execution log: {e}")
             return None
+
+    def _extract_artifact_paths(self, result: str) -> list[Path]:
+        """Extract absolute markdown artifact paths referenced in subagent output."""
+        artifacts: list[Path] = []
+        seen: set[str] = set()
+        for raw_path in _ARTIFACT_PATH_RE.findall(result):
+            path = Path(raw_path)
+            if not path.is_absolute():
+                continue
+            normalized = str(path)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            artifacts.append(path)
+        return artifacts
 
 
 @dataclass
@@ -370,6 +410,9 @@ class SubagentExecutionResult:
     content: str
     artifact_path: Path | None
     total_tokens: int = 0
+    record_id: str = ""
+    artifacts: list[Path] = field(default_factory=list)
+    log_path: Path | None = None
 
 
 class _SubagentLoopHooks:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -30,7 +31,7 @@ async def test_run_returns_result_directly(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_with_details_persists_artifact(tmp_path: Path) -> None:
+async def test_run_with_details_appends_jsonl_log(tmp_path: Path) -> None:
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test-model"
     provider.chat = AsyncMock(
@@ -48,9 +49,75 @@ async def test_run_with_details_persists_artifact(tmp_path: Path) -> None:
     assert isinstance(details, SubagentExecutionResult)
     assert details.content == "found 3 files"
     assert details.total_tokens == 15
+    assert details.record_id
+    assert details.log_path is not None
+    assert details.log_path.exists()
     assert details.artifact_path is not None
-    assert details.artifact_path.exists()
-    assert "found 3 files" in details.artifact_path.read_text(encoding="utf-8")
+    assert details.artifact_path == details.log_path
+
+    records = [
+        json.loads(line)
+        for line in details.log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(records) == 1
+    assert records[0]["id"] == details.record_id
+    assert records[0]["task"] == "list files"
+    assert records[0]["result"] == "found 3 files"
+    assert records[0]["status"] == "completed"
+    assert records[0]["artifacts"] == []
+    assert sorted(p.name for p in details.log_path.parent.iterdir()) == ["subagent-log.jsonl"]
+
+
+@pytest.mark.asyncio
+async def test_run_with_details_keeps_full_task_and_result_in_log(tmp_path: Path) -> None:
+    long_task = "task-" + "x" * 500
+    long_result = "result-" + "y" * 1200
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(
+            content=long_result,
+            tool_calls=[],
+            usage={"total_tokens": 42},
+            finish_reason="stop",
+        ),
+    )
+
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    details = await mgr.run_with_details(task=long_task, label="long")
+
+    assert details.log_path is not None
+    record = json.loads(details.log_path.read_text(encoding="utf-8").strip())
+    assert record["task"] == long_task
+    assert record["result"] == long_result
+
+
+@pytest.mark.asyncio
+async def test_run_with_details_extracts_report_artifact_paths(tmp_path: Path) -> None:
+    report = tmp_path / "artifacts" / "subagent" / "report.md"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text("# report", encoding="utf-8")
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(
+            content=f"Done. Full report: `{report}`",
+            tool_calls=[],
+            finish_reason="stop",
+        ),
+    )
+
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    details = await mgr.run_with_details(task="report task", label="R")
+
+    assert details.log_path is not None
+    assert details.artifacts == [report]
+    assert details.artifact_path == report
+    record = json.loads(details.log_path.read_text(encoding="utf-8").strip())
+    assert record["artifacts"] == [str(report)]
 
 
 @pytest.mark.asyncio
@@ -139,8 +206,10 @@ async def test_await_pending_collects_results(tmp_path) -> None:
     assert labels == {"T1", "T2"}
     for _, result in results:
         assert result.content == "done"
+        assert result.record_id
+        assert result.log_path is not None
+        assert result.log_path.exists()
         assert result.artifact_path is not None
-        assert result.artifact_path.exists()
 
     assert mgr.get_running_count() == 0
 

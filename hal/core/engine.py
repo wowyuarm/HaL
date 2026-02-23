@@ -789,7 +789,9 @@ class _EngineLoopHooks:
             bg = arguments.get("background", False)
             if not bg:
                 label = arguments.get("label", arguments.get("task", "")[:40])
-                content, artifact_path, total_tokens = _split_subagent_tool_result(result)
+                content, artifact_path, total_tokens, record_id = _split_subagent_tool_result(
+                    result
+                )
                 status = "failed" if content.startswith("Error:") else "completed"
                 self._engine.memory.record_conversation(
                     channel=self._channel,
@@ -800,8 +802,10 @@ class _EngineLoopHooks:
                         content=content,
                         status=status,
                         background=False,
+                        record_id=record_id,
                         artifact_path=artifact_path,
                         total_tokens=total_tokens,
+                        max_chars=_SUBAGENT_HISTORY_MAX_CHARS,
                     ),
                     entry_type="injection",
                 )
@@ -828,24 +832,37 @@ class _EngineLoopHooks:
             content = getattr(details, "content", str(details))
             artifact_path = getattr(details, "artifact_path", None)
             total_tokens = getattr(details, "total_tokens", 0)
+            record_id = getattr(details, "record_id", None)
             status = "failed" if content.startswith("Error:") else "completed"
-            inject = _build_subagent_injection(
+            runtime_inject = _build_subagent_injection(
                 label=label,
                 content=content,
                 status=status,
                 background=True,
+                record_id=record_id,
                 artifact_path=str(artifact_path) if artifact_path else None,
                 total_tokens=total_tokens,
+                max_chars=_SUBAGENT_RUNTIME_MAX_CHARS,
             )
-            messages.append({"role": "user", "content": inject})
+            messages.append({"role": "user", "content": runtime_inject})
             logger.info(f"[inject] subagent result: {label} ({status})")
 
             if self._channel and self._chat_id:
+                history_inject = _build_subagent_injection(
+                    label=label,
+                    content=content,
+                    status=status,
+                    background=True,
+                    record_id=record_id,
+                    artifact_path=str(artifact_path) if artifact_path else None,
+                    total_tokens=total_tokens,
+                    max_chars=_SUBAGENT_HISTORY_MAX_CHARS,
+                )
                 self._engine.memory.record_conversation(
                     channel=self._channel,
                     chat_id=self._chat_id,
                     role="user",
-                    content=inject,
+                    content=history_inject,
                     entry_type="injection",
                 )
         return True
@@ -899,7 +916,10 @@ class _EngineLoopHooks:
 _THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.DOTALL)
 _SUBAGENT_TOKEN_RE = re.compile(r"\[Subagent Total Tokens\]\s*(\d+)")
 _SUBAGENT_ARTIFACT_RE = re.compile(r"^\[Subagent Artifact\]\s*(.+)$", re.MULTILINE)
-_SUBAGENT_MAX_CHARS = 800
+_SUBAGENT_RECORD_RE = re.compile(r"^\[Subagent Record ID\]\s*(.+)$", re.MULTILINE)
+_SUBAGENT_HISTORY_MAX_CHARS = 800
+# 0 = no truncation for same-turn runtime injection to main agent.
+_SUBAGENT_RUNTIME_MAX_CHARS = 0
 
 
 def _format_progress_message(
@@ -1008,10 +1028,12 @@ def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:
     return total
 
 
-def _split_subagent_tool_result(result: str) -> tuple[str, str | None, int]:
+def _split_subagent_tool_result(result: str) -> tuple[str, str | None, int, str | None]:
     """Split sync spawn tool result into content + metadata markers."""
     artifact_match = _SUBAGENT_ARTIFACT_RE.search(result)
     artifact_path = artifact_match.group(1).strip() if artifact_match else None
+    record_match = _SUBAGENT_RECORD_RE.search(result)
+    record_id = record_match.group(1).strip() if record_match else None
     total_tokens = 0
     for token in _SUBAGENT_TOKEN_RE.findall(result):
         total_tokens += int(token)
@@ -1020,11 +1042,15 @@ def _split_subagent_tool_result(result: str) -> tuple[str, str | None, int]:
     for line in result.splitlines():
         if line.startswith("[Subagent Artifact]"):
             continue
+        if line.startswith("[Subagent Record ID]"):
+            continue
+        if line.startswith("[Subagent Log]"):
+            continue
         if line.startswith("[Subagent Total Tokens]"):
             continue
         cleaned_lines.append(line)
     cleaned = "\n".join(cleaned_lines).strip()
-    return cleaned or result.strip(), artifact_path, total_tokens
+    return cleaned or result.strip(), artifact_path, total_tokens, record_id
 
 
 def _build_subagent_injection(
@@ -1033,15 +1059,17 @@ def _build_subagent_injection(
     content: str,
     status: str,
     background: bool,
+    record_id: str | None,
     artifact_path: str | None,
     total_tokens: int,
+    max_chars: int = _SUBAGENT_HISTORY_MAX_CHARS,
 ) -> str:
     """Build compact subagent injection content for next-loop context."""
     is_error = status == "failed" or content.startswith("Error:")
     body = content
     truncated = False
-    if not is_error and len(body) > _SUBAGENT_MAX_CHARS:
-        body = body[:_SUBAGENT_MAX_CHARS].rstrip() + " [...]"
+    if not is_error and max_chars > 0 and len(body) > max_chars:
+        body = body[:max_chars].rstrip() + " [...]"
         truncated = True
 
     if background:
@@ -1051,6 +1079,8 @@ def _build_subagent_injection(
 
     if truncated:
         text += "\n\n[Full result saved to subagent artifact file]"
+    if record_id:
+        text += f"\n[Subagent Record ID] {record_id}"
     if artifact_path:
         text += f"\n[Subagent Artifact] {artifact_path}"
     if total_tokens:

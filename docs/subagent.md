@@ -2,105 +2,123 @@
 
 ## Overview
 
-Subagents are lightweight agent instances delegated by the main agent to handle
-specific tasks. They share the same LLM provider but have isolated context
-(no session history, no memory, no personality).
+Subagents are lightweight delegated executors used by the main agent for focused
+tasks. They share provider/model config but run with isolated tool context
+(no recursive spawn, no message tool, no inherited chat history/memory).
 
-## Two Execution Modes
+This document reflects the current behavior:
+- Runtime delivery to the main agent favors completeness (no truncation in same-turn background injection).
+- Durable storage uses append-only JSONL (`subagent-log.jsonl`) with full task/result.
+- Conversation history keeps compact subagent injections for context control.
+
+## Execution Modes
 
 ### Synchronous (default)
 
-The main agent's loop **awaits** the subagent. The result flows back as a normal
-`tool_result` within the same loop iteration — no bus injection, no context break.
+The main loop waits for subagent completion and receives the result as a normal
+`tool_result` in the same loop iteration.
 
-**Benefits:**
-- Prompt-cache friendly: system prompt + prior messages all hit cache
-- Reasoning chain stays intact: main agent can continue, spawn more, or synthesize
-- Semantically identical to other tools (exec, web_search): call → wait → continue
-
-```
-Main Agent loop iteration N:
-  LLM → "call spawn(task='analyze logs')"
-  → SpawnTool.execute(background=False)
-  → SubagentManager.run(task)
-  → await _execute_subagent()      ← subagent runs its own loop (up to 50 iterations)
-  → return result string           ← tool_result in the SAME loop
-  LLM sees tool_result → decides next step (reply / spawn more / reason further)
-```
+Flow:
+1. Main LLM calls `spawn(task, background=false)`.
+2. `SpawnTool` calls `SubagentManager.run_with_details(...)`.
+3. Subagent runs its own tool loop (up to 50 iterations).
+4. `SpawnTool` returns content plus metadata markers:
+   - `[Subagent Record ID] ...`
+   - `[Subagent Artifact] ...` (if detected)
+   - `[Subagent Log] ...` (if distinct from artifact)
+   - `[Subagent Total Tokens] ...` (if available)
+5. Main LLM sees full tool result and continues reasoning in the same turn.
 
 ### Background (opt-in)
 
-For long-running tasks where the main agent should keep working while subagents
-run in parallel. Set `background=true` in the spawn tool call.
+For long-running work, `spawn(..., background=true)` starts a task and returns
+immediately. Pending results are collected before the loop finalizes.
 
-Background subagent results are **collected within the same conversation turn**:
-when the main agent's LLM produces a text response (no more tool calls), the
-engine awaits all pending background subagents, injects their results as
-ephemeral context, and lets the LLM produce a unified final response.
+Flow:
+1. Main LLM calls `spawn(task, background=true)`.
+2. `SubagentManager.spawn_background(...)` starts an async task.
+3. Later, when main LLM emits a no-tool response, engine calls `await_pending()`.
+4. Engine injects each completed subagent result back into the loop as `user` messages.
+5. Main LLM receives these results and produces a unified final response.
 
-**Key properties:**
-- Results are **not** recorded to conversation history (ephemeral, single-turn only)
-- All pending subagents are awaited together — the LLM sees all results at once
-- No extra LLM round-trips per subagent (unlike the old bus-based approach)
+## Runtime vs History Context
 
+Subagent result handling intentionally differs by stage:
+
+- Runtime (same turn, main reasoning):
+  - Background injections are **not truncated**.
+  - Goal: avoid extra `read` calls for typical subagent outputs.
+
+- History persistence (future turns):
+  - Subagent injection entries are compacted with a char cap (current: 800).
+  - Goal: limit long-term context growth and style contamination.
+
+So the main agent can reason over full current results while history remains budget-friendly.
+
+## Durable Artifact Model
+
+### 1) Execution log (automatic, append-only)
+
+Each subagent run appends one JSON record to:
+
+`artifacts/subagent/subagent-log.jsonl`
+
+Record fields:
+- `id` (record/task id)
+- `timestamp`
+- `label`
+- `task` (full text, no truncation)
+- `iterations`
+- `tools_used`
+- `tokens`
+- `result` (full text, no truncation)
+- `artifacts` (explicit linked report paths)
+- `status`
+
+Example:
+
+```json
+{
+  "id": "5b45e3e1",
+  "timestamp": "2026-02-23T10:19:06",
+  "label": "VPS research",
+  "task": "full task text...",
+  "iterations": 8,
+  "tools_used": ["web_search", "web_fetch", "exec"],
+  "tokens": 1234,
+  "result": "full result text...",
+  "artifacts": ["/home/yu/.hal/artifacts/subagent/vultr_research.md"],
+  "status": "completed"
+}
 ```
-Main Agent loop iteration N:
-  LLM → "call spawn(task='...', background=true)"
-  → SpawnTool.execute(background=True)
-  → SubagentManager.spawn_background(task)
-  → asyncio.create_task()          ← runs in parallel
-  → return "Background subagent started..."
-  LLM sees tool_result → may do more work or produce text response
 
-Main Agent loop iteration N+k:
-  LLM produces text response (no tool calls)
-  → engine calls subagents.await_pending()
-  → awaits all background tasks, collects (label, result) pairs
-  → injects results as ephemeral user messages
-  → continues loop — LLM sees all results and produces unified response
-```
+### 2) Markdown reports (task-authored, optional)
+
+Subagents may still produce full `.md` reports when the delegated task explicitly
+writes them (for example with `fs(action="write", path=".../subagent/xxx.md")`).
+
+These reports are **not** auto-generated by the manager per run anymore.
+Instead, they are optional outputs linked via JSONL `artifacts`.
 
 ## Subagent Capabilities
 
-Each subagent gets an isolated `ToolRegistry` with:
-- `FsTool` — file read/write/edit/list
-- `ExecTool` — shell execution
-- `WebSearchTool` — web search
-- `WebFetchTool` — web fetch
+Each subagent gets an isolated tool set:
+- `FsTool`
+- `ExecTool`
+- `WebSearchTool`
+- `WebFetchTool`
 
-**Not available:**
-- `spawn` — no recursive subagent creation
-- `message` — no direct user messaging
-- Session history or memory from the main agent
+Not available:
+- `spawn` (prevents recursive delegation)
+- `message`
+- main-agent chat history/memory
 
 ## Key Files
 
 | File | Role |
 |------|------|
-| `hal/core/subagent.py` | `SubagentManager` — `run()`, `spawn_background()`, `await_pending()` |
-| `hal/capabilities/tools/spawn.py` | `SpawnTool` — tool interface with `background` param |
-| `hal/core/engine.py` | `_execute_loop()` — awaits pending subagents before finalizing |
-| `hal/core/context/builder.py` | `ExecutionMode.ASYNC` + `_MODE_DIRECTIVES` |
-
-## Flow Diagram
-
-```
-User msg → Main Agent loop
-              │
-              LLM decides: spawn(task, background=false)
-              │
-              ├─ [sync, default]
-              │   SpawnTool → manager.run(task) → await _execute_subagent()
-              │   subagent loop: LLM ↔ tools (up to 50 iters)
-              │   → result returned as tool_result
-              │   → Main Agent continues in SAME loop
-              │
-              └─ [background, opt-in]
-                  SpawnTool → manager.spawn_background(task)
-                  → asyncio.create_task() → return "started..."
-                  → Main Agent continues working
-                            ⋮
-                  LLM produces text (no tool calls)
-                  → await_pending() collects all background results
-                  → inject as ephemeral messages → LLM unifies → final response
-```
+| `hal/core/subagent.py` | subagent execution loop + JSONL append + artifact extraction |
+| `hal/capabilities/tools/spawn.py` | `spawn` tool response formatting and metadata markers |
+| `hal/core/engine.py` | pending background collection + runtime/history injection policy |
+| `tests/subagents/test_subagent_manager.py` | JSONL schema and full task/result persistence tests |
+| `tests/core/test_engine.py` | subagent marker parsing and injection truncation policy tests |

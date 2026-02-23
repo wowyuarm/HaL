@@ -141,8 +141,12 @@ class SpawnTool(Tool):
     def _format_result(details: "SubagentExecutionResult") -> str:
         """Encode subagent detail metadata into the tool result payload."""
         lines = [details.content]
+        if details.record_id:
+            lines.append(f"[Subagent Record ID] {details.record_id}")
         if details.artifact_path:
             lines.append(f"[Subagent Artifact] {details.artifact_path}")
+        if details.log_path and details.log_path != details.artifact_path:
+            lines.append(f"[Subagent Log] {details.log_path}")
         if details.total_tokens:
             lines.append(f"[Subagent Total Tokens] {details.total_tokens}")
         return "\n\n".join(lines)

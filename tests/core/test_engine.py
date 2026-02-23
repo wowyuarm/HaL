@@ -806,11 +806,17 @@ class TestGenerateSummary:
 
 class TestSubagentInjectionHelpers:
     def test_split_subagent_tool_result_extracts_metadata(self):
-        payload = "Result line\n\n[Subagent Artifact] /tmp/a.md\n\n[Subagent Total Tokens] 123"
-        content, artifact_path, total_tokens = _split_subagent_tool_result(payload)
+        payload = (
+            "Result line\n\n"
+            "[Subagent Record ID] abc123\n\n"
+            "[Subagent Artifact] /tmp/a.md\n\n"
+            "[Subagent Total Tokens] 123"
+        )
+        content, artifact_path, total_tokens, record_id = _split_subagent_tool_result(payload)
         assert content == "Result line"
         assert artifact_path == "/tmp/a.md"
         assert total_tokens == 123
+        assert record_id == "abc123"
 
     def test_build_subagent_injection_truncates_success(self):
         text = _build_subagent_injection(
@@ -818,10 +824,12 @@ class TestSubagentInjectionHelpers:
             content="X" * 1200,
             status="completed",
             background=False,
+            record_id="abc123",
             artifact_path="/tmp/a.md",
             total_tokens=88,
         )
         assert "[Full result saved to subagent artifact file]" in text
+        assert "[Subagent Record ID] abc123" in text
         assert "[Subagent Artifact] /tmp/a.md" in text
         assert "[Subagent Total Tokens] 88" in text
 
@@ -832,8 +840,23 @@ class TestSubagentInjectionHelpers:
             content=err,
             status="failed",
             background=True,
+            record_id=None,
             artifact_path=None,
             total_tokens=0,
         )
         assert err in text
         assert "[Full result saved to subagent artifact file]" not in text
+
+    def test_build_subagent_injection_no_truncate_when_limit_disabled(self):
+        text = _build_subagent_injection(
+            label="task",
+            content="X" * 1200,
+            status="completed",
+            background=True,
+            record_id=None,
+            artifact_path=None,
+            total_tokens=0,
+            max_chars=0,
+        )
+        assert "[Full result saved to subagent artifact file]" not in text
+        assert " [...]" not in text
