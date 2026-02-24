@@ -210,9 +210,14 @@ class TelegramChannel(BaseChannel):
             self._app = None
 
     async def _send_startup_notification(self) -> None:
-        """Send a startup notification to the first allowed user."""
-        allow_list = getattr(self.config, "allow_from", [])
-        owner_id = next((uid for uid in allow_list if uid.isdigit()), None)
+        """Send a startup notification to the owner.
+
+        If ``~/.hal/last_update.json`` exists (written by the update script
+        before restarting the service), the notification includes the changelog
+        and an injection entry is written to daily_log so HaL's agent context
+        contains the update information on the next conversation turn.
+        """
+        owner_id = self._resolve_owner_id()
         if not owner_id or not self._app:
             return
 
@@ -227,12 +232,75 @@ class TelegramChannel(BaseChannel):
         except Exception:
             commit_info = "unknown"
 
-        text = f"\U0001f534 HaL online — {commit_info}"
+        # Check for update marker written by update.sh before restart
+        update_info = self._read_update_marker()
+
+        if update_info:
+            changes = update_info.get("changes", "")
+            before = update_info.get("before", "?")[:7]
+            text = f"\U0001f534 HaL online — {commit_info}\n\nChanges since {before}:\n{changes}"
+        else:
+            text = f"\U0001f534 HaL online — {commit_info}"
+
         try:
             await self._app.bot.send_message(chat_id=int(owner_id), text=text)
             logger.info(f"Startup notification sent to {owner_id}")
         except Exception as e:
             logger.warning(f"Failed to send startup notification: {e}")
+
+        # Write injection entry so HaL knows about the update in conversation
+        if update_info and self.memory_manager:
+            changes = update_info.get("changes", "")
+            self.memory_manager.record_conversation(
+                channel="telegram",
+                chat_id=owner_id,
+                role="user",
+                content=(
+                    f"[System: HaL restarted after self-update. "
+                    f"Now running {commit_info}. Changes: {changes}]"
+                ),
+                entry_type="injection",
+            )
+            logger.info("Update context written to daily_log as injection")
+
+    def _resolve_owner_id(self) -> str | None:
+        """Extract a numeric Telegram user ID from the allow_from list.
+
+        Handles plain numeric IDs (``"123456"``), ``"id|username"`` pairs, and
+        skips pure usernames (Telegram Bot API requires numeric chat_id).
+        """
+        allow_list = getattr(self.config, "allow_from", [])
+        for entry in allow_list:
+            if entry.isdigit():
+                return entry
+            # Support "id|username" format used at runtime
+            if "|" in entry:
+                numeric_part = entry.split("|", 1)[0]
+                if numeric_part.isdigit():
+                    return numeric_part
+        if allow_list:
+            logger.warning(
+                "allow_from contains no numeric IDs — cannot send startup notification. "
+                "Add a numeric Telegram user ID to allow_from."
+            )
+        return None
+
+    @staticmethod
+    def _read_update_marker() -> dict[str, str] | None:
+        """Read and consume ``~/.hal/last_update.json`` if it exists."""
+        from pathlib import Path
+
+        marker = Path.home() / ".hal" / "last_update.json"
+        if not marker.exists():
+            return None
+        try:
+            data = json.loads(marker.read_text(encoding="utf-8"))
+            marker.unlink()
+            logger.info(f"Consumed update marker: {data.get('after', '?')[:7]}")
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to read update marker: {e}")
+            return None
 
     def _split_telegram_message(self, text: str, max_length: int = 4000) -> list[str]:
         """
