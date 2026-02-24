@@ -10,7 +10,7 @@
 - `pytest tests/`: run the full test suite.
 - `pytest tests/core/test_engine.py::test_name`: run a single test.
 - `ruff check hal/ && ruff format hal/`: lint and format Python code.
-- `hal onboard && hal agent -m "hello"`: initialize and smoke-test CLI wiring.
+- `hal --version`: verify CLI wiring.
 
 ## Virtual Environment & Dependency Hygiene
 Use a local virtual environment; do not install dependencies into system Python.

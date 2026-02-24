@@ -21,7 +21,7 @@ class ChannelManager:
     Manages chat channels and coordinates message routing.
 
     Responsibilities:
-    - Initialize enabled channels (Telegram, Discord, etc.)
+    - Initialize enabled channels (Telegram, etc.)
     - Start/stop channels
     - Route outbound messages
     """
@@ -65,26 +65,6 @@ class ChannelManager:
                 logger.info("Telegram channel enabled")
             except ImportError as e:
                 logger.warning(f"Telegram channel not available: {e}")
-
-        # Discord channel
-        if self.config.channels.discord.enabled:
-            try:
-                from hal.channels.discord import DiscordChannel
-
-                self.channels["discord"] = DiscordChannel(self.config.channels.discord, self.bus)
-                logger.info("Discord channel enabled")
-            except ImportError as e:
-                logger.warning(f"Discord channel not available: {e}")
-
-        # Feishu channel
-        if self.config.channels.feishu.enabled:
-            try:
-                from hal.channels.feishu import FeishuChannel
-
-                self.channels["feishu"] = FeishuChannel(self.config.channels.feishu, self.bus)
-                logger.info("Feishu channel enabled")
-            except ImportError as e:
-                logger.warning(f"Feishu channel not available: {e}")
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

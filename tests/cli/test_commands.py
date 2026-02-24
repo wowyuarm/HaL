@@ -21,60 +21,6 @@ def test_version_flag_exits_0() -> None:
     assert "hal v" in result.output
 
 
-def test_onboard_creates_config_workspace_and_templates(tmp_home: Path) -> None:
-    result = runner.invoke(commands.app, ["onboard"], input="y\n")
-    assert result.exit_code == 0
-
-    config_path = tmp_home / ".hal" / "config.yaml"
-    assert config_path.exists()
-
-    import yaml
-
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert "agents" in data
-    assert "providers" in data
-
-    hal_dir = tmp_home / ".hal"
-    assert (hal_dir / "AGENTS.md").exists()
-    assert (hal_dir / "SOUL.md").exists()
-    assert (hal_dir / "USER.md").exists()
-    assert (hal_dir / "TOOLS.md").exists()
-    assert (hal_dir / "HEARTBEAT.md").exists()
-
-    mem = hal_dir / "memory" / "MEMORY.md"
-    assert mem.exists()
-
-
-def test_onboard_declines_overwrite(tmp_home: Path) -> None:
-    # First run creates config
-    first = runner.invoke(commands.app, ["onboard"], input="y\n")
-    assert first.exit_code == 0
-
-    config_path = tmp_home / ".hal" / "config.yaml"
-    original = config_path.read_text(encoding="utf-8")
-
-    # Second run: config exists, user declines overwrite
-    second = runner.invoke(commands.app, ["onboard"], input="n\n")
-    assert second.exit_code == 0
-    assert config_path.read_text(encoding="utf-8") == original
-
-
-def test_status_runs_without_config(tmp_home: Path) -> None:
-    # No onboard; config does not exist
-    result = runner.invoke(commands.app, ["status"])
-    assert result.exit_code == 0
-    assert "HaL Status" in result.output
-
-
-def test_status_runs_with_config(tmp_home: Path) -> None:
-    onboard = runner.invoke(commands.app, ["onboard"], input="y\n")
-    assert onboard.exit_code == 0
-
-    result = runner.invoke(commands.app, ["status"])
-    assert result.exit_code == 0
-    assert "Model:" in result.output
-
-
 def _read_cron_store(home: Path) -> tuple[Path, dict]:
     store_path = home / ".hal" / "cron" / "jobs.json"
     assert store_path.exists()
@@ -142,44 +88,6 @@ def test_cron_add_requires_schedule(tmp_home: Path) -> None:
         ],
     )
     assert result.exit_code != 0
-
-
-def test_channels_login_exits_when_npm_missing(
-    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(shutil, "which", lambda _: None)
-    result = runner.invoke(commands.app, ["channels", "login"])
-    assert result.exit_code == 1
-    assert "npm not found" in result.output.lower()
-
-
-def test_agent_errors_without_api_key(tmp_home: Path) -> None:
-    # No config with API key
-    result = runner.invoke(commands.app, ["agent", "-m", "hi"])
-    assert result.exit_code == 1
-    assert "no api key" in result.output.lower()
-
-
-def test_agent_single_message_success_with_patched_loop(
-    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    class DummyLoop:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-        async def process_direct(self, content: str, session_key: str = "cli:default", **kwargs):
-            return f"echo:{content}:{session_key}"
-
-    # Avoid exiting in make_provider
-    monkeypatch.setattr(commands, "make_provider", lambda cfg: object())
-
-    import hal.core.engine as engine_mod
-
-    monkeypatch.setattr(engine_mod, "AgentLoop", DummyLoop)
-
-    result = runner.invoke(commands.app, ["agent", "-m", "hello", "--session", "cli:test"])
-    assert result.exit_code == 0
-    assert "echo:hello:cli:test" in result.output
 
 
 def test_anyrouter_bridge_requires_api_key(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

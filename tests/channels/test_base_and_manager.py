@@ -91,40 +91,17 @@ def test_channel_manager_initializes_enabled_channels(monkeypatch: pytest.Monkey
         async def send(self, msg) -> None:  # pragma: no cover
             pass
 
-    class DummyDiscord(BaseChannel):
-        name = "discord"
-
-        async def start(self) -> None:  # pragma: no cover
-            pass
-
-        async def stop(self) -> None:  # pragma: no cover
-            pass
-
-        async def send(self, msg) -> None:  # pragma: no cover
-            pass
-
-    class DummyFeishu(DummyDiscord):
-        name = "feishu"
-
     tg_mod = types.ModuleType("hal.channels.telegram")
     tg_mod.TelegramChannel = DummyTelegram
-    dc_mod = types.ModuleType("hal.channels.discord")
-    dc_mod.DiscordChannel = DummyDiscord
-    fs_mod = types.ModuleType("hal.channels.feishu")
-    fs_mod.FeishuChannel = DummyFeishu
 
     monkeypatch.setitem(sys.modules, "hal.channels.telegram", tg_mod)
-    monkeypatch.setitem(sys.modules, "hal.channels.discord", dc_mod)
-    monkeypatch.setitem(sys.modules, "hal.channels.feishu", fs_mod)
 
     cfg = Config()
     cfg.channels.telegram.enabled = True
-    cfg.channels.discord.enabled = True
-    cfg.channels.feishu.enabled = True
 
     mgr = ChannelManager(cfg, MessageBus())
 
-    assert set(mgr.enabled_channels) == {"telegram", "discord", "feishu"}
+    assert set(mgr.enabled_channels) == {"telegram"}
 
 
 def test_channel_manager_skips_channel_when_import_fails(monkeypatch: pytest.MonkeyPatch) -> None:

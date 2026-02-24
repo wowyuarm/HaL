@@ -9,9 +9,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 pip install -e ".[dev]"
 
 # Run
-hal onboard              # First-time setup (creates ~/.hal/)
-hal agent -m "message"   # Single message mode
-hal agent                # Interactive REPL
 hal gateway              # Start all enabled chat channels
 
 # Test
@@ -25,12 +22,12 @@ ruff format hal/         # Format
 
 ## Architecture Overview
 
-HaL is a reliable, precise, and independent digital butler framework. Messages flow through an async message bus that decouples chat platforms from the agent core:
+HaL is a personal digital butler running on VPS, accessed via Telegram. Messages flow through an async message bus that decouples the chat channel from the agent core:
 
 ```
-Channels (Telegram/Discord/etc) → MessageBus (async queue) → AgentEngine → LLMProvider
-                                                                   ↕
-                                                              ToolRegistry
+Telegram → MessageBus (async queue) → AgentEngine → LLMProvider
+                                           ↕
+                                      ToolRegistry
 ```
 
 ### Agent Engine (`hal/core/engine.py`)
@@ -97,7 +94,7 @@ For OpenAI-compatible proxies (e.g. codex-proxy), set `compat_mode: "openai"` in
 
 ### Channels (`hal/channels/`)
 
-Chat platform integrations (Telegram, Discord, Feishu). Each channel pushes `InboundMessage` to the bus and subscribes to `OutboundMessage` dispatches. They are independent of agent internals.
+Chat platform integration (Telegram). The channel pushes `InboundMessage` to the bus and subscribes to `OutboundMessage` dispatches. It is independent of agent internals.
 
 ### Configuration (`hal/infra/config/`)
 
@@ -166,9 +163,8 @@ hal/
 │       └── heartbeat.py    # Heartbeat monitor for HEARTBEAT.md
 ├── channels/           # Chat integrations
 │   ├── base.py         # Abstract Channel class
-│   ├── telegram.py     # Telegram integration
-│   ├── discord.py      # Discord integration
-│   └── feishu.py       # Feishu/Lark integration
+│   ├── manager.py      # ChannelManager — coordinates channels
+│   └── telegram.py     # Telegram integration
 ├── bus/                # Async message routing
 │   ├── events.py       # InboundMessage, OutboundMessage
 │   └── queue.py        # MessageBus — async queue routing
@@ -181,10 +177,9 @@ hal/
 │       ├── schema.py   # Pydantic config models
 │       └── loader.py   # YAML loading, auth separation
 ├── cli/                # CLI commands
-│   ├── commands.py     # CLI entry points (onboard, agent, gateway, status)
+│   ├── commands.py     # CLI entry points (gateway, anyrouter bridge, version)
 │   ├── factory.py      # Provider and memory search construction
-│   ├── cron_commands.py # Cron job management commands
-│   └── channel_commands.py # Channel management commands
+│   └── cron_commands.py # Cron job management commands
 └── utils/              # Helpers
     └── [utility modules]
 ```

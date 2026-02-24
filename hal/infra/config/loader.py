@@ -124,8 +124,6 @@ def _extract_auth(data: dict) -> dict:
     channels = data.get("channels", {})
     channel_auth_fields = {
         "telegram": ["token"],
-        "feishu": ["app_secret", "encrypt_key", "verification_token"],
-        "discord": ["token"],
     }
     for ch_name, fields in channel_auth_fields.items():
         ch_cfg = channels.get(ch_name, {})
