@@ -248,6 +248,20 @@ async def test_await_pending_empty_returns_empty_list(tmp_path) -> None:
 # ------------------------------------------------------------------
 
 
+def test_max_iterations_from_config(tmp_path) -> None:
+    """max_iterations should use the value passed at construction, not a hardcoded default."""
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+
+    # Default should match config schema default (20)
+    mgr_default = SubagentManager(provider=provider, workspace=tmp_path)
+    assert mgr_default.max_iterations == 20
+
+    # Custom value should be respected
+    mgr_custom = SubagentManager(provider=provider, workspace=tmp_path, max_iterations=35)
+    assert mgr_custom.max_iterations == 35
+
+
 def test_build_system_prompt_includes_workspace(tmp_path) -> None:
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"

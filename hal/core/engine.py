@@ -97,6 +97,7 @@ class AgentEngine:
             web_search_api_key=web_search_api_key,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            max_iterations=max_iterations,
         )
 
         self._running = False

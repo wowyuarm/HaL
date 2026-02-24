@@ -50,6 +50,7 @@ class SubagentManager:
         web_search_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        max_iterations: int = 20,
     ):
         from hal.infra.config.schema import ExecToolConfig
 
@@ -59,6 +60,7 @@ class SubagentManager:
         self.web_search_api_key = web_search_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
+        self.max_iterations = max_iterations
         # task_id -> (asyncio.Task, label)
         self._running_tasks: dict[str, tuple[asyncio.Task[SubagentExecutionResult], str]] = {}
         # Track iteration count for the currently executing sync subagent
@@ -168,7 +170,7 @@ class SubagentManager:
             {"role": "user", "content": task},
         ]
 
-        max_iterations = 50
+        max_iterations = self.max_iterations
         self._current_iteration = 0
 
         hooks = _SubagentLoopHooks(self, task_id)
