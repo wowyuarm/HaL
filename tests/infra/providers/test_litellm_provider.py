@@ -55,24 +55,14 @@ def test_gateway_detection_and_env_setup(monkeypatch: pytest.MonkeyPatch) -> Non
     assert os.environ.get("OPENROUTER_API_KEY") == "sk-or-test"
 
 
-def test_resolve_model_gateway_prefix_and_strip(monkeypatch: pytest.MonkeyPatch) -> None:
-    # aihubmix detected via api_base keyword, strips provider prefix then prefixes openai/
-    p = LiteLLMProvider(
-        api_key="k", api_base="https://aihubmix.com/v1", default_model="anthropic/claude"
-    )
-
-    assert p._resolve_model("anthropic/claude-3") == "openai/claude-3"
-    assert p._resolve_model("openai/gpt-4o") == "openai/gpt-4o"
-
-
 def test_resolve_model_standard_provider_prefixing() -> None:
     p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
 
-    # Dashscope should prefix qwen models
-    assert p._resolve_model("qwen-max") == "dashscope/qwen-max"
+    # DeepSeek should add deepseek/ prefix
+    assert p._resolve_model("deepseek-chat") == "deepseek/deepseek-chat"
 
     # Already prefixed should not double-prefix
-    assert p._resolve_model("dashscope/qwen-max") == "dashscope/qwen-max"
+    assert p._resolve_model("deepseek/deepseek-chat") == "deepseek/deepseek-chat"
 
     # Zhipu skip_prefixes include openrouter/ so it should not add zai/
     assert p._resolve_model("openrouter/glm-4") == "openrouter/glm-4"

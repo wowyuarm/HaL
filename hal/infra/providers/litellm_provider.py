@@ -54,7 +54,6 @@ class LiteLLMProvider(LLMProvider):
 
         # Backwards-compatible flags (used by tests and possibly external code)
         self.is_openrouter = bool(self._gateway and self._gateway.name == "openrouter")
-        self.is_aihubmix = bool(self._gateway and self._gateway.name == "aihubmix")
         self.is_vllm = bool(self._gateway and self._gateway.is_local)
 
         # Configure environment variables
@@ -172,7 +171,7 @@ class LiteLLMProvider(LLMProvider):
         if self._compat_mode:
             kwargs["custom_llm_provider"] = self._compat_mode
 
-        # Pass extra headers (e.g. APP-Code for AiHubMix)
+        # Pass provider-specific request headers when configured
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
 

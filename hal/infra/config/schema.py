@@ -66,7 +66,7 @@ class ProviderConfig(BaseModel):
 
     api_key: str = ""
     api_base: str | None = None
-    extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    extra_headers: dict[str, str] | None = None  # Custom request headers for provider endpoints
     compat_mode: str = ""  # Protocol hint for proxies: "openai" = OpenAI-compatible endpoint
 
 
@@ -80,12 +80,10 @@ class ProvidersConfig(BaseModel):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
-    dashscope: ProviderConfig = Field(default_factory=ProviderConfig)  # 阿里云通义千问
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
-    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
 
 
 class GatewayConfig(BaseModel):

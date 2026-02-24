@@ -26,20 +26,20 @@ class ProviderSpec:
     """
 
     # identity
-    name: str  # config field name, e.g. "dashscope"
+    name: str  # config field name, e.g. "openrouter"
     keywords: tuple[str, ...]  # model-name keywords for matching (lowercase)
-    env_key: str  # LiteLLM env var, e.g. "DASHSCOPE_API_KEY"
+    env_key: str  # LiteLLM env var, e.g. "OPENROUTER_API_KEY"
     display_name: str = ""  # shown in `hal status`
 
     # model prefixing
-    litellm_prefix: str = ""  # "dashscope" → model becomes "dashscope/{model}"
+    litellm_prefix: str = ""  # "openrouter" → model becomes "openrouter/{model}"
     skip_prefixes: tuple[str, ...] = ()  # don't prefix if model already starts with these
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
     env_extras: tuple[tuple[str, str], ...] = ()
 
     # gateway / local detection
-    is_gateway: bool = False  # routes any model (OpenRouter, AiHubMix)
+    is_gateway: bool = False  # routes any model (OpenRouter, AnyRouter)
     is_local: bool = False  # local deployment (vLLM, Ollama)
     detect_by_key_prefix: str = ""  # match api_key prefix, e.g. "sk-or-"
     detect_by_base_keyword: str = ""  # match substring in api_base URL
@@ -78,25 +78,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="openrouter",
         default_api_base="https://openrouter.ai/api/v1",
         strip_model_prefix=False,
-        model_overrides=(),
-    ),
-    # AiHubMix: global gateway, OpenAI-compatible interface.
-    # strip_model_prefix=True: it doesn't understand "anthropic/claude-3",
-    # so we strip to bare "claude-3" then re-prefix as "openai/claude-3".
-    ProviderSpec(
-        name="aihubmix",
-        keywords=("aihubmix",),
-        env_key="OPENAI_API_KEY",  # OpenAI-compatible
-        display_name="AiHubMix",
-        litellm_prefix="openai",  # → openai/{model}
-        skip_prefixes=(),
-        env_extras=(),
-        is_gateway=True,
-        is_local=False,
-        detect_by_key_prefix="",
-        detect_by_base_keyword="aihubmix",
-        default_api_base="https://aihubmix.com/v1",
-        strip_model_prefix=True,  # anthropic/claude-3 → claude-3 → openai/claude-3
         model_overrides=(),
     ),
     # AnyRouter: Anthropic-compatible relay. Requires Claude Code stealth headers
@@ -198,23 +179,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         litellm_prefix="zai",  # glm-4 → zai/glm-4
         skip_prefixes=("zhipu/", "zai/", "openrouter/", "hosted_vllm/"),
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
-        is_gateway=False,
-        is_local=False,
-        detect_by_key_prefix="",
-        detect_by_base_keyword="",
-        default_api_base="",
-        strip_model_prefix=False,
-        model_overrides=(),
-    ),
-    # DashScope: Qwen models, needs "dashscope/" prefix.
-    ProviderSpec(
-        name="dashscope",
-        keywords=("qwen", "dashscope"),
-        env_key="DASHSCOPE_API_KEY",
-        display_name="DashScope",
-        litellm_prefix="dashscope",  # qwen-max → dashscope/qwen-max
-        skip_prefixes=("dashscope/", "openrouter/"),
-        env_extras=(),
         is_gateway=False,
         is_local=False,
         detect_by_key_prefix="",
@@ -341,7 +305,7 @@ def find_gateway(
 
 
 def find_by_name(name: str) -> ProviderSpec | None:
-    """Find a provider spec by config field name, e.g. "dashscope"."""
+    """Find a provider spec by config field name, e.g. "openrouter"."""
     for spec in PROVIDERS:
         if spec.name == name:
             return spec
