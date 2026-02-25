@@ -245,6 +245,7 @@ const server = http.createServer(async (req, res) => {
       if (defaultThinking) {
         ensureDefaultThinking(payload, defaultThinkingBudget);
       }
+      payload.temperature = 1;
       upstreamBody = Buffer.from(JSON.stringify(payload));
       logDebug(
         `#${reqId} payload model=${payload.model || "-"} messages=${
