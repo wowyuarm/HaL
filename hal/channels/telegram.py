@@ -521,26 +521,6 @@ class TelegramChannel(BaseChannel):
                 lines.append(f'  [{idx}] {role:<9}  {tokens:>6,}t  "{preview}"')
         return "\n".join(lines)
 
-    @staticmethod
-    def _fmt_ctx_last_run(latest_metrics: dict[str, Any] | None) -> str:
-        """Last actual LLM usage metrics."""
-        if not isinstance(latest_metrics, dict):
-            return "📈 <b>Last Run</b>  none"
-
-        def _show(val: Any) -> str:
-            return f"{val:,}" if isinstance(val, int) else "N/A"
-
-        prompt = latest_metrics.get("first_prompt_tokens")
-        comp = latest_metrics.get("first_completion_tokens")
-        tools_used = latest_metrics.get("tools_used") or []
-        parts = [
-            "📈 <b>Last Run</b>",
-            f"  tokens: {_show(prompt)} → {_show(comp)} (prompt → completion)",
-        ]
-        if tools_used:
-            parts.append(f"  tools: {', '.join(tools_used)}")
-        return "\n".join(parts)
-
     def _format_context_report(
         self,
         data: dict[str, Any],
@@ -553,7 +533,6 @@ class TelegramChannel(BaseChannel):
             self._fmt_ctx_snapshot(data),
             self._fmt_ctx_recall(data.get("recall_items") or []),
             self._fmt_ctx_messages(data, full_messages=full_messages),
-            self._fmt_ctx_last_run(data.get("latest_metrics")),
         ]
         return self._compress_context_output("\n\n".join(sections))
 

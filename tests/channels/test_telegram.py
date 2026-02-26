@@ -95,40 +95,6 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
     assert "[1] user" in report
 
 
-def test_format_context_report_last_run_missing_usage_shows_na() -> None:
-    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
-    report = ch._format_context_report(
-        {
-            "channel": "telegram",
-            "chat_id": "1",
-            "model": "test-model",
-            "mode": "collab",
-            "history_message_count": 0,
-            "history_tokens": 0,
-            "recall_count": 0,
-            "recall_items": [],
-            "system_prompt_tokens": 1,
-            "total_input_tokens": 2,
-            "token_estimate": {
-                "method": "litellm.token_counter",
-                "messages_only": 2,
-                "with_tools": 4,
-                "tools_only": 2,
-                "error": None,
-            },
-            "latest_metrics": {
-                "timestamp": "2026-02-22T10:00:00",
-                "first_prompt_tokens": None,
-                "first_completion_tokens": None,
-                "tools_used": [],
-            },
-            "messages": [{"role": "system", "content": "sys"}],
-            "message_summaries": [{"role": "system", "tokens": 1, "preview": "sys"}],
-        }
-    )
-    assert "tokens: N/A → N/A (prompt → completion)" in report
-
-
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     md = (
         "# Title\n"

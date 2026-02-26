@@ -647,20 +647,6 @@ class AgentEngine:
             )
 
         sys_chars = _content_char_len(messages[0].get("content", "")) if messages else 0
-        latest_metrics = self._metrics_collector.get_latest(
-            channel=channel,
-            chat_id=chat_id,
-            mode=ExecutionMode.COLLAB.value,
-        )
-        if latest_metrics and not _metrics_row_has_usage(latest_metrics):
-            latest_with_usage = self._metrics_collector.get_latest(
-                channel=channel,
-                chat_id=chat_id,
-                mode=ExecutionMode.COLLAB.value,
-                require_usage=True,
-            )
-            if latest_with_usage:
-                latest_metrics = latest_with_usage
 
         return {
             "channel": channel,
@@ -685,7 +671,6 @@ class AgentEngine:
             },
             "history_window": history_window,
             "token_estimate": token_estimate,
-            "latest_metrics": latest_metrics,
         }
 
     async def process_direct(
@@ -1081,14 +1066,6 @@ def _estimate_prompt_tokens(
 def _rough_tokens(chars: int) -> int:
     """Rough chars→tokens estimate with ceil division."""
     return (max(chars, 0) + 3) // 4
-
-
-def _metrics_row_has_usage(row: dict[str, Any]) -> bool:
-    """Whether metrics row includes first-response token usage."""
-    for key in ("first_prompt_tokens", "first_completion_tokens", "first_total_tokens"):
-        if isinstance(row.get(key), int):
-            return True
-    return False
 
 
 def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:

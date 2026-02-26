@@ -87,44 +87,6 @@ def test_metrics_collector_get_latest_with_filters(tmp_path: Path) -> None:
     assert none_match is None
 
 
-def test_metrics_collector_get_latest_require_usage(tmp_path: Path) -> None:
-    path = tmp_path / "logs" / "context_metrics.jsonl"
-    collector = MetricsCollector(path)
-
-    collector.record(
-        ContextMetrics.create(channel="telegram", chat_id="1", mode="collab", total_input_chars=10)
-    )
-    collector.record(
-        ContextMetrics.create(
-            channel="telegram",
-            chat_id="1",
-            mode="collab",
-            total_input_chars=20,
-            first_prompt_tokens=101,
-            first_completion_tokens=22,
-            first_total_tokens=123,
-        )
-    )
-    collector.record(
-        ContextMetrics.create(channel="telegram", chat_id="1", mode="collab", total_input_chars=30)
-    )
-
-    latest = collector.get_latest(channel="telegram", chat_id="1", mode="collab")
-    assert latest is not None
-    assert latest["total_input_chars"] == 30
-    assert latest["first_prompt_tokens"] is None
-
-    latest_with_usage = collector.get_latest(
-        channel="telegram",
-        chat_id="1",
-        mode="collab",
-        require_usage=True,
-    )
-    assert latest_with_usage is not None
-    assert latest_with_usage["total_input_chars"] == 20
-    assert latest_with_usage["first_prompt_tokens"] == 101
-
-
 @pytest.mark.asyncio
 async def test_run_tool_loop_records_first_response_usage() -> None:
     provider = MagicMock(spec=LLMProvider)
