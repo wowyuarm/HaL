@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from hal.core.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
 from hal.core.memory.daily_log import DailyLog, LogEntry
 
 if TYPE_CHECKING:
@@ -41,24 +42,31 @@ class MemoryManager:
 
         self._search = memory_search
 
-    def get_context(self, budget: int | None = None) -> str:
+    def get_context(self, budget_tokens: int | None = None, token_model: str | None = None) -> str:
         """
         Assemble memory context for prompt injection.
 
         Args:
-            budget: Approximate character budget for memory section.
+            budget_tokens: Approximate token budget for memory section.
+            token_model: Model id used for token counting.
         """
         lt = self.long_term.read()
         if not lt:
             return ""
 
         content = f"## Long-term Memory\n\n{lt}"
-        if budget is None or budget <= 0 or len(content) <= budget:
+        if budget_tokens is None or budget_tokens <= 0:
+            return content
+        if estimate_text_tokens(content, model=token_model) <= budget_tokens:
             return content
 
         # Keep a valid markdown tail marker when truncation is required.
-        clipped = content[:budget].rstrip()
-        return f"{clipped}\n\n[...truncated]"
+        return trim_text_to_token_budget(
+            content,
+            budget_tokens,
+            model=token_model,
+            suffix="\n\n[...truncated]",
+        )
 
     def record_conversation(
         self,
@@ -104,9 +112,10 @@ class MemoryManager:
         max_messages: int = 50,
         include_tools: bool = False,
         recent_full_turns: int = 3,
-        assistant_truncate_chars: int = 200,
-        max_chars: int = 0,
+        assistant_truncate_tokens: int = 50,
+        max_tokens: int = 0,
         history_days: int = 1,
+        token_model: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Get recent conversation history for a specific channel/chat.
@@ -117,7 +126,7 @@ class MemoryManager:
             max_messages: Maximum number of messages to return
             include_tools: Whether to include tool messages
             recent_full_turns: Number of recent assistant messages kept verbatim.
-            assistant_truncate_chars: Max chars for older assistant messages.
+            assistant_truncate_tokens: Max tokens for older assistant messages.
 
         Returns:
             List of messages in LLM format (role, content)
@@ -128,9 +137,10 @@ class MemoryManager:
             max_messages=max_messages,
             include_tools=include_tools,
             recent_full_turns=recent_full_turns,
-            assistant_truncate_chars=assistant_truncate_chars,
-            max_chars=max_chars,
+            assistant_truncate_tokens=assistant_truncate_tokens,
+            max_tokens=max_tokens,
             history_days=history_days,
+            token_model=token_model,
         )
 
     def get_conversation_stats(self) -> dict[str, Any]:

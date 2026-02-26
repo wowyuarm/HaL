@@ -1,6 +1,6 @@
 # History Context Management — Design Document
 
-> Status: **Phase 1 implemented** (assistant truncation). Phase 2 is a future enhancement.
+> Status: **Token-based budgeting implemented** for history/memory/recall truncation.
 
 ## Problem
 
@@ -29,9 +29,10 @@ Key insight: OpenClaw's compaction **indirectly** reduces style contamination be
 Simple heuristic applied in `DailyLog.get_recent_conversation()`:
 
 - The most recent `recent_full_turns` assistant messages are kept **verbatim**
-- Older assistant messages are **truncated** to `assistant_truncate_chars` characters
+- Older assistant messages are **truncated** to `assistant_truncate_tokens` tokens
 - User messages are **always kept in full** (they carry intent, not style)
 - Tool messages are already filtered by `include_tools=False`
+- Optional hard cap keeps only the newest history under `max_history_tokens`
 
 Configuration via `config.yaml`:
 
@@ -41,7 +42,12 @@ agents:
     history:
       max_messages: 50
       recent_full_turns: 3
-      assistant_truncate_chars: 200
+      assistant_truncate_tokens: 50
+      max_history_tokens: 0
+      memory_budget_tokens: 0
+      recall_max_total_tokens: 500
+      recall_max_per_item_tokens: 125
+      history_days: 1
 ```
 
 This addresses the core issue: old assistant outputs lose their formatting/style information through truncation, while preserving enough factual content for conversation coherence.
@@ -128,7 +134,7 @@ agents:
     history:
       max_messages: 50
       recent_full_turns: 3
-      assistant_truncate_chars: 200
+      assistant_truncate_tokens: 50
       condensed_context:
         enabled: false
         verbatim_budget_tokens: 8000
@@ -138,7 +144,7 @@ agents:
 
 #### Open Questions
 
-1. **Token estimation accuracy** — without a provider-specific tokenizer, character-based estimation (1 token ≈ 3-4 chars English, ≈ 2 chars Chinese) may waste budget. Consider integrating `tiktoken` or using provider token-count APIs.
+1. **Tokenizer fallback behavior** — when model-aware token counting is unavailable, fallback rough counting (`chars/4`) can still introduce budget drift.
 
 2. **Cross-day history** — `DailyLog` only reads today's file. Conversations spanning midnight would lose earlier context. May need to extend to read yesterday's file for ongoing sessions.
 

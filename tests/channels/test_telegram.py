@@ -73,7 +73,7 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
             "history_config": {
                 "history_days": 1,
                 "max_messages": 50,
-                "max_history_chars": 0,
+                "max_history_tokens": 0,
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [
@@ -432,7 +432,9 @@ async def test_stop_cancels_typing_tasks_and_shuts_down_app() -> None:
 @pytest.mark.asyncio
 async def test_on_reset_clears_history_without_session_key() -> None:
     memory = MagicMock()
-    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus(), memory_manager=memory)
+    ch = TelegramChannel(
+        TelegramConfig(enabled=True, token="t"), MessageBus(), memory_manager=memory
+    )
 
     msg = _Message(chat_id=123, text="/reset")
     msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
@@ -486,7 +488,7 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
             "history_config": {
                 "history_days": 1,
                 "max_messages": 50,
-                "max_history_chars": 0,
+                "max_history_tokens": 0,
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "latest_metrics": {
@@ -560,7 +562,7 @@ async def test_on_context_full_mode_parses_message() -> None:
             "history_config": {
                 "history_days": 1,
                 "max_messages": 50,
-                "max_history_chars": 0,
+                "max_history_tokens": 0,
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [{"role": "system", "content": "sys"}],
@@ -713,7 +715,10 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
     # Should send enriched message
     mock_bot.send_message.assert_awaited_once()
     sent_text = mock_bot.send_message.await_args.kwargs.get(
-        "text", mock_bot.send_message.await_args.args[1] if len(mock_bot.send_message.await_args.args) > 1 else ""
+        "text",
+        mock_bot.send_message.await_args.args[1]
+        if len(mock_bot.send_message.await_args.args) > 1
+        else "",
     )
     assert "Changes since" in sent_text
     assert "fix: thing" in sent_text
@@ -748,7 +753,10 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
 
     mock_bot.send_message.assert_awaited_once()
     sent_text = mock_bot.send_message.await_args.kwargs.get(
-        "text", mock_bot.send_message.await_args.args[1] if len(mock_bot.send_message.await_args.args) > 1 else ""
+        "text",
+        mock_bot.send_message.await_args.args[1]
+        if len(mock_bot.send_message.await_args.args) > 1
+        else "",
     )
     assert "HaL online" in sent_text
     assert "Changes since" not in sent_text

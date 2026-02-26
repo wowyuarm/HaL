@@ -12,6 +12,8 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel
 
+from hal.core.context.token_budget import estimate_content_tokens, trim_text_to_token_budget
+
 
 class LogEntry(BaseModel):
     """A single entry in the daily log."""
@@ -120,9 +122,10 @@ class DailyLog:
         max_messages: int = 50,
         include_tools: bool = False,
         recent_full_turns: int = 3,
-        assistant_truncate_chars: int = 200,
-        max_chars: int = 0,
+        assistant_truncate_tokens: int = 50,
+        max_tokens: int = 0,
         history_days: int = 1,
+        token_model: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Get recent conversation history for a specific channel/chat.
@@ -141,9 +144,10 @@ class DailyLog:
             include_tools: Whether to include tool messages
             recent_full_turns: Number of recent assistant messages to keep
                 verbatim. Older assistant messages are truncated.
-            assistant_truncate_chars: Max characters for older assistant messages.
-            max_chars: Hard cap on total output chars (0 = unlimited).
+            assistant_truncate_tokens: Max tokens for older assistant messages.
+            max_tokens: Hard cap on total output tokens (0 = unlimited).
             history_days: Number of days to include, counting today.
+            token_model: Model id used for token counting.
 
         Returns:
             List of messages in LLM format (role, content)
@@ -217,18 +221,22 @@ class DailyLog:
                     if i in summary_for_assistant:
                         content = summary_for_assistant[i]
                     else:
-                        content = _truncate_assistant(content, assistant_truncate_chars)
+                        content = _truncate_assistant(
+                            content,
+                            assistant_truncate_tokens,
+                            token_model=token_model,
+                        )
                 else:
                     # Inside recent full turns: skip paired summary (already in skip_indices)
                     pass
             messages.append({"role": entry.role, "content": content})
 
-        if max_chars > 0 and messages:
+        if max_tokens > 0 and messages:
             total = 0
             cutoff = 0
             for i in range(len(messages) - 1, -1, -1):
-                total += len(str(messages[i].get("content", "")))
-                if total > max_chars:
+                total += estimate_content_tokens(messages[i].get("content", ""), model=token_model)
+                if total > max_tokens:
                     cutoff = i + 1
                     break
             if cutoff >= len(messages):
@@ -320,14 +328,16 @@ class DailyLog:
         return stats
 
 
-def _truncate_assistant(content: str, max_chars: int) -> str:
+def _truncate_assistant(content: str, max_tokens: int, token_model: str | None = None) -> str:
     """Truncate an assistant message to a factual preview.
 
     Strips style/formatting from older assistant outputs so the LLM sees
     *what was done* without picking up *how it was phrased*.
     """
-    if len(content) <= max_chars:
-        return content
-    # Take the first max_chars, collapse to single line for compactness
-    preview = content[:max_chars].replace("\n", " ").strip()
-    return preview + " [...]"
+    return trim_text_to_token_budget(
+        content,
+        max_tokens,
+        model=token_model,
+        suffix=" [...]",
+        collapse_newlines=True,
+    )

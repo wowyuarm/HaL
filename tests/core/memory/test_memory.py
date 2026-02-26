@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
+from hal.core.context.token_budget import estimate_text_tokens
 from hal.core.memory.daily_log import DailyLog, LogEntry, _truncate_assistant
 from hal.core.memory.long_term import LongTermMemory
 from hal.core.memory.manager import MemoryManager
@@ -79,13 +80,13 @@ class TestDailyLog:
         # Should be the most recent 3
         assert history[0]["content"] == "msg-7"
 
-    def test_get_recent_conversation_respects_max_chars(self, tmp_path: Path):
+    def test_get_recent_conversation_respects_max_tokens(self, tmp_path: Path):
         log = DailyLog(tmp_path / "logs")
         log.append(channel="cli", chat_id="d", role="user", content="short-1")
         log.append(channel="cli", chat_id="d", role="assistant", content="short-2")
         log.append(channel="cli", chat_id="d", role="user", content="X" * 100)
 
-        history = log.get_recent_conversation(channel="cli", chat_id="d", max_chars=30)
+        history = log.get_recent_conversation(channel="cli", chat_id="d", max_tokens=20)
         assert len(history) == 1
         assert history[0]["content"] == "X" * 100
 
@@ -231,11 +232,11 @@ class TestMemoryManager:
         ctx = mgr.get_context()
         assert ctx == ""
 
-    def test_get_context_respects_budget(self, tmp_path: Path):
+    def test_get_context_respects_budget_tokens(self, tmp_path: Path):
         mgr = MemoryManager(workspace=tmp_path)
         mgr.long_term.update("A" * 200)
-        ctx = mgr.get_context(budget=60)
-        assert len(ctx) <= 80  # includes truncation marker
+        ctx = mgr.get_context(budget_tokens=20)
+        assert estimate_text_tokens(ctx) <= 20
         assert "[...truncated]" in ctx
 
     def test_record_conversation_creates_entry(self, tmp_path: Path):
@@ -406,18 +407,19 @@ class TestAssistantTruncation:
     """Tests for truncation of older assistant messages."""
 
     def test_truncate_assistant_short_message_unchanged(self):
-        assert _truncate_assistant("short reply", 200) == "short reply"
+        assert _truncate_assistant("short reply", 50) == "short reply"
 
     def test_truncate_assistant_long_message_truncated(self):
         long_msg = "A" * 300
-        result = _truncate_assistant(long_msg, 200)
+        result = _truncate_assistant(long_msg, 50)
         assert len(result) < 300
         assert result.endswith("[...]")
-        assert result.startswith("A" * 200)
+        assert result.startswith("A" * 180)
+        assert estimate_text_tokens(result) <= 50
 
     def test_truncate_assistant_collapses_newlines(self):
         msg = "line1\nline2\nline3\n" * 50
-        result = _truncate_assistant(msg, 100)
+        result = _truncate_assistant(msg, 25)
         assert "\n" not in result
         assert "[...]" in result
 
@@ -431,7 +433,7 @@ class TestAssistantTruncation:
             log.append(channel="cli", chat_id="d", role="assistant", content=long_content)
 
         history = log.get_recent_conversation(
-            channel="cli", chat_id="d", recent_full_turns=2, assistant_truncate_chars=100
+            channel="cli", chat_id="d", recent_full_turns=2, assistant_truncate_tokens=25
         )
 
         assistant_msgs = [m for m in history if m["role"] == "assistant"]
@@ -469,7 +471,7 @@ class TestAssistantTruncation:
             log.append(channel="cli", chat_id="d", role="assistant", content="short")
 
         history = log.get_recent_conversation(
-            channel="cli", chat_id="d", recent_full_turns=1, assistant_truncate_chars=50
+            channel="cli", chat_id="d", recent_full_turns=1, assistant_truncate_tokens=12
         )
 
         user_msgs = [m for m in history if m["role"] == "user"]

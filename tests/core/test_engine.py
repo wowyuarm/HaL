@@ -926,7 +926,7 @@ class TestSubagentInjectionHelpers:
             record_id=None,
             artifact_path=None,
             total_tokens=0,
-            max_chars=0,
+            max_tokens=0,
         )
         assert "[Full result saved to subagent artifact file]" not in text
         assert " [...]" not in text

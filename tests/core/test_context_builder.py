@@ -120,7 +120,7 @@ class TestBuildSystemPrompt:
         prompt = cc.build_system_prompt()
         assert "Remember: user likes tea." in prompt
         assert "# Memory" in prompt
-        mm.get_context.assert_called_with(budget=None)
+        mm.get_context.assert_called_with(budget_tokens=None, token_model=None)
 
     def test_memory_budget_is_passed_to_manager(self, workspace: Path) -> None:
         mm = MagicMock()
@@ -133,8 +133,8 @@ class TestBuildSystemPrompt:
             )
             cc = ContextBuilder(workspace, memory_manager=mm)
 
-        cc.build_system_prompt(memory_budget_chars=123)
-        mm.get_context.assert_called_with(budget=123)
+        cc.build_system_prompt(memory_budget_tokens=123)
+        mm.get_context.assert_called_with(budget_tokens=123, token_model=None)
 
     def test_no_memory_section_when_empty(self, builder: ContextBuilder) -> None:
         prompt = builder.build_system_prompt()
@@ -323,7 +323,7 @@ class TestDynamicContext:
         system_content = msgs[0]["content"]
         assert "Relevant Past Memories" not in system_content
 
-    def test_memory_search_total_chars_limit(self, builder: ContextBuilder) -> None:
+    def test_memory_search_total_tokens_limit(self, builder: ContextBuilder) -> None:
         r1 = MagicMock()
         r1.source = "d1"
         r1.heading = ""
@@ -342,8 +342,8 @@ class TestDynamicContext:
             [],
             "msg",
             memory_search_results=[r1, r2],
-            recall_max_total_chars=600,
-            recall_max_per_item_chars=500,
+            recall_max_total_tokens=120,
+            recall_max_per_item_tokens=100,
         )
         user_content = msgs[-1]["content"]
         assert "d1" in user_content

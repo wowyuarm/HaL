@@ -18,6 +18,10 @@ from hal.capabilities.tools.schedule import CronTool
 from hal.capabilities.tools.spawn import SpawnTool
 from hal.core.context.builder import ContextBuilder, ExecutionMode
 from hal.core.context.metrics import ContextMetrics, MetricsCollector
+from hal.core.context.token_budget import (
+    rough_tokens_from_chars,
+    trim_text_to_token_budget,
+)
 from hal.core.memory.manager import MemoryManager
 from hal.core.runtime.loop import LoopMetadata, run_tool_loop
 from hal.core.runtime.summary import generate_summary
@@ -224,15 +228,17 @@ class AgentEngine:
 
         # Get conversation history from log
         hc = self._history_config
+        resolved_model = self.provider.resolve_model(self.model)
         history = self.memory.get_conversation_history(
             channel=msg.channel,
             chat_id=msg.chat_id,
             max_messages=hc.max_messages,
             include_tools=False,
             recent_full_turns=hc.recent_full_turns,
-            assistant_truncate_chars=hc.assistant_truncate_chars,
-            max_chars=hc.max_history_chars,
+            assistant_truncate_tokens=hc.assistant_truncate_tokens,
+            max_tokens=hc.max_history_tokens,
             history_days=hc.history_days,
+            token_model=resolved_model,
         )
 
         # Pre-fetch relevant memories via semantic search
@@ -255,9 +261,10 @@ class AgentEngine:
             chat_id=msg.chat_id,
             mode=ExecutionMode.COLLAB,
             memory_search_results=search_results or None,
-            memory_budget_chars=(hc.memory_budget_chars or None),
-            recall_max_total_chars=hc.recall_max_total_chars,
-            recall_max_per_item_chars=hc.recall_max_per_item_chars,
+            memory_budget_tokens=(hc.memory_budget_tokens or None),
+            recall_max_total_tokens=hc.recall_max_total_tokens,
+            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+            token_model=resolved_model,
         )
         pre_metrics = ContextMetrics(
             timestamp=datetime.now().isoformat(),
@@ -272,7 +279,13 @@ class AgentEngine:
             recall_count=len(search_results),
             recall_scores=[float(getattr(r, "score", 0.0)) for r in search_results],
             recall_chars=sum(
-                len(str(getattr(r, "content", ""))[: hc.recall_max_per_item_chars])
+                len(
+                    trim_text_to_token_budget(
+                        str(getattr(r, "content", "")),
+                        hc.recall_max_per_item_tokens,
+                        model=resolved_model,
+                    )
+                )
                 for r in search_results
             ),
             current_message_chars=len(msg.content),
@@ -349,15 +362,17 @@ class AgentEngine:
 
         # Get conversation history from log
         hc = self._history_config
+        resolved_model = self.provider.resolve_model(self.model)
         history = self.memory.get_conversation_history(
             channel=channel,
             chat_id=chat_id,
             max_messages=hc.max_messages,
             include_tools=False,
             recent_full_turns=hc.recent_full_turns,
-            assistant_truncate_chars=hc.assistant_truncate_chars,
-            max_chars=hc.max_history_chars,
+            assistant_truncate_tokens=hc.assistant_truncate_tokens,
+            max_tokens=hc.max_history_tokens,
             history_days=hc.history_days,
+            token_model=resolved_model,
         )
 
         messages = self.context.build_messages(
@@ -366,9 +381,10 @@ class AgentEngine:
             channel=channel,
             chat_id=chat_id,
             mode=ExecutionMode.OPERATOR,
-            memory_budget_chars=(hc.memory_budget_chars or None),
-            recall_max_total_chars=hc.recall_max_total_chars,
-            recall_max_per_item_chars=hc.recall_max_per_item_chars,
+            memory_budget_tokens=(hc.memory_budget_tokens or None),
+            recall_max_total_tokens=hc.recall_max_total_tokens,
+            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+            token_model=resolved_model,
         )
         pre_metrics = ContextMetrics(
             timestamp=datetime.now().isoformat(),
@@ -560,15 +576,17 @@ class AgentEngine:
         This does not mutate memory or execute any LLM/tool calls.
         """
         hc = self._history_config
+        resolved_model = self.provider.resolve_model(self.model)
         history = self.memory.get_conversation_history(
             channel=channel,
             chat_id=chat_id,
             max_messages=hc.max_messages,
             include_tools=False,
             recent_full_turns=hc.recent_full_turns,
-            assistant_truncate_chars=hc.assistant_truncate_chars,
-            max_chars=hc.max_history_chars,
+            assistant_truncate_tokens=hc.assistant_truncate_tokens,
+            max_tokens=hc.max_history_tokens,
             history_days=hc.history_days,
+            token_model=resolved_model,
         )
 
         search_results = []
@@ -589,12 +607,12 @@ class AgentEngine:
             chat_id=chat_id,
             mode=ExecutionMode.COLLAB,
             memory_search_results=search_results or None,
-            memory_budget_chars=(hc.memory_budget_chars or None),
-            recall_max_total_chars=hc.recall_max_total_chars,
-            recall_max_per_item_chars=hc.recall_max_per_item_chars,
+            memory_budget_tokens=(hc.memory_budget_tokens or None),
+            recall_max_total_tokens=hc.recall_max_total_tokens,
+            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+            token_model=resolved_model,
         )
 
-        resolved_model = self.provider.resolve_model(self.model)
         tools = self.tools.get_definitions()
         token_estimate = _estimate_prompt_tokens(resolved_model, messages, tools)
         history_tokens = _estimate_messages_tokens(resolved_model, history)
@@ -630,7 +648,9 @@ class AgentEngine:
             content = msg.get("content", "")
             chars = _content_char_len(content)
             tokens = (
-                per_message_tokens[idx] if idx < len(per_message_tokens) else _rough_tokens(chars)
+                per_message_tokens[idx]
+                if idx < len(per_message_tokens)
+                else rough_tokens_from_chars(chars)
             )
             preview_src = content if isinstance(content, str) else str(content)
             preview = preview_src[:preview_len].replace("\n", " ")
@@ -666,7 +686,7 @@ class AgentEngine:
             "history_config": {
                 "history_days": hc.history_days,
                 "max_messages": hc.max_messages,
-                "max_history_chars": hc.max_history_chars,
+                "max_history_tokens": hc.max_history_tokens,
             },
             "history_window": history_window,
             "token_estimate": token_estimate,
@@ -821,7 +841,7 @@ class _EngineLoopHooks:
                         record_id=record_id,
                         artifact_path=artifact_path,
                         total_tokens=total_tokens,
-                        max_chars=_SUBAGENT_HISTORY_MAX_CHARS,
+                        max_tokens=_SUBAGENT_HISTORY_MAX_TOKENS,
                     ),
                     entry_type="injection",
                 )
@@ -858,7 +878,7 @@ class _EngineLoopHooks:
                 record_id=record_id,
                 artifact_path=str(artifact_path) if artifact_path else None,
                 total_tokens=total_tokens,
-                max_chars=_SUBAGENT_RUNTIME_MAX_CHARS,
+                max_tokens=_SUBAGENT_RUNTIME_MAX_TOKENS,
             )
             messages.append({"role": "user", "content": runtime_inject})
             logger.info(f"[inject] subagent result: {label} ({status})")
@@ -872,7 +892,7 @@ class _EngineLoopHooks:
                     record_id=record_id,
                     artifact_path=str(artifact_path) if artifact_path else None,
                     total_tokens=total_tokens,
-                    max_chars=_SUBAGENT_HISTORY_MAX_CHARS,
+                    max_tokens=_SUBAGENT_HISTORY_MAX_TOKENS,
                 )
                 self._engine.memory.record_conversation(
                     channel=self._channel,
@@ -933,9 +953,9 @@ _THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.DOTALL)
 _SUBAGENT_TOKEN_RE = re.compile(r"\[Subagent Total Tokens\]\s*(\d+)")
 _SUBAGENT_ARTIFACT_RE = re.compile(r"^\[Subagent Artifact\]\s*(.+)$", re.MULTILINE)
 _SUBAGENT_RECORD_RE = re.compile(r"^\[Subagent Record ID\]\s*(.+)$", re.MULTILINE)
-_SUBAGENT_HISTORY_MAX_CHARS = 800
+_SUBAGENT_HISTORY_MAX_TOKENS = 200
 # 0 = no truncation for same-turn runtime injection to main agent.
-_SUBAGENT_RUNTIME_MAX_CHARS = 0
+_SUBAGENT_RUNTIME_MAX_TOKENS = 0
 
 
 def _format_progress_message(
@@ -1002,7 +1022,9 @@ def _estimate_messages_tokens(model: str, messages: list[dict[str, Any]]) -> int
     if not messages:
         return 0
 
-    fallback = _rough_tokens(sum(_content_char_len(m.get("content", "")) for m in messages))
+    fallback = rough_tokens_from_chars(
+        sum(_content_char_len(m.get("content", "")) for m in messages)
+    )
     try:
         import litellm
 
@@ -1013,7 +1035,7 @@ def _estimate_messages_tokens(model: str, messages: list[dict[str, Any]]) -> int
 
 def _estimate_per_message_tokens(model: str, messages: list[dict[str, Any]]) -> list[int]:
     """Estimate token count for each message (for context inspector display)."""
-    fallback = [_rough_tokens(_content_char_len(m.get("content", ""))) for m in messages]
+    fallback = [rough_tokens_from_chars(_content_char_len(m.get("content", ""))) for m in messages]
     if not messages:
         return fallback
 
@@ -1039,9 +1061,9 @@ def _estimate_prompt_tokens(
     tools_chars = len(json.dumps(tools, ensure_ascii=False))
     fallback = {
         "method": "chars_div_4",
-        "messages_only": _rough_tokens(msg_chars),
-        "with_tools": _rough_tokens(msg_chars + tools_chars),
-        "tools_only": _rough_tokens(tools_chars),
+        "messages_only": rough_tokens_from_chars(msg_chars),
+        "with_tools": rough_tokens_from_chars(msg_chars + tools_chars),
+        "tools_only": rough_tokens_from_chars(tools_chars),
         "error": None,
     }
 
@@ -1060,11 +1082,6 @@ def _estimate_prompt_tokens(
     except Exception as e:
         fallback["error"] = str(e)
         return fallback
-
-
-def _rough_tokens(chars: int) -> int:
-    """Rough chars→tokens estimate with ceil division."""
-    return (max(chars, 0) + 3) // 4
 
 
 def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:
@@ -1111,15 +1128,16 @@ def _build_subagent_injection(
     record_id: str | None,
     artifact_path: str | None,
     total_tokens: int,
-    max_chars: int = _SUBAGENT_HISTORY_MAX_CHARS,
+    max_tokens: int = _SUBAGENT_HISTORY_MAX_TOKENS,
 ) -> str:
     """Build compact subagent injection content for next-loop context."""
     is_error = status == "failed" or content.startswith("Error:")
     body = content
     truncated = False
-    if not is_error and max_chars > 0 and len(body) > max_chars:
-        body = body[:max_chars].rstrip() + " [...]"
-        truncated = True
+    if not is_error and max_tokens > 0:
+        trimmed = trim_text_to_token_budget(body, max_tokens, suffix=" [...]")
+        truncated = trimmed != body
+        body = trimmed
 
     if background:
         text = f"[Background subagent '{label}' {status}]\n\nResult:\n{body}"
