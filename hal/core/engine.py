@@ -593,8 +593,12 @@ class AgentEngine:
             recall_max_per_item_chars=hc.recall_max_per_item_chars,
         )
 
+        resolved_model = self.provider.resolve_model(self.model)
         tools = self.tools.get_definitions()
-        token_estimate = _estimate_prompt_tokens(self.model, messages, tools)
+        token_estimate = _estimate_prompt_tokens(resolved_model, messages, tools)
+        history_tokens = _estimate_messages_tokens(resolved_model, history)
+        system_prompt_tokens = _estimate_messages_tokens(resolved_model, messages[:1])
+        per_message_tokens = _estimate_per_message_tokens(resolved_model, messages)
         history_window = self._inspect_history_window(hc.history_days)
 
         # Deduplicate recall items at engine layer (by source+heading+source_type).
@@ -621,18 +625,42 @@ class AgentEngine:
         # Build per-message summaries (role + char count + short preview).
         preview_len = 80
         message_summaries: list[dict[str, Any]] = []
-        for msg in messages:
+        for idx, msg in enumerate(messages):
             content = msg.get("content", "")
             chars = _content_char_len(content)
+            tokens = (
+                per_message_tokens[idx]
+                if idx < len(per_message_tokens)
+                else _rough_tokens(chars)
+            )
             preview_src = content if isinstance(content, str) else str(content)
             preview = preview_src[:preview_len].replace("\n", " ")
             if len(preview_src) > preview_len:
                 preview += "…"
             message_summaries.append(
-                {"role": msg.get("role", ""), "chars": chars, "preview": preview}
+                {
+                    "role": msg.get("role", ""),
+                    "chars": chars,
+                    "tokens": tokens,
+                    "preview": preview,
+                }
             )
 
         sys_chars = _content_char_len(messages[0].get("content", "")) if messages else 0
+        latest_metrics = self._metrics_collector.get_latest(
+            channel=channel,
+            chat_id=chat_id,
+            mode=ExecutionMode.COLLAB.value,
+        )
+        if latest_metrics and not _metrics_row_has_usage(latest_metrics):
+            latest_with_usage = self._metrics_collector.get_latest(
+                channel=channel,
+                chat_id=chat_id,
+                mode=ExecutionMode.COLLAB.value,
+                require_usage=True,
+            )
+            if latest_with_usage:
+                latest_metrics = latest_with_usage
 
         return {
             "channel": channel,
@@ -643,10 +671,13 @@ class AgentEngine:
             "message_summaries": message_summaries,
             "history_message_count": len(history),
             "history_chars": sum(_content_char_len(h.get("content", "")) for h in history),
+            "history_tokens": history_tokens,
             "recall_count": len(recall_items),
             "recall_items": recall_items,
             "system_prompt_chars": sys_chars,
+            "system_prompt_tokens": system_prompt_tokens,
             "total_input_chars": sum(_content_char_len(m.get("content", "")) for m in messages),
+            "total_input_tokens": token_estimate.get("messages_only", 0),
             "history_config": {
                 "history_days": hc.history_days,
                 "max_messages": hc.max_messages,
@@ -654,7 +685,7 @@ class AgentEngine:
             },
             "history_window": history_window,
             "token_estimate": token_estimate,
-            "latest_metrics": self._metrics_collector.get_latest(channel=channel, chat_id=chat_id),
+            "latest_metrics": latest_metrics,
         }
 
     async def process_direct(
@@ -982,6 +1013,34 @@ def _content_char_len(content: Any) -> int:
     return len(str(content))
 
 
+def _estimate_messages_tokens(model: str, messages: list[dict[str, Any]]) -> int:
+    """Estimate token count for a list of messages."""
+    if not messages:
+        return 0
+
+    fallback = _rough_tokens(sum(_content_char_len(m.get("content", "")) for m in messages))
+    try:
+        import litellm
+
+        return int(litellm.token_counter(model=model, messages=messages))
+    except Exception:
+        return fallback
+
+
+def _estimate_per_message_tokens(model: str, messages: list[dict[str, Any]]) -> list[int]:
+    """Estimate token count for each message (for context inspector display)."""
+    fallback = [_rough_tokens(_content_char_len(m.get("content", ""))) for m in messages]
+    if not messages:
+        return fallback
+
+    try:
+        import litellm
+
+        return [int(litellm.token_counter(model=model, messages=[m])) for m in messages]
+    except Exception:
+        return fallback
+
+
 def _estimate_prompt_tokens(
     model: str,
     messages: list[dict[str, Any]],
@@ -996,9 +1055,9 @@ def _estimate_prompt_tokens(
     tools_chars = len(json.dumps(tools, ensure_ascii=False))
     fallback = {
         "method": "chars_div_4",
-        "messages_only": msg_chars // 4,
-        "with_tools": (msg_chars + tools_chars) // 4,
-        "tools_only": tools_chars // 4,
+        "messages_only": _rough_tokens(msg_chars),
+        "with_tools": _rough_tokens(msg_chars + tools_chars),
+        "tools_only": _rough_tokens(tools_chars),
         "error": None,
     }
 
@@ -1017,6 +1076,19 @@ def _estimate_prompt_tokens(
     except Exception as e:
         fallback["error"] = str(e)
         return fallback
+
+
+def _rough_tokens(chars: int) -> int:
+    """Rough chars→tokens estimate with ceil division."""
+    return (max(chars, 0) + 3) // 4
+
+
+def _metrics_row_has_usage(row: dict[str, Any]) -> bool:
+    """Whether metrics row includes first-response token usage."""
+    for key in ("first_prompt_tokens", "first_completion_tokens", "first_total_tokens"):
+        if isinstance(row.get(key), int):
+            return True
+    return False
 
 
 def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:

@@ -104,6 +104,7 @@ class MetricsCollector:
         channel: str | None = None,
         chat_id: str | None = None,
         mode: str | None = None,
+        require_usage: bool = False,
     ) -> dict[str, Any] | None:
         """Return the latest row optionally filtered by channel/chat/mode."""
         rows = self._load_recent(0)
@@ -114,8 +115,18 @@ class MetricsCollector:
                 continue
             if mode and row.get("mode") != mode:
                 continue
+            if require_usage and not self._has_usage(row):
+                continue
             return row
         return None
+
+    @staticmethod
+    def _has_usage(row: dict[str, Any]) -> bool:
+        """Whether a metrics row has explicit first-response token usage."""
+        for key in ("first_prompt_tokens", "first_completion_tokens", "first_total_tokens"):
+            if isinstance(row.get(key), int):
+                return True
+        return False
 
     def _load_recent(self, last_n: int) -> list[dict[str, Any]]:
         if not self._log_path.exists():

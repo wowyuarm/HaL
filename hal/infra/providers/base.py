@@ -42,6 +42,10 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
 
+    def resolve_model(self, model: str | None = None) -> str:
+        """Resolve a model name as it should be sent to provider internals."""
+        return model or self.get_default_model()
+
     @abstractmethod
     async def chat(
         self,

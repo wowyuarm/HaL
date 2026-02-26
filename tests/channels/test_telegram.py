@@ -57,10 +57,13 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
             "mode": "collab",
             "history_message_count": 1,
             "history_chars": 12,
+            "history_tokens": 8,
             "recall_count": 0,
             "recall_items": [],
             "system_prompt_chars": 5000,
+            "system_prompt_tokens": 950,
             "total_input_chars": 5200,
+            "total_input_tokens": 1000,
             "token_estimate": {
                 "method": "chars_div_4",
                 "messages_only": 1000,
@@ -78,15 +81,52 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
                 {"role": "user", "content": "hello"},
             ],
             "message_summaries": [
-                {"role": "system", "chars": 4000, "preview": "S" * 80 + "…"},
-                {"role": "user", "chars": 5, "preview": "hello"},
+                {"role": "system", "chars": 4000, "tokens": 800, "preview": "S" * 80 + "…"},
+                {"role": "user", "chars": 5, "tokens": 2, "preview": "hello"},
             ],
         },
     )
     # Compact mode: shows summaries, not full messages
     assert "<b>HaL Context Inspector</b>" in report
-    assert "system" in report
-    assert "5,200" in report  # total_input_chars with thousands separator
+    assert "system_prompt   950 tokens" in report
+    assert "total           1,000 tokens" in report
+    assert "tokens (est.)   1,200 total = 1,000 input + 200 tools [chars_div_4]" in report
+    assert "[0] system" in report
+    assert "[1] user" in report
+
+
+def test_format_context_report_last_run_missing_usage_shows_na() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    report = ch._format_context_report(
+        {
+            "channel": "telegram",
+            "chat_id": "1",
+            "model": "test-model",
+            "mode": "collab",
+            "history_message_count": 0,
+            "history_tokens": 0,
+            "recall_count": 0,
+            "recall_items": [],
+            "system_prompt_tokens": 1,
+            "total_input_tokens": 2,
+            "token_estimate": {
+                "method": "litellm.token_counter",
+                "messages_only": 2,
+                "with_tools": 4,
+                "tools_only": 2,
+                "error": None,
+            },
+            "latest_metrics": {
+                "timestamp": "2026-02-22T10:00:00",
+                "first_prompt_tokens": None,
+                "first_completion_tokens": None,
+                "tools_used": [],
+            },
+            "messages": [{"role": "system", "content": "sys"}],
+            "message_summaries": [{"role": "system", "tokens": 1, "preview": "sys"}],
+        }
+    )
+    assert "tokens: N/A → N/A (prompt → completion)" in report
 
 
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
@@ -462,12 +502,15 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
             "mode": "collab",
             "history_message_count": 2,
             "history_chars": 10,
+            "history_tokens": 3,
             "recall_count": 1,
             "recall_items": [
                 {"source": "2026-02-22.md", "heading": "chat", "score": 0.8, "source_type": "raw"}
             ],
             "system_prompt_chars": 20,
+            "system_prompt_tokens": 5,
             "total_input_chars": 30,
+            "total_input_tokens": 11,
             "token_estimate": {
                 "method": "litellm.token_counter",
                 "messages_only": 11,
@@ -494,8 +537,8 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
                 {"role": "user", "content": "hi"},
             ],
             "message_summaries": [
-                {"role": "system", "chars": 3, "preview": "sys"},
-                {"role": "user", "chars": 2, "preview": "hi"},
+                {"role": "system", "chars": 3, "tokens": 1, "preview": "sys"},
+                {"role": "user", "chars": 2, "tokens": 1, "preview": "hi"},
             ],
         }
     )
@@ -535,10 +578,13 @@ async def test_on_context_full_mode_parses_message() -> None:
             "mode": "collab",
             "history_message_count": 0,
             "history_chars": 0,
+            "history_tokens": 0,
             "recall_count": 0,
             "recall_items": [],
             "system_prompt_chars": 3,
+            "system_prompt_tokens": 1,
             "total_input_chars": 5,
+            "total_input_tokens": 1,
             "token_estimate": {
                 "method": "chars_div_4",
                 "messages_only": 1,
@@ -552,7 +598,7 @@ async def test_on_context_full_mode_parses_message() -> None:
             },
             "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [{"role": "system", "content": "sys"}],
-            "message_summaries": [{"role": "system", "chars": 3, "preview": "sys"}],
+            "message_summaries": [{"role": "system", "chars": 3, "tokens": 1, "preview": "sys"}],
         }
     )
     ch = TelegramChannel(

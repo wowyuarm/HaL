@@ -119,6 +119,10 @@ class LiteLLMProvider(LLMProvider):
 
         return model
 
+    def resolve_model(self, model: str | None = None) -> str:
+        """Resolve model name for outbound requests and token estimation."""
+        return self._resolve_model(model or self.default_model)
+
     def _apply_model_overrides(self, model: str, kwargs: dict[str, Any]) -> None:
         """Apply model-specific parameter overrides from the registry."""
         model_lower = model.lower()
@@ -150,7 +154,7 @@ class LiteLLMProvider(LLMProvider):
         Returns:
             LLMResponse with content and/or tool calls.
         """
-        model = self._resolve_model(model or self.default_model)
+        model = self.resolve_model(model)
 
         kwargs: dict[str, Any] = {
             "model": model,

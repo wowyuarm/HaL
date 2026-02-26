@@ -427,18 +427,35 @@ class TelegramChannel(BaseChannel):
     @staticmethod
     def _fmt_ctx_snapshot(data: dict[str, Any]) -> str:
         """Core size metrics."""
+        e = html_mod.escape
         te = data.get("token_estimate") or {}
-        tok_prompt = te.get("messages_only", 0)
+        tok_input = te.get("messages_only", 0)
         tok_tools = te.get("tools_only", 0)
-        return (
+        tok_total = te.get("with_tools", tok_input + tok_tools)
+        method = te.get("method", "unknown")
+        token_error = te.get("error")
+        system_tokens = data.get("system_prompt_tokens")
+        if not isinstance(system_tokens, int):
+            system_tokens = (max(int(data.get("system_prompt_chars", 0)), 0) + 3) // 4
+        history_tokens = data.get("history_tokens")
+        if not isinstance(history_tokens, int):
+            history_tokens = (max(int(data.get("history_chars", 0)), 0) + 3) // 4
+        total_tokens = data.get("total_input_tokens")
+        if not isinstance(total_tokens, int):
+            total_tokens = tok_input
+
+        lines = [
             f"📊 <b>Context Size</b>\n"
-            f"  system_prompt   {data.get('system_prompt_chars', 0):,} chars\n"
+            f"  system_prompt   {system_tokens:,} tokens\n"
             f"  history         {data.get('history_message_count', 0)} msgs"
-            f" / {data.get('history_chars', 0):,} chars\n"
+            f" / {history_tokens:,} tokens\n"
             f"  recall          {data.get('recall_count', 0)} hits\n"
-            f"  total           {data.get('total_input_chars', 0):,} chars\n"
-            f"  tokens (est.)   {tok_prompt:,} prompt + {tok_tools:,} tools"
-        )
+            f"  total           {total_tokens:,} tokens\n"
+            f"  tokens (est.)   {tok_total:,} total = {tok_input:,} input + {tok_tools:,} tools [{method}]"
+        ]
+        if token_error:
+            lines.append(f"  token_error     {e(str(token_error))[:160]}")
+        return "\n".join(lines)
 
     @staticmethod
     def _fmt_ctx_recall(recall_items: list[dict[str, Any]]) -> str:
@@ -471,8 +488,14 @@ class TelegramChannel(BaseChannel):
             for idx, msg in enumerate(messages):
                 role = msg.get("role", "?")
                 content = TelegramChannel._stringify_message_content(msg.get("content", ""))
-                chars = len(content)
-                lines.append(f"\n[{idx}] {role}  {chars:,}c")
+                tokens = 0
+                if idx < len(summaries) and isinstance(summaries[idx], dict):
+                    s_tokens = summaries[idx].get("tokens")
+                    if isinstance(s_tokens, int):
+                        tokens = s_tokens
+                if tokens <= 0:
+                    tokens = (max(len(content), 0) + 3) // 4
+                lines.append(f"\n[{idx}] {role}  {tokens:,}t")
                 if role == "system":
                     digest = hashlib.sha256(content.encode()).hexdigest()[:16]
                     lines.append(f"(sha256={digest})")
@@ -490,10 +513,12 @@ class TelegramChannel(BaseChannel):
         else:
             for idx, s in enumerate(summaries):
                 role = s.get("role", "?")
-                chars = s.get("chars", 0)
+                tokens = s.get("tokens")
+                if not isinstance(tokens, int):
+                    chars = s.get("chars", 0)
+                    tokens = ((max(int(chars), 0) + 3) // 4) if isinstance(chars, int) else 0
                 preview = e(s.get("preview", ""))
-                tag = role[:4]
-                lines.append(f'  [{idx}] {tag:<4}  {chars:>6,}c  "{preview}"')
+                lines.append(f'  [{idx}] {role:<9}  {tokens:>6,}t  "{preview}"')
         return "\n".join(lines)
 
     @staticmethod
@@ -501,12 +526,16 @@ class TelegramChannel(BaseChannel):
         """Last actual LLM usage metrics."""
         if not isinstance(latest_metrics, dict):
             return "📈 <b>Last Run</b>  none"
-        prompt = latest_metrics.get("first_prompt_tokens") or 0
-        comp = latest_metrics.get("first_completion_tokens") or 0
+
+        def _show(val: Any) -> str:
+            return f"{val:,}" if isinstance(val, int) else "N/A"
+
+        prompt = latest_metrics.get("first_prompt_tokens")
+        comp = latest_metrics.get("first_completion_tokens")
         tools_used = latest_metrics.get("tools_used") or []
         parts = [
             "📈 <b>Last Run</b>",
-            f"  tokens: {prompt:,} → {comp:,} (prompt → completion)",
+            f"  tokens: {_show(prompt)} → {_show(comp)} (prompt → completion)",
         ]
         if tools_used:
             parts.append(f"  tools: {', '.join(tools_used)}")
