@@ -66,7 +66,7 @@ class ContextBuilder:
 
     # Bootstrap files loaded into Layer 1 (personality/instructions).
     # TOOLS.md provides usage guidance (not definitions — those come from function calling).
-    BOOTSTRAP_FILES = ["SOUL.md", "USER.md", "AGENTS.md", "TOOLS.md", "IDENTITY.md"]
+    BOOTSTRAP_FILES = ["SOUL.md", "USER.md", "AGENTS.md", "TOOLS.md"]
 
     def __init__(
         self,

@@ -65,7 +65,8 @@ class TestInit:
 class TestBootstrapFiles:
     def test_loads_existing_bootstrap_files(self, workspace: Path) -> None:
         (workspace / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
-        (workspace / "IDENTITY.md").write_text("I am HaL.", encoding="utf-8")
+        (workspace / "USER.md").write_text("User profile.", encoding="utf-8")
+        (workspace / "IDENTITY.md").write_text("IDENTITY-OVERRIDE-MARKER", encoding="utf-8")
 
         with patch("hal.core.context.builder.SkillsLoader") as cls:
             cls.return_value = MagicMock(
@@ -76,7 +77,8 @@ class TestBootstrapFiles:
 
         prompt = cc.build_system_prompt()
         assert "Be helpful." in prompt
-        assert "I am HaL." in prompt
+        assert "User profile." in prompt
+        assert "IDENTITY-OVERRIDE-MARKER" not in prompt
 
     def test_ignores_missing_bootstrap_files(self, builder: ContextBuilder) -> None:
         # No bootstrap files on disk — should not raise
