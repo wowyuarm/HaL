@@ -732,9 +732,10 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.asyncio
 async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Startup notification is plain when no update marker exists."""
+    """Startup notification writes a generic injection when no update marker exists."""
     cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
-    ch = TelegramChannel(cfg, MessageBus())
+    mm = MagicMock()
+    ch = TelegramChannel(cfg, MessageBus(), memory_manager=mm)
 
     mock_bot = AsyncMock()
     ch._app = MagicMock()
@@ -760,3 +761,9 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
     )
     assert "HaL online" in sent_text
     assert "Changes since" not in sent_text
+
+    # Should still write a generic injection to daily_log
+    mm.record_conversation.assert_called_once()
+    call_kwargs = mm.record_conversation.call_args.kwargs
+    assert call_kwargs["entry_type"] == "injection"
+    assert "service started" in call_kwargs["content"]

@@ -212,10 +212,10 @@ class TelegramChannel(BaseChannel):
     async def _send_startup_notification(self) -> None:
         """Send a startup notification to the owner.
 
-        If ``~/.hal/last_update.json`` exists (written by the update script
-        before restarting the service), the notification includes the changelog
-        and an injection entry is written to daily_log so HaL's agent context
-        contains the update information on the next conversation turn.
+        Always writes a daily_log injection so HaL's agent context knows it
+        was restarted on the next conversation turn.  If
+        ``~/.hal/last_update.json`` exists (written by the update script), the
+        notification additionally includes the changelog.
         """
         owner_id = self._resolve_owner_id()
         if not owner_id or not self._app:
@@ -248,20 +248,24 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.warning(f"Failed to send startup notification: {e}")
 
-        # Write injection entry so HaL knows about the update in conversation
-        if update_info and self.memory_manager:
-            changes = update_info.get("changes", "")
+        # Always write injection so HaL knows it (re)started
+        if self.memory_manager:
+            if update_info:
+                changes = update_info.get("changes", "")
+                injection = (
+                    f"[System: HaL restarted after self-update. "
+                    f"Now running {commit_info}. Changes: {changes}]"
+                )
+            else:
+                injection = f"[System: HaL service started. Now running {commit_info}.]"
             self.memory_manager.record_conversation(
                 channel="telegram",
                 chat_id=owner_id,
                 role="user",
-                content=(
-                    f"[System: HaL restarted after self-update. "
-                    f"Now running {commit_info}. Changes: {changes}]"
-                ),
+                content=injection,
                 entry_type="injection",
             )
-            logger.info("Update context written to daily_log as injection")
+            logger.info("Startup context written to daily_log as injection")
 
     def _resolve_owner_id(self) -> str | None:
         """Extract a numeric Telegram user ID from the allow_from list.
