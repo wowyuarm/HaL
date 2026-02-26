@@ -313,7 +313,7 @@ class TestDispatch:
         assert out is not None
         assert out.channel == "telegram"
         assert out.chat_id == "c1"
-        assert "no response" in out.content.lower()
+        assert out.content == "(No response generated.)"
 
 
 class TestProcessOperator:
@@ -360,6 +360,76 @@ class TestExecuteLoop:
         assert engine.tools.execute.await_count == 3
         engine.context.add_assistant_message.assert_called_once()
         assert engine.context.add_tool_result.call_count == 3
+
+    async def test_nudge_on_empty_response_after_tool_calls(self, engine, mock_provider):
+        """When LLM returns empty content after tool work, the loop injects a nudge and retries."""
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "read", "path": "x"}),
+        ]
+
+        # Turn 1: tool call, Turn 2: empty (triggers nudge), Turn 3: real reply
+        mock_provider.chat.side_effect = [
+            LLMResponse(content=None, tool_calls=tool_calls),
+            LLMResponse(content=None, tool_calls=[]),
+            LLMResponse(content="here is the file", tool_calls=[]),
+        ]
+
+        final, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+        )
+
+        assert final == "here is the file"
+        assert meta.iterations == 3
+        assert mock_provider.chat.await_count == 3
+        # Verify nudge message was appended
+        third_call_msgs = mock_provider.chat.await_args_list[2].kwargs["messages"]
+        nudge_msgs = [
+            m
+            for m in third_call_msgs
+            if m.get("role") == "user" and "[System]" in m.get("content", "")
+        ]
+        assert len(nudge_msgs) == 1
+
+    async def test_nudge_only_fires_once(self, engine, mock_provider):
+        """Nudge is a one-shot retry — if the second attempt is also empty, loop exits."""
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "read", "path": "x"}),
+        ]
+
+        # Turn 1: tool call, Turn 2: empty (nudge), Turn 3: still empty (exits)
+        mock_provider.chat.side_effect = [
+            LLMResponse(content=None, tool_calls=tool_calls),
+            LLMResponse(content=None, tool_calls=[]),
+            LLMResponse(content=None, tool_calls=[]),
+        ]
+
+        final, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+        )
+
+        assert final is None
+        assert meta.iterations == 3
+
+    async def test_no_nudge_without_prior_tool_calls(self, engine, mock_provider):
+        """Empty response on the very first turn (no tool work) exits immediately."""
+        mock_provider.chat.side_effect = [
+            LLMResponse(content=None, tool_calls=[]),
+        ]
+
+        final, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+        )
+
+        assert final is None
+        assert meta.iterations == 1
+        assert mock_provider.chat.await_count == 1
 
 
 class TestMidLoopInjection:

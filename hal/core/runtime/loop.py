@@ -12,6 +12,14 @@ from loguru import logger
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.infra.providers.base import LLMProvider
 
+# Injected when the LLM returns an empty response (no tool calls, no text).
+# Uses "user" role so it lands after the cached prefix and triggers a retry
+# without being recorded in memory/daily-log (the loop handles it transiently).
+_EMPTY_RESPONSE_NUDGE = (
+    "[System] You completed tool calls but produced no visible reply. "
+    "Respond to the user now — briefly confirm what you did or deliver the result."
+)
+
 
 @dataclass
 class LoopMetadata:
@@ -173,6 +181,7 @@ async def run_tool_loop(
     h = hooks or _DEFAULT_HOOKS
     iteration = 0
     final_content: str | None = None
+    nudged = False
     meta = LoopMetadata()
     start_idx = len(messages)
 
@@ -308,6 +317,12 @@ async def run_tool_loop(
             # No tool calls — check if caller wants to continue (e.g. subagent injection)
             should_continue = await h.on_no_tool_calls(messages, response, meta)
             if should_continue:
+                continue
+
+            # Guard: if content is empty after tool work, nudge the LLM once.
+            if not response.content and meta.total_tool_calls > 0 and not nudged:
+                nudged = True
+                messages.append({"role": "user", "content": _EMPTY_RESPONSE_NUDGE})
                 continue
 
             final_content = response.content

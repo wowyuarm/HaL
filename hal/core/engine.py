@@ -296,8 +296,9 @@ class AgentEngine:
         pre_metrics.spawn_total_tokens = _extract_spawn_total_tokens(messages)
         self._record_metrics(pre_metrics)
 
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
+        # Defensive fallback — should rarely trigger after loop-level nudge.
+        if not final_content:
+            final_content = "(No response generated.)"
 
         # Record assistant response
         self.memory.record_conversation(
@@ -629,9 +630,7 @@ class AgentEngine:
             content = msg.get("content", "")
             chars = _content_char_len(content)
             tokens = (
-                per_message_tokens[idx]
-                if idx < len(per_message_tokens)
-                else _rough_tokens(chars)
+                per_message_tokens[idx] if idx < len(per_message_tokens) else _rough_tokens(chars)
             )
             preview_src = content if isinstance(content, str) else str(content)
             preview = preview_src[:preview_len].replace("\n", " ")
