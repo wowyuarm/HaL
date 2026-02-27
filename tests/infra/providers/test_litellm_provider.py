@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -192,3 +193,57 @@ async def test_chat_exception_strips_raw_response_payload(monkeypatch: pytest.Mo
     assert r.content is not None
     assert "Original Response:" not in r.content
     assert "event: message_start" not in r.content
+
+
+@pytest.mark.asyncio
+async def test_aggregate_stream_separates_tool_calls_when_index_is_reused() -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="openai/gpt-5.3-codex")
+
+    def _tc(*, index: int, id_: str | None, name: str | None, arguments: str):
+        return SimpleNamespace(
+            index=index,
+            id=id_,
+            function=SimpleNamespace(name=name, arguments=arguments),
+        )
+
+    def _chunk(*, tool_calls: list[object], finish_reason: str | None = None):
+        delta = SimpleNamespace(content=None, reasoning_content=None, tool_calls=tool_calls)
+        choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+        return SimpleNamespace(choices=[choice], usage=None)
+
+    async def _stream():
+        # LiteLLM /responses path can emit every tool call with index=0.
+        # Verify we still keep calls separate based on call ID + ordering.
+        yield _chunk(tool_calls=[_tc(index=0, id_="call_fs", name="fs", arguments="")])
+        yield _chunk(
+            tool_calls=[
+                _tc(
+                    index=0,
+                    id_=None,
+                    name=None,
+                    arguments='{"action":"list","path":"."}',
+                )
+            ]
+        )
+        yield _chunk(tool_calls=[_tc(index=0, id_="call_web", name="web_search", arguments="")])
+        yield _chunk(
+            tool_calls=[
+                _tc(
+                    index=0,
+                    id_=None,
+                    name=None,
+                    arguments='{"query":"abc"}',
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+
+    result = await p._aggregate_stream(_stream())
+
+    assert len(result.tool_calls) == 2
+    assert result.tool_calls[0].id == "call_fs"
+    assert result.tool_calls[0].name == "fs"
+    assert result.tool_calls[0].arguments == {"action": "list", "path": "."}
+    assert result.tool_calls[1].id == "call_web"
+    assert result.tool_calls[1].name == "web_search"
+    assert result.tool_calls[1].arguments == {"query": "abc"}

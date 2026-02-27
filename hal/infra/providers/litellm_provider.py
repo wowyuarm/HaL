@@ -215,7 +215,12 @@ class LiteLLMProvider(LLMProvider):
     async def _aggregate_stream(self, stream: Any) -> LLMResponse:
         """Aggregate a streaming response into a single LLMResponse."""
         content_parts: list[str] = []
-        tool_calls_map: dict[int, dict[str, Any]] = {}  # index → {id, name, arguments}
+        # Prefer explicit tool-call IDs. Some LiteLLM /responses streams reuse
+        # index=0 for every tool call, which can incorrectly merge calls.
+        tool_calls_map: dict[str, dict[str, Any]] = {}
+        tool_call_order: list[str] = []
+        last_key_by_index: dict[int, str] = {}
+        synthetic_key_counter = 0
         finish_reason = "stop"
         usage: dict[str, int] = {}
         reasoning_parts: list[str] = []
@@ -238,20 +243,39 @@ class LiteLLMProvider(LLMProvider):
             # Tool calls (streamed incrementally)
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tool_calls_map:
-                        tool_calls_map[idx] = {
-                            "id": tc_delta.id or "",
-                            "name": getattr(tc_delta.function, "name", "") or "",
+                    idx = getattr(tc_delta, "index", 0)
+                    tc_id = getattr(tc_delta, "id", None)
+                    tc_fn = getattr(tc_delta, "function", None)
+
+                    if tc_id:
+                        key = f"id:{tc_id}"
+                        last_key_by_index[idx] = key
+                    elif idx in last_key_by_index:
+                        key = last_key_by_index[idx]
+                    else:
+                        key = f"idx:{idx}:{synthetic_key_counter}"
+                        synthetic_key_counter += 1
+                        last_key_by_index[idx] = key
+
+                    if key not in tool_calls_map:
+                        tool_calls_map[key] = {
+                            "id": tc_id or "",
+                            "name": getattr(tc_fn, "name", "") or "",
                             "arguments": "",
                         }
-                    entry = tool_calls_map[idx]
-                    if tc_delta.id:
-                        entry["id"] = tc_delta.id
-                    if hasattr(tc_delta.function, "name") and tc_delta.function.name:
-                        entry["name"] = tc_delta.function.name
-                    if hasattr(tc_delta.function, "arguments") and tc_delta.function.arguments:
-                        entry["arguments"] += tc_delta.function.arguments
+                        tool_call_order.append(key)
+
+                    entry = tool_calls_map[key]
+                    if tc_id:
+                        entry["id"] = tc_id
+
+                    fn_name = getattr(tc_fn, "name", None)
+                    if fn_name:
+                        entry["name"] = fn_name
+
+                    fn_args = getattr(tc_fn, "arguments", None)
+                    if fn_args:
+                        entry["arguments"] += fn_args
 
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
@@ -264,16 +288,20 @@ class LiteLLMProvider(LLMProvider):
                     "total_tokens": chunk.usage.total_tokens or 0,
                 }
 
-        # Build tool calls list
+        # Build tool calls list preserving first-seen order
         tool_calls: list[ToolCallRequest] = []
-        for idx in sorted(tool_calls_map):
-            entry = tool_calls_map[idx]
+        for pos, key in enumerate(tool_call_order):
+            entry = tool_calls_map[key]
             args_str = entry["arguments"]
             try:
                 args = json.loads(args_str) if args_str else {}
             except json.JSONDecodeError:
                 args = {"raw": args_str}
-            tool_calls.append(ToolCallRequest(id=entry["id"], name=entry["name"], arguments=args))
+
+            tool_call_id = entry["id"] or f"call_{pos}"
+            tool_calls.append(
+                ToolCallRequest(id=tool_call_id, name=entry["name"], arguments=args)
+            )
 
         return LLMResponse(
             content="".join(content_parts) or None,
