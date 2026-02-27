@@ -880,13 +880,25 @@ class TestSubagentInjectionHelpers:
             "Result line\n\n"
             "[Subagent Record ID] abc123\n\n"
             "[Subagent Artifact] /tmp/a.md\n\n"
-            "[Subagent Total Tokens] 123"
+            "[Subagent Total Tokens] 123\n\n"
+            "[Subagent Status] partial\n\n"
+            "[Subagent Tools Used] [\"fs\", \"web_search\"]\n\n"
+            "[Subagent Tool Counts] {\"fs\": 2}\n\n"
+            "[Subagent Has Side Effects] true\n\n"
+            "[Subagent Files Modified] [\"/tmp/a.md\"]\n\n"
+            "[Subagent Commands Run] [\"ls -la\"]"
         )
-        content, artifact_path, total_tokens, record_id = _split_subagent_tool_result(payload)
-        assert content == "Result line"
-        assert artifact_path == "/tmp/a.md"
-        assert total_tokens == 123
-        assert record_id == "abc123"
+        parsed = _split_subagent_tool_result(payload)
+        assert parsed.content == "Result line"
+        assert parsed.artifact_path == "/tmp/a.md"
+        assert parsed.total_tokens == 123
+        assert parsed.record_id == "abc123"
+        assert parsed.status == "partial"
+        assert parsed.tools_used == ["fs", "web_search"]
+        assert parsed.tool_call_counts == {"fs": 2}
+        assert parsed.has_side_effects is True
+        assert parsed.files_modified == ["/tmp/a.md"]
+        assert parsed.commands_run == ["ls -la"]
 
     def test_build_subagent_injection_truncates_success(self):
         text = _build_subagent_injection(
@@ -902,6 +914,8 @@ class TestSubagentInjectionHelpers:
         assert "[Subagent Record ID] abc123" in text
         assert "[Subagent Artifact] /tmp/a.md" in text
         assert "[Subagent Total Tokens] 88" in text
+        assert "[Subagent Status] completed" in text
+        assert "[Subagent Has Side Effects] false" in text
 
     def test_build_subagent_injection_keeps_error_untruncated(self):
         err = "Error: failed step\ntrace"
@@ -916,6 +930,7 @@ class TestSubagentInjectionHelpers:
         )
         assert err in text
         assert "[Full result saved to subagent artifact file]" not in text
+        assert "[Subagent Status] failed" in text
 
     def test_build_subagent_injection_no_truncate_when_limit_disabled(self):
         text = _build_subagent_injection(
@@ -930,3 +945,28 @@ class TestSubagentInjectionHelpers:
         )
         assert "[Full result saved to subagent artifact file]" not in text
         assert " [...]" not in text
+
+    def test_build_subagent_injection_includes_side_effect_markers(self):
+        text = _build_subagent_injection(
+            label="task",
+            content="done",
+            status="completed",
+            background=False,
+            record_id="rid",
+            artifact_path=None,
+            total_tokens=12,
+            tools_used=["fs"],
+            tool_call_counts={"fs": 2},
+            has_side_effects=True,
+            files_modified=["/tmp/a.md"],
+            commands_run=["echo hi"],
+            tool_errors=["fs: Error: bad path"],
+            missing_artifacts=["/tmp/missing.md"],
+        )
+        assert "[Subagent Tools Used] [\"fs\"]" in text
+        assert "[Subagent Tool Counts] {\"fs\": 2}" in text
+        assert "[Subagent Has Side Effects] true" in text
+        assert "[Subagent Files Modified] [\"/tmp/a.md\"]" in text
+        assert "[Subagent Commands Run] [\"echo hi\"]" in text
+        assert "[Subagent Tool Errors] [\"fs: Error: bad path\"]" in text
+        assert "[Subagent Missing Artifacts] [\"/tmp/missing.md\"]" in text

@@ -66,6 +66,11 @@ async def test_run_with_details_appends_jsonl_log(tmp_path: Path) -> None:
     assert records[0]["result"] == "found 3 files"
     assert records[0]["status"] == "completed"
     assert records[0]["artifacts"] == []
+    assert records[0]["missing_artifacts"] == []
+    assert records[0]["has_side_effects"] is False
+    assert records[0]["tool_call_counts"] == {}
+    assert records[0]["files_modified"] == []
+    assert records[0]["commands_run"] == []
     assert sorted(p.name for p in details.log_path.parent.iterdir()) == ["subagent-log.jsonl"]
 
 
@@ -118,6 +123,72 @@ async def test_run_with_details_extracts_report_artifact_paths(tmp_path: Path) -
     assert details.artifact_path == report
     record = json.loads(details.log_path.read_text(encoding="utf-8").strip())
     assert record["artifacts"] == [str(report)]
+
+
+@pytest.mark.asyncio
+async def test_run_with_details_marks_missing_artifact_as_partial(tmp_path: Path) -> None:
+    missing = tmp_path / "artifacts" / "subagent" / "missing-report.md"
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(
+            content=f"Done. Report path: `{missing}`",
+            tool_calls=[],
+            finish_reason="stop",
+        ),
+    )
+
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+    details = await mgr.run_with_details(task="report task", label="R")
+
+    assert details.status == "partial"
+    assert details.artifacts == []
+    assert details.missing_artifacts == [missing]
+
+    assert details.log_path is not None
+    record = json.loads(details.log_path.read_text(encoding="utf-8").strip())
+    assert record["status"] == "partial"
+    assert record["missing_artifacts"] == [str(missing)]
+
+
+@pytest.mark.asyncio
+async def test_run_with_details_tracks_side_effects_for_fs_write(tmp_path: Path) -> None:
+    out_file = tmp_path / "out.md"
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        side_effect=[
+            LLMResponse(
+                content="writing report",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="1",
+                        name="fs",
+                        arguments={
+                            "action": "write",
+                            "path": str(out_file),
+                            "content": "# Report\\n",
+                        },
+                    )
+                ],
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(content=f"Done. `{out_file}`", tool_calls=[], finish_reason="stop"),
+        ]
+    )
+
+    mgr = SubagentManager(provider=provider, workspace=tmp_path, restrict_to_workspace=True)
+    details = await mgr.run_with_details(task="write report", label="R")
+
+    assert details.status == "completed"
+    assert details.has_side_effects is True
+    assert details.tools_used == ["fs"]
+    assert details.tool_call_counts == {"fs": 1}
+    assert details.files_modified == [str(out_file)]
+    assert details.commands_run == []
+    assert out_file.exists()
 
 
 @pytest.mark.asyncio
@@ -300,6 +371,17 @@ def test_build_system_prompt_includes_tool_guide(tmp_path) -> None:
     assert "exec(command=" in prompt
     assert "web_search(query=" in prompt
     assert "web_fetch(url=" in prompt
+
+
+def test_build_system_prompt_includes_reliability_constraints(tmp_path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test"
+    mgr = SubagentManager(provider=provider, workspace=tmp_path)
+
+    prompt = mgr._build_system_prompt()
+    assert "Do not use exec(cat/sed/python read_text)" in prompt
+    assert "Before claiming a file is written" in prompt
+    assert "Final Output Contract" in prompt
 
 
 def test_build_system_prompt_includes_time(tmp_path) -> None:

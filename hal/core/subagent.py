@@ -24,6 +24,10 @@ if TYPE_CHECKING:
     from hal.infra.config.schema import ExecToolConfig
 
 _ARTIFACT_PATH_RE = re.compile(r"(/[^`'\"<>\s)]+\.md)\b")
+_PARTIAL_INDICATOR_RE = re.compile(
+    r"\b(could not|couldn't|unable|not able|hard blocker|incomplete|remaining|blocked)\b",
+    re.IGNORECASE,
+)
 
 
 class SubagentManager:
@@ -145,6 +149,7 @@ class SubagentManager:
                             content=f"Error: {e}",
                             artifact_path=None,
                             total_tokens=0,
+                            status="failed",
                         ),
                     )
                 )
@@ -187,7 +192,14 @@ class SubagentManager:
         if final_content is None:
             final_content = "Task completed but no summary was generated."
 
-        artifacts = self._extract_artifact_paths(final_content)
+        artifacts, missing_artifacts = self._extract_artifact_paths(final_content)
+        tool_errors = self._extract_tool_errors(meta.loop_messages)
+        status = self._classify_status(
+            final_content=final_content,
+            loop_exhausted=hooks.loop_exhausted,
+            missing_artifacts=missing_artifacts,
+            tool_errors=tool_errors,
+        )
         log_path = self._append_execution_log(
             task_id=task_id,
             label=label,
@@ -195,16 +207,26 @@ class SubagentManager:
             result=final_content,
             meta=meta,
             artifacts=artifacts,
-            status="completed",
+            status=status,
+            missing_artifacts=missing_artifacts,
+            tool_errors=tool_errors,
         )
         artifact_path = artifacts[0] if artifacts else log_path
-        logger.info(f"Subagent [{task_id}] completed (log: {log_path})")
+        logger.info(f"Subagent [{task_id}] {status} (log: {log_path})")
         return SubagentExecutionResult(
             content=final_content,
             artifact_path=artifact_path,
             total_tokens=meta.total_usage.get("total_tokens", 0),
             record_id=task_id,
             artifacts=artifacts,
+            status=status,
+            has_side_effects=meta.has_side_effects,
+            tools_used=list(meta.tools_used),
+            tool_call_counts=dict(meta.tool_call_counts),
+            files_modified=list(meta.files_modified),
+            commands_run=list(meta.commands_run),
+            tool_errors=tool_errors,
+            missing_artifacts=missing_artifacts,
             log_path=log_path,
         )
 
@@ -258,7 +280,23 @@ Your result will be reported back — you do not interact with the user directly
 ## Rules
 - Complete only the assigned task. Do not take on side tasks.
 - Be thorough in execution, concise in your final report.
-- If the task is ambiguous, make reasonable assumptions and state them.""")
+- If the task is ambiguous, make reasonable assumptions and state them.
+- For file read/write/edit/list tasks, use fs(action=...) as the primary tool.
+- Do not use exec(cat/sed/python read_text) as the primary way to read file contents.
+- If exec output shows \"truncated\", switch to fs(action=\"read\", offset=..., limit=...) chunked reads.
+- If the same tool error repeats twice, change strategy immediately (different tool or corrected params).
+- If the task requires writing deliverables, write early (not only at the final step).
+- Before claiming a file is written, verify with fs(action=\"list\") and fs(action=\"read\").
+- Never claim \"done\" or \"written\" unless verification succeeded.
+
+## Final Output Contract
+Your final response must include these sections:
+1. Status: completed | partial | failed
+2. Completed: what you finished
+3. Incomplete: what remains unfinished
+4. Deliverables Verified: file paths + exists=true/false
+5. Side Effects: files modified, commands run, web actions
+6. Key Findings: important outputs/data""")
 
         # Tool usage guide (only the tools subagent actually has)
         parts.append("""\
@@ -363,6 +401,8 @@ Current time: {now}""")
         meta: LoopMetadata,
         artifacts: list[Path],
         status: str,
+        missing_artifacts: list[Path],
+        tool_errors: list[str],
     ) -> Path | None:
         """Append full subagent execution details to artifacts/subagent/subagent-log.jsonl."""
         try:
@@ -377,9 +417,15 @@ Current time: {now}""")
                 "task": task,
                 "iterations": meta.iterations,
                 "tools_used": meta.tools_used,
+                "tool_call_counts": meta.tool_call_counts,
+                "has_side_effects": meta.has_side_effects,
+                "files_modified": meta.files_modified,
+                "commands_run": meta.commands_run,
+                "tool_errors": tool_errors,
                 "tokens": meta.total_usage.get("total_tokens", 0),
                 "result": result,
                 "artifacts": [str(path) for path in artifacts],
+                "missing_artifacts": [str(path) for path in missing_artifacts],
                 "status": status,
             }
             with log_path.open("a", encoding="utf-8") as f:
@@ -389,9 +435,10 @@ Current time: {now}""")
             logger.warning(f"Failed to append subagent execution log: {e}")
             return None
 
-    def _extract_artifact_paths(self, result: str) -> list[Path]:
-        """Extract absolute markdown artifact paths referenced in subagent output."""
+    def _extract_artifact_paths(self, result: str) -> tuple[list[Path], list[Path]]:
+        """Extract and validate absolute markdown artifact paths referenced in output."""
         artifacts: list[Path] = []
+        missing: list[Path] = []
         seen: set[str] = set()
         for raw_path in _ARTIFACT_PATH_RE.findall(result):
             path = Path(raw_path)
@@ -401,8 +448,54 @@ Current time: {now}""")
             if normalized in seen:
                 continue
             seen.add(normalized)
-            artifacts.append(path)
-        return artifacts
+            if path.exists() and path.is_file():
+                artifacts.append(path)
+            else:
+                missing.append(path)
+        return artifacts, missing
+
+    def _extract_tool_errors(self, loop_messages: list[dict[str, Any]]) -> list[str]:
+        """Collect unique tool errors from loop messages for observability."""
+        errors: list[str] = []
+        seen: set[str] = set()
+        for msg in loop_messages:
+            if not isinstance(msg, dict) or msg.get("role") != "tool":
+                continue
+            content = str(msg.get("content", "")).strip()
+            if not content.startswith("Error"):
+                continue
+            name = str(msg.get("name") or "tool")
+            summary = content.splitlines()[0][:240]
+            item = f"{name}: {summary}"
+            if item in seen:
+                continue
+            seen.add(item)
+            errors.append(item)
+        return errors
+
+    def _classify_status(
+        self,
+        *,
+        final_content: str,
+        loop_exhausted: bool,
+        missing_artifacts: list[Path],
+        tool_errors: list[str],
+    ) -> str:
+        """Classify execution status for downstream routing and logging."""
+        text = final_content.strip()
+        lowered = text.lower()
+
+        if lowered.startswith("error calling llm:") or lowered.startswith("error:"):
+            return "failed"
+        if loop_exhausted:
+            return "exhausted"
+        if missing_artifacts:
+            return "partial"
+        if _PARTIAL_INDICATOR_RE.search(text):
+            return "partial"
+        if tool_errors and _PARTIAL_INDICATOR_RE.search("\n".join(tool_errors)):
+            return "partial"
+        return "completed"
 
 
 @dataclass
@@ -414,6 +507,14 @@ class SubagentExecutionResult:
     total_tokens: int = 0
     record_id: str = ""
     artifacts: list[Path] = field(default_factory=list)
+    status: str = "completed"
+    has_side_effects: bool = False
+    tools_used: list[str] = field(default_factory=list)
+    tool_call_counts: dict[str, int] = field(default_factory=dict)
+    files_modified: list[str] = field(default_factory=list)
+    commands_run: list[str] = field(default_factory=list)
+    tool_errors: list[str] = field(default_factory=list)
+    missing_artifacts: list[Path] = field(default_factory=list)
     log_path: Path | None = None
 
 
@@ -426,6 +527,10 @@ class _SubagentLoopHooks:
     def __init__(self, manager: SubagentManager, task_id: str):
         self._manager = manager
         self._task_id = task_id
+        self.loop_exhausted = False
+        self._last_error_signature = ""
+        self._repeat_error_count = 0
+        self.error_recovery_injections = 0
 
     def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
         self._manager._current_iteration = meta.iterations
@@ -440,6 +545,42 @@ class _SubagentLoopHooks:
         meta: LoopMetadata,
     ) -> None:
         logger.debug(f"Subagent [{self._task_id}] executed: {tool_name}")
+
+        content = str(result).strip()
+        if not content.startswith("Error"):
+            self._last_error_signature = ""
+            self._repeat_error_count = 0
+            return
+
+        summary = self._summarize_tool_error(content)
+        signature = f"{tool_name}:{summary}"
+        if signature == self._last_error_signature:
+            self._repeat_error_count += 1
+        else:
+            self._last_error_signature = signature
+            self._repeat_error_count = 1
+
+        if self._repeat_error_count < 2:
+            return
+
+        self._last_error_signature = ""
+        self._repeat_error_count = 0
+        self.error_recovery_injections += 1
+        logger.warning(
+            f"Subagent [{self._task_id}] repeated tool error ({signature}); injecting strategy shift"
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "You repeated the same tool error twice. Change strategy now. "
+                    "Do NOT call the same tool with the same argument shape again. "
+                    "For file tasks, use fs(action=read/write/edit/list) instead of exec(cat/sed). "
+                    "If command output was truncated, use fs(read, offset, limit) to read in chunks. "
+                    "Briefly explain your new plan, then continue with corrected tool calls."
+                ),
+            }
+        )
 
     async def on_no_tool_calls(
         self,
@@ -463,17 +604,21 @@ class _SubagentLoopHooks:
         meta: LoopMetadata,
     ) -> str | None:
         """Force a final summary when max iterations reached."""
+        self.loop_exhausted = True
         logger.warning(f"Subagent [{self._task_id}] hit max iterations, forcing summary")
         messages.append(
             {
                 "role": "user",
                 "content": (
                     "You have reached the maximum number of tool iterations. "
-                    "Do NOT call any more tools. Provide a structured final "
-                    "report:\n"
-                    "1. **Completed**: what you accomplished\n"
-                    "2. **Incomplete**: what remains unfinished (if any)\n"
-                    "3. **Key findings**: important results or data discovered"
+                    "Do NOT call any more tools. Provide a structured final report with exactly "
+                    "these sections:\n"
+                    "1. Status: completed | partial | failed\n"
+                    "2. Completed: what you accomplished\n"
+                    "3. Incomplete: what remains unfinished (if any)\n"
+                    "4. Deliverables Verified: for each file path, include exists=true/false\n"
+                    "5. Side Effects: files modified, commands run, network actions\n"
+                    "6. Key Findings: important results or data discovered"
                 ),
             }
         )
@@ -481,3 +626,9 @@ class _SubagentLoopHooks:
             messages=messages, tools=[], model=self._manager.model
         )
         return response.content
+
+    @staticmethod
+    def _summarize_tool_error(result: str) -> str:
+        """Normalize tool error text for duplicate-detection."""
+        first_line = result.splitlines()[0].strip()
+        return first_line[:200]

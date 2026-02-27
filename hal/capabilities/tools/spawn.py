@@ -1,6 +1,7 @@
 """Spawn tool for delegating tasks to subagents."""
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -143,10 +144,40 @@ class SpawnTool(Tool):
         lines = [details.content]
         if details.record_id:
             lines.append(f"[Subagent Record ID] {details.record_id}")
+        if details.status:
+            lines.append(f"[Subagent Status] {details.status}")
         if details.artifact_path:
             lines.append(f"[Subagent Artifact] {details.artifact_path}")
         if details.log_path and details.log_path != details.artifact_path:
             lines.append(f"[Subagent Log] {details.log_path}")
         if details.total_tokens:
             lines.append(f"[Subagent Total Tokens] {details.total_tokens}")
+        if details.tools_used:
+            lines.append(
+                f"[Subagent Tools Used] {json.dumps(details.tools_used, ensure_ascii=False)}"
+            )
+        if details.tool_call_counts:
+            lines.append(
+                f"[Subagent Tool Counts] {json.dumps(details.tool_call_counts, ensure_ascii=False)}"
+            )
+        lines.append(
+            f"[Subagent Has Side Effects] {'true' if details.has_side_effects else 'false'}"
+        )
+        if details.files_modified:
+            lines.append(
+                f"[Subagent Files Modified] {json.dumps(details.files_modified, ensure_ascii=False)}"
+            )
+        if details.commands_run:
+            lines.append(
+                f"[Subagent Commands Run] {json.dumps(details.commands_run, ensure_ascii=False)}"
+            )
+        if details.tool_errors:
+            lines.append(
+                f"[Subagent Tool Errors] {json.dumps(details.tool_errors, ensure_ascii=False)}"
+            )
+        if details.missing_artifacts:
+            lines.append(
+                "[Subagent Missing Artifacts] "
+                + json.dumps([str(p) for p in details.missing_artifacts], ensure_ascii=False)
+            )
         return "\n\n".join(lines)
