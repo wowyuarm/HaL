@@ -23,9 +23,59 @@ if TYPE_CHECKING:
     from hal.core.memory.manager import MemoryManager
 
 
-def _markdown_to_telegram_html(text: str) -> str:
+def _markdown_table_to_pre(table_text: str) -> str:
+    """Convert a markdown table to a fixed-width <pre> block for Telegram.
+
+    Accepts a raw markdown table string (with | delimiters and optional
+    separator row) and returns an HTML-escaped <pre> block with aligned
+    columns.
     """
-    Convert markdown to Telegram-safe HTML.
+    lines = [l.strip() for l in table_text.strip().splitlines() if l.strip()]
+    if not lines:
+        return ""
+
+    # Parse rows into cells, skipping separator lines (e.g. |---|---|)
+    rows: list[list[str]] = []
+    for line in lines:
+        stripped = line.strip("|").strip()
+        if re.match(r"^[\s|:\-]+$", stripped):
+            continue  # separator row
+        cells = [c.strip() for c in stripped.split("|")]
+        rows.append(cells)
+
+    if not rows:
+        return ""
+
+    # Calculate column widths
+    n_cols = max(len(r) for r in rows)
+    col_widths = [0] * n_cols
+    for row in rows:
+        for i, cell in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(cell))
+
+    # Format rows
+    formatted: list[str] = []
+    for idx, row in enumerate(rows):
+        padded = []
+        for i in range(n_cols):
+            cell = row[i] if i < len(row) else ""
+            padded.append(cell.ljust(col_widths[i]))
+        formatted.append("  ".join(padded))
+        # Add separator after header row
+        if idx == 0 and len(rows) > 1:
+            formatted.append("  ".join("─" * w for w in col_widths))
+
+    escaped = "\n".join(formatted)
+    escaped = escaped.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return f"<pre>{escaped}</pre>"
+
+
+def _markdown_to_telegram_html(text: str) -> str:
+    """Convert markdown to Telegram-safe HTML.
+
+    Supports: code blocks, inline code, tables, headers, blockquotes,
+    bold, italic, strikethrough, links, bullet/ordered lists, and
+    horizontal rules.
     """
     if not text:
         return ""
@@ -48,42 +98,75 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r"`([^`]+)`", save_inline_code, text)
 
-    # 3. Headers # Title -> just the title text
-    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
+    # 3. Extract and protect markdown tables -> <pre> blocks
+    table_blocks: list[str] = []
 
-    # 4. Blockquotes > text -> just the text (before HTML escaping)
-    text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
+    def save_table(m: re.Match) -> str:
+        pre = _markdown_table_to_pre(m.group(0))
+        table_blocks.append(pre)
+        return f"\x00TB{len(table_blocks) - 1}\x00"
 
-    # 5. Escape HTML special characters
+    # Match consecutive lines starting with |
+    text = re.sub(
+        r"(?:^[ \t]*\|.+\|[ \t]*$\n?){2,}",
+        save_table,
+        text,
+        flags=re.MULTILINE,
+    )
+
+    # 4. Horizontal rules --- or *** or ___ -> unicode line (before HTML escape)
+    text = re.sub(r"^[ \t]*[-*_]{3,}[ \t]*$", "━━━━━━━━━━━━━━━━━━━━", text, flags=re.MULTILINE)
+
+    # 5. Escape HTML special characters FIRST (before generating any HTML tags)
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # 6. Links [text](url) - must be before bold/italic to handle nested cases
+    # 6. Headers # Title -> <b>Title</b> (after escape, so title text is safe)
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
+
+    # 7. Blockquotes &gt; text -> <blockquote>text</blockquote>
+    # After HTML escape, > became &gt; so match that
+    def collapse_blockquotes(m: re.Match) -> str:
+        lines = m.group(0).splitlines()
+        inner = "\n".join(re.sub(r"^&gt;\s?", "", l) for l in lines)
+        return f"<blockquote>{inner}</blockquote>\n"
+
+    text = re.sub(r"(?:^&gt;.*$\n?)+", collapse_blockquotes, text, flags=re.MULTILINE)
+
+    # 8. Links [text](url) - must be before bold/italic to handle nested cases
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
 
-    # 7. Bold **text** or __text__
+    # 9. Bold **text** or __text__
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
 
-    # 8. Italic _text_ (avoid matching inside words like some_var_name)
+    # 10. Italic _text_ (avoid matching inside words like some_var_name)
     text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
 
-    # 9. Strikethrough ~~text~~
+    # 11. Strikethrough ~~text~~
     text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
 
-    # 10. Bullet lists - item -> • item
-    text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
+    # 12. Bullet lists - item or * item -> • item (preserve leading indentation)
+    text = re.sub(r"^(\s*)[-*]\s+", r"\1• ", text, flags=re.MULTILINE)
 
-    # 11. Restore inline code with HTML tags
+    # 12.5 Single-asterisk italic *text* (after bold and bullet processing)
+    text = re.sub(r"(?<![a-zA-Z0-9\*])\*([^*]+)\*(?![a-zA-Z0-9\*])", r"<i>\1</i>", text)
+
+    # 13. Ordered lists  1. item -> 1. item (preserve numbering, just clean indent)
+    text = re.sub(r"^(\d+)\.\s+", r"\1. ", text, flags=re.MULTILINE)
+
+    # 14. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
-        # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
 
-    # 12. Restore code blocks with HTML tags
+    # 15. Restore code blocks with HTML tags
     for i, code in enumerate(code_blocks):
-        # Escape HTML in code content
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
+
+    # 16. Restore table blocks (already contain valid HTML)
+    for i, tbl in enumerate(table_blocks):
+        text = text.replace(f"\x00TB{i}\x00", tbl)
 
     return text
 
