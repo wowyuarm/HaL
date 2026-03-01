@@ -7,7 +7,6 @@ import json
 import platform
 import re
 import uuid
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.core.context.builder import _MODE_DIRECTIVES, ExecutionMode
+from hal.core.ports import SubagentExecutionResult
 from hal.core.runtime.loop import LoopMetadata, run_tool_loop
 from hal.core.runtime.tool_factory import create_tools
 from hal.infra.providers.base import LLMProvider
@@ -496,26 +496,6 @@ Current time: {now}""")
         if tool_errors and _PARTIAL_INDICATOR_RE.search("\n".join(tool_errors)):
             return "partial"
         return "completed"
-
-
-@dataclass
-class SubagentExecutionResult:
-    """Structured subagent execution result."""
-
-    content: str
-    artifact_path: Path | None
-    total_tokens: int = 0
-    record_id: str = ""
-    artifacts: list[Path] = field(default_factory=list)
-    status: str = "completed"
-    has_side_effects: bool = False
-    tools_used: list[str] = field(default_factory=list)
-    tool_call_counts: dict[str, int] = field(default_factory=dict)
-    files_modified: list[str] = field(default_factory=list)
-    commands_run: list[str] = field(default_factory=list)
-    tool_errors: list[str] = field(default_factory=list)
-    missing_artifacts: list[Path] = field(default_factory=list)
-    log_path: Path | None = None
 
 
 class _SubagentLoopHooks:

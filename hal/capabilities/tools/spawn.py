@@ -3,15 +3,13 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
 from hal.bus.events import OutboundMessage
 from hal.capabilities.tools.base import Tool
-
-if TYPE_CHECKING:
-    from hal.core.subagent import SubagentExecutionResult, SubagentManager
+from hal.core.ports import SubagentExecutionResult, SubagentPort
 
 # Interval (seconds) between progress messages for sync spawn.
 _PROGRESS_INTERVAL = 30
@@ -29,7 +27,7 @@ class SpawnTool(Tool):
 
     def __init__(
         self,
-        manager: "SubagentManager",
+        manager: SubagentPort,
         send_callback: Callable[[OutboundMessage], Awaitable[None]] | None = None,
     ):
         self._manager = manager
@@ -139,7 +137,7 @@ class SpawnTool(Tool):
             raise
 
     @staticmethod
-    def _format_result(details: "SubagentExecutionResult") -> str:
+    def _format_result(details: SubagentExecutionResult) -> str:
         """Encode subagent detail metadata into the tool result payload."""
         lines = [details.content]
         if details.record_id:

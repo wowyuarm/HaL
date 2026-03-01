@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hal.core.subagent import SubagentExecutionResult, SubagentManager
+from hal.core.ports import SubagentExecutionResult
+from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 # ------------------------------------------------------------------

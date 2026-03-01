@@ -9,12 +9,12 @@ from hal.capabilities.tools.exec import ExecTool
 from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
+from hal.core.ports import SubagentPort
 
 if TYPE_CHECKING:
     from hal.bus.queue import MessageBus
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.core.memory.search import MemorySearch
-    from hal.core.subagent import SubagentManager
     from hal.infra.config.schema import ExecToolConfig
 
 
@@ -25,7 +25,7 @@ def create_tools(
     restrict_to_workspace: bool = False,
     web_search_api_key: str | None = None,
     bus: "MessageBus | None" = None,
-    subagent_manager: "SubagentManager | None" = None,
+    subagent_manager: SubagentPort | None = None,
     cron_service: "CronService | None" = None,
     memory_search: "MemorySearch | None" = None,
 ) -> ToolRegistry:

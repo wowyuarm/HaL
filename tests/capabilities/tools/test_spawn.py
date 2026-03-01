@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from hal.capabilities.tools.spawn import SpawnTool
-from hal.core.subagent import SubagentExecutionResult
+from hal.core.ports import SubagentExecutionResult
 
 
 def test_format_result_includes_structured_subagent_metadata() -> None:
