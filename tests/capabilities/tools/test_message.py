@@ -53,7 +53,41 @@ def test_message_tool_setters_update_context_and_callback() -> None:
 
     assert tool._default_channel == "x"
     assert tool._default_chat_id == "y"
+    # set_context also resets sent_in_turn
+    assert tool.sent_in_turn is False
 
     cb = AsyncMock()
     tool.set_send_callback(cb)
     assert tool._send_callback is cb
+
+
+# --- sent_in_turn flag tests ---
+
+
+@pytest.mark.asyncio
+async def test_sent_in_turn_set_on_successful_send() -> None:
+    tool = MessageTool(send_callback=AsyncMock(), default_channel="tg", default_chat_id="1")
+    assert tool.sent_in_turn is False
+
+    await tool.execute(content="hello")
+    assert tool.sent_in_turn is True
+
+
+@pytest.mark.asyncio
+async def test_sent_in_turn_not_set_on_failed_send() -> None:
+    async def boom(_msg: OutboundMessage) -> None:
+        raise RuntimeError("fail")
+
+    tool = MessageTool(send_callback=boom, default_channel="tg", default_chat_id="1")
+    await tool.execute(content="hello")
+    assert tool.sent_in_turn is False
+
+
+@pytest.mark.asyncio
+async def test_sent_in_turn_reset_by_set_context() -> None:
+    tool = MessageTool(send_callback=AsyncMock(), default_channel="tg", default_chat_id="1")
+    await tool.execute(content="hello")
+    assert tool.sent_in_turn is True
+
+    tool.set_context("tg", "1")
+    assert tool.sent_in_turn is False

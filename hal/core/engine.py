@@ -177,6 +177,12 @@ class AgentEngine:
             origin="cron",
         )
         if msg.metadata.get("deliver"):
+            # Suppress deliver if message tool already sent during this turn
+            message_tool = self.tools.get("message")
+            if isinstance(message_tool, MessageTool) and message_tool.sent_in_turn:
+                logger.info("[cron] message already sent via message tool, skipping deliver")
+                return None
+
             job_name = msg.metadata.get("cron_job_name", msg.metadata.get("cron_job_id", ""))
             content = f"[⏰ cron: {job_name}]\n{response}"
             return OutboundMessage(
@@ -329,6 +335,14 @@ class AgentEngine:
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info(f"[collab] response: {preview}")
+
+        # Suppress final outbound if the message tool already sent during this turn
+        message_tool = self.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool.sent_in_turn:
+            logger.info(
+                "[collab] message already sent via message tool, suppressing final outbound"
+            )
+            return None
 
         return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
 
@@ -883,9 +897,7 @@ class _EngineLoopHooks:
             files_modified = list(getattr(details, "files_modified", []) or [])
             commands_run = list(getattr(details, "commands_run", []) or [])
             tool_errors = list(getattr(details, "tool_errors", []) or [])
-            missing_artifacts = [
-                str(p) for p in (getattr(details, "missing_artifacts", []) or [])
-            ]
+            missing_artifacts = [str(p) for p in (getattr(details, "missing_artifacts", []) or [])]
             runtime_inject = _build_subagent_injection(
                 label=label,
                 content=content,
@@ -986,9 +998,7 @@ _SUBAGENT_RECORD_RE = re.compile(r"^\[Subagent Record ID\]\s*(.+)$", re.MULTILIN
 _SUBAGENT_STATUS_RE = re.compile(r"^\[Subagent Status\]\s*(.+)$", re.MULTILINE)
 _SUBAGENT_TOOLS_USED_RE = re.compile(r"^\[Subagent Tools Used\]\s*(.+)$", re.MULTILINE)
 _SUBAGENT_TOOL_COUNTS_RE = re.compile(r"^\[Subagent Tool Counts\]\s*(.+)$", re.MULTILINE)
-_SUBAGENT_HAS_SIDE_EFFECTS_RE = re.compile(
-    r"^\[Subagent Has Side Effects\]\s*(.+)$", re.MULTILINE
-)
+_SUBAGENT_HAS_SIDE_EFFECTS_RE = re.compile(r"^\[Subagent Has Side Effects\]\s*(.+)$", re.MULTILINE)
 _SUBAGENT_FILES_MODIFIED_RE = re.compile(r"^\[Subagent Files Modified\]\s*(.+)$", re.MULTILINE)
 _SUBAGENT_COMMANDS_RUN_RE = re.compile(r"^\[Subagent Commands Run\]\s*(.+)$", re.MULTILINE)
 _SUBAGENT_TOOL_ERRORS_RE = re.compile(r"^\[Subagent Tool Errors\]\s*(.+)$", re.MULTILINE)
@@ -1312,7 +1322,9 @@ def _build_subagent_injection(
     if tool_errors:
         text += f"\n[Subagent Tool Errors] {json.dumps(tool_errors, ensure_ascii=False)}"
     if missing_artifacts:
-        text += f"\n[Subagent Missing Artifacts] {json.dumps(missing_artifacts, ensure_ascii=False)}"
+        text += (
+            f"\n[Subagent Missing Artifacts] {json.dumps(missing_artifacts, ensure_ascii=False)}"
+        )
     return text
 
 
