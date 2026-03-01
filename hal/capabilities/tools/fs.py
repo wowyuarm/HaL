@@ -1,9 +1,15 @@
 """File system tools: read, write, edit."""
 
+import difflib
 from pathlib import Path
 from typing import Any
 
 from hal.capabilities.tools.base import Tool
+
+# Maximum characters in fuzzy diagnostic output.
+_DIAG_MAX_CHARS = 800
+# Minimum similarity ratio to show a fuzzy match.
+_DIAG_MIN_RATIO = 0.6
 
 
 def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
@@ -142,6 +148,47 @@ class WriteFileTool(Tool):
             return f"Error writing file: {str(e)}"
 
 
+def _fuzzy_diagnostic(content: str, old_text: str) -> str:
+    """Find the closest match for *old_text* in *content* and return a diff.
+
+    Slides a line-based window over *content* and uses character-level
+    similarity to find the best match.  Returns a unified diff when the
+    ratio exceeds the threshold, or an empty string otherwise.
+    """
+    target_lines = old_text.splitlines(keepends=True)
+    content_lines = content.splitlines(keepends=True)
+    window = len(target_lines)
+    if window == 0 or len(content_lines) == 0:
+        return ""
+
+    best_ratio = 0.0
+    best_start = 0
+
+    for start in range(max(1, len(content_lines) - window + 1)):
+        candidate_text = "".join(content_lines[start : start + window])
+        ratio = difflib.SequenceMatcher(None, old_text, candidate_text).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_start = start
+
+    if best_ratio < _DIAG_MIN_RATIO:
+        return ""
+
+    best_lines = content_lines[best_start : best_start + window]
+    diff = difflib.unified_diff(
+        target_lines,
+        best_lines,
+        fromfile="old_text (provided)",
+        tofile=f"file (line {best_start + 1})",
+    )
+    result = "".join(diff)
+
+    if len(result) > _DIAG_MAX_CHARS:
+        result = result[:_DIAG_MAX_CHARS] + "\n... (truncated)"
+
+    return result
+
+
 class EditFileTool(Tool):
     """Tool to edit a file by replacing text."""
 
@@ -177,7 +224,11 @@ class EditFileTool(Tool):
             content = file_path.read_text(encoding="utf-8")
 
             if old_text not in content:
-                return "Error: old_text not found in file. Make sure it matches exactly."
+                diag = _fuzzy_diagnostic(content, old_text)
+                base = "Error: old_text not found in file."
+                if diag:
+                    return f"{base}\n\nNearest match found:\n{diag}"
+                return f"{base} Make sure it matches exactly."
 
             # Count occurrences
             count = content.count(old_text)

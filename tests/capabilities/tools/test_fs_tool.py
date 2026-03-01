@@ -229,3 +229,73 @@ class TestFsToolAllowedDir:
             action="read", path=str(tmp_path / "subdir" / ".." / ".." / "etc" / "passwd")
         )
         assert "Error" in result
+
+
+# ------------------------------------------------------------------
+# Edit fuzzy match diagnostics (#15)
+# ------------------------------------------------------------------
+
+
+class TestEditFuzzyDiagnostics:
+    async def test_typo_returns_fuzzy_diff(self, unrestricted_fs_tool, tmp_path):
+        """Near-miss old_text should produce a diagnostic with a diff."""
+        target = tmp_path / "fuzzy.txt"
+        target.write_text("def hello_world():\n    return 42\n", encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(
+            action="edit",
+            path=str(target),
+            old_text="def hello_wrold():\n    return 42\n",  # typo
+            new_text="def hello_world():\n    return 0\n",
+        )
+        assert "old_text not found" in result
+        assert "Nearest match found:" in result
+        assert "hello_world" in result  # shows what's actually in file
+
+    async def test_unrelated_content_returns_generic_error(self, unrestricted_fs_tool, tmp_path):
+        """Completely unrelated old_text should give the generic error."""
+        target = tmp_path / "unrelated.txt"
+        target.write_text("alpha beta gamma\n", encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(
+            action="edit",
+            path=str(target),
+            old_text="xxxxxxxxx yyyyyy zzzzzzz\n",
+            new_text="replacement\n",
+        )
+        assert "old_text not found" in result
+        assert "Make sure it matches exactly" in result
+        assert "Nearest match" not in result
+
+    async def test_exact_match_still_works(self, unrestricted_fs_tool, tmp_path):
+        """Exact match should succeed without any diagnostic."""
+        target = tmp_path / "exact.txt"
+        target.write_text("line one\nline two\n", encoding="utf-8")
+
+        result = await unrestricted_fs_tool.execute(
+            action="edit",
+            path=str(target),
+            old_text="line one\n",
+            new_text="line ONE\n",
+        )
+        assert "Successfully edited" in result
+        assert target.read_text(encoding="utf-8") == "line ONE\nline two\n"
+
+    async def test_large_file_completes_quickly(self, unrestricted_fs_tool, tmp_path):
+        """Fuzzy diagnostic on a ~1MB file should finish in reasonable time."""
+        import time
+
+        target = tmp_path / "large.txt"
+        target.write_text("line\n" * 200_000, encoding="utf-8")  # ~1MB
+
+        start = time.monotonic()
+        result = await unrestricted_fs_tool.execute(
+            action="edit",
+            path=str(target),
+            old_text="def nonexistent_function():\n    pass\n",
+            new_text="replaced\n",
+        )
+        elapsed = time.monotonic() - start
+
+        assert "old_text not found" in result
+        assert elapsed < 5.0, f"Fuzzy diagnostic took {elapsed:.1f}s on ~1MB file"
