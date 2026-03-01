@@ -62,9 +62,10 @@ class WebSearchTool(Tool):
         "required": ["query"],
     }
 
-    def __init__(self, api_key: str | None = None, max_results: int = 5):
+    def __init__(self, api_key: str | None = None, max_results: int = 5, timeout_s: float = 10.0):
         self.api_key = api_key or os.environ.get("TAVILY_API_KEY", "")
         self.max_results = max_results
+        self.timeout_s = timeout_s
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         if not self.api_key:
@@ -84,7 +85,7 @@ class WebSearchTool(Tool):
                         "search_depth": "basic",
                     },
                     headers={"Content-Type": "application/json"},
-                    timeout=10.0,
+                    timeout=self.timeout_s,
                 )
                 r.raise_for_status()
 
@@ -123,8 +124,10 @@ class WebFetchTool(Tool):
         "required": ["url"],
     }
 
-    def __init__(self, max_chars: int = 50000):
+    def __init__(self, max_chars: int = 50000, timeout_s: float = 30.0, max_redirects: int = 5):
         self.max_chars = max_chars
+        self.timeout_s = timeout_s
+        self.max_redirects = max_redirects
 
     async def execute(
         self,
@@ -147,7 +150,7 @@ class WebFetchTool(Tool):
 
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=30.0
+                follow_redirects=True, max_redirects=self.max_redirects, timeout=self.timeout_s
             ) as client:
                 r = await client.get(url, headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()

@@ -183,6 +183,11 @@ _CTX_SYSTEM_PREVIEW_CHARS = 2400
 _CTX_MESSAGE_PREVIEW_CHARS = 900
 _CTX_OUTPUT_MAX_CHARS = 12000
 
+_MSG_SPLIT_MAX_LENGTH = 4000
+_TYPING_INDICATOR_INTERVAL_S = 4
+_BOT_KEEPALIVE_SLEEP_S = 1
+_GIT_LOG_TIMEOUT_S = 5
+
 
 class TelegramChannel(BaseChannel):
     """
@@ -280,7 +285,7 @@ class TelegramChannel(BaseChannel):
 
         # Keep running until stopped
         while self._running:
-            await asyncio.sleep(1)
+            await asyncio.sleep(_BOT_KEEPALIVE_SLEEP_S)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -314,7 +319,7 @@ class TelegramChannel(BaseChannel):
                 ["git", "log", "-1", "--format=%h %s"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=_GIT_LOG_TIMEOUT_S,
             )
             commit_info = result.stdout.strip() if result.returncode == 0 else "unknown"
         except Exception:
@@ -435,7 +440,7 @@ class TelegramChannel(BaseChannel):
         """Reply in multiple chunks when text exceeds Telegram limits."""
         if not update.message:
             return
-        for chunk in self._split_telegram_message(text, max_length=4000):
+        for chunk in self._split_telegram_message(text, max_length=_MSG_SPLIT_MAX_LENGTH):
             await update.message.reply_text(chunk, parse_mode=parse_mode)
 
     @staticmethod
@@ -910,7 +915,7 @@ class TelegramChannel(BaseChannel):
         try:
             while self._app:
                 await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
-                await asyncio.sleep(4)
+                await asyncio.sleep(_TYPING_INDICATOR_INTERVAL_S)
         except asyncio.CancelledError:
             pass
         except Exception as e:

@@ -215,6 +215,9 @@ def gateway(
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
         recall_min_score=config.memory_search.recall_min_score,
         history_config=config.agents.defaults.history,
+        engine_config=config.engine,
+        web_search_config=config.tools.web.search,
+        web_fetch_config=config.tools.web.fetch,
     )
 
     # Set cron callback (needs agent)
@@ -264,7 +267,7 @@ def gateway(
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
         on_heartbeat=on_heartbeat,
-        interval_s=30 * 60,  # 30 minutes
+        interval_s=config.scheduling.heartbeat.interval_s,
         enabled=True,
     )
 
@@ -274,6 +277,7 @@ def gateway(
         bus,
         memory_manager=agent.memory,
         context_inspector=agent.inspect_context,
+        outbound_poll_timeout_s=config.channels.outbound_poll_timeout_s,
     )
 
     if channels.enabled_channels:
@@ -285,7 +289,8 @@ def gateway(
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
 
-    console.print("[green]✓[/green] Heartbeat: every 30m")
+    hb_min = config.scheduling.heartbeat.interval_s // 60
+    console.print(f"[green]✓[/green] Heartbeat: every {hb_min}m")
 
     async def run():
         nonlocal memory_search

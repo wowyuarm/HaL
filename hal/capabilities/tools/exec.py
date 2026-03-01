@@ -15,12 +15,14 @@ class ExecTool(Tool):
     def __init__(
         self,
         timeout: int = 60,
+        kill_wait_s: int = 5,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
     ):
         self.timeout = timeout
+        self.kill_wait_s = kill_wait_s
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
@@ -62,13 +64,13 @@ class ExecTool(Tool):
             "required": ["command"],
         }
 
-    async def execute(
-        self,
-        command: str,
-        working_dir: str | None = None,
-        timeout: int | None = None,
-        **kwargs: Any,
-    ) -> str:
+    async def execute(self, **kwargs: Any) -> str:
+        command = kwargs.get("command")
+        if not isinstance(command, str) or not command.strip():
+            return "Error: Missing required parameter 'command'"
+
+        working_dir = kwargs.get("working_dir")
+        timeout = kwargs.get("timeout")
         cwd = working_dir or self.working_dir or os.getcwd()
         guard_error = self._guard_command(command, cwd)
         if guard_error:
@@ -92,7 +94,7 @@ class ExecTool(Tool):
             except asyncio.TimeoutError:
                 process.kill()
                 try:
-                    await asyncio.wait_for(process.wait(), timeout=5)
+                    await asyncio.wait_for(process.wait(), timeout=self.kill_wait_s)
                 except asyncio.TimeoutError:
                     pass  # Process didn't exit in time, but we tried
                 return f"Error: Command timed out after {actual_timeout} seconds"

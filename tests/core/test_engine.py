@@ -882,11 +882,11 @@ class TestSubagentInjectionHelpers:
             "[Subagent Artifact] /tmp/a.md\n\n"
             "[Subagent Total Tokens] 123\n\n"
             "[Subagent Status] partial\n\n"
-            "[Subagent Tools Used] [\"fs\", \"web_search\"]\n\n"
-            "[Subagent Tool Counts] {\"fs\": 2}\n\n"
+            '[Subagent Tools Used] ["fs", "web_search"]\n\n'
+            '[Subagent Tool Counts] {"fs": 2}\n\n'
             "[Subagent Has Side Effects] true\n\n"
-            "[Subagent Files Modified] [\"/tmp/a.md\"]\n\n"
-            "[Subagent Commands Run] [\"ls -la\"]"
+            '[Subagent Files Modified] ["/tmp/a.md"]\n\n'
+            '[Subagent Commands Run] ["ls -la"]'
         )
         parsed = _split_subagent_tool_result(payload)
         assert parsed.content == "Result line"
@@ -963,10 +963,10 @@ class TestSubagentInjectionHelpers:
             tool_errors=["fs: Error: bad path"],
             missing_artifacts=["/tmp/missing.md"],
         )
-        assert "[Subagent Tools Used] [\"fs\"]" in text
-        assert "[Subagent Tool Counts] {\"fs\": 2}" in text
+        assert '[Subagent Tools Used] ["fs"]' in text
+        assert '[Subagent Tool Counts] {"fs": 2}' in text
         assert "[Subagent Has Side Effects] true" in text
-        assert "[Subagent Files Modified] [\"/tmp/a.md\"]" in text
-        assert "[Subagent Commands Run] [\"echo hi\"]" in text
-        assert "[Subagent Tool Errors] [\"fs: Error: bad path\"]" in text
-        assert "[Subagent Missing Artifacts] [\"/tmp/missing.md\"]" in text
+        assert '[Subagent Files Modified] ["/tmp/a.md"]' in text
+        assert '[Subagent Commands Run] ["echo hi"]' in text
+        assert '[Subagent Tool Errors] ["fs: Error: bad path"]' in text
+        assert '[Subagent Missing Artifacts] ["/tmp/missing.md"]' in text

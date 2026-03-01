@@ -21,7 +21,7 @@ from hal.infra.providers.base import LLMProvider
 
 if TYPE_CHECKING:
     from hal.capabilities.tools.registry import ToolRegistry
-    from hal.infra.config.schema import ExecToolConfig
+    from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
 _ARTIFACT_PATH_RE = re.compile(r"(/[^`'\"<>\s)]+\.md)\b")
 _PARTIAL_INDICATOR_RE = re.compile(
@@ -55,6 +55,8 @@ class SubagentManager:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         max_iterations: int = 20,
+        web_search_config: "WebSearchConfig | None" = None,
+        web_fetch_config: "WebFetchConfig | None" = None,
     ):
         from hal.infra.config.schema import ExecToolConfig
 
@@ -65,6 +67,8 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self.max_iterations = max_iterations
+        self._web_search_config = web_search_config
+        self._web_fetch_config = web_fetch_config
         # task_id -> (asyncio.Task, label)
         self._running_tasks: dict[str, tuple[asyncio.Task[SubagentExecutionResult], str]] = {}
         # Track iteration count for the currently executing sync subagent
@@ -241,6 +245,8 @@ class SubagentManager:
             exec_config=self.exec_config,
             restrict_to_workspace=self.restrict_to_workspace,
             web_search_api_key=self.web_search_api_key,
+            web_search_config=self._web_search_config,
+            web_fetch_config=self._web_fetch_config,
         )
 
     def _build_system_prompt(self) -> str:

@@ -30,10 +30,10 @@ def test_format_result_includes_structured_subagent_metadata() -> None:
     assert "[Subagent Artifact] /tmp/report.md" in text
     assert "[Subagent Log] /tmp/subagent-log.jsonl" in text
     assert "[Subagent Total Tokens] 42" in text
-    assert "[Subagent Tools Used] [\"fs\", \"web_search\"]" in text
-    assert "[Subagent Tool Counts] {\"fs\": 2, \"web_search\": 1}" in text
+    assert '[Subagent Tools Used] ["fs", "web_search"]' in text
+    assert '[Subagent Tool Counts] {"fs": 2, "web_search": 1}' in text
     assert "[Subagent Has Side Effects] true" in text
-    assert "[Subagent Files Modified] [\"/tmp/report.md\"]" in text
-    assert "[Subagent Commands Run] [\"ls -la\"]" in text
-    assert "[Subagent Tool Errors] [\"web_search: Error: Invalid parameters\"]" in text
-    assert "[Subagent Missing Artifacts] [\"/tmp/missing.md\"]" in text
+    assert '[Subagent Files Modified] ["/tmp/report.md"]' in text
+    assert '[Subagent Commands Run] ["ls -la"]' in text
+    assert '[Subagent Tool Errors] ["web_search: Error: Invalid parameters"]' in text
+    assert '[Subagent Missing Artifacts] ["/tmp/missing.md"]' in text

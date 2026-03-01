@@ -235,9 +235,7 @@ class TestSearch:
         ):
             await memory_search.index_date(date(2026, 2, 12))
 
-            keyword_query = _build_keyword_query(
-                "deployment", _build_keyword_terms("deployment")
-            )
+            keyword_query = _build_keyword_query("deployment", _build_keyword_terms("deployment"))
             # Get raw scores from store directly (before penalty)
             raw_results = await memory_search._store.search(
                 _fake_embedding(["deployment"])[0], query_text=keyword_query, top_k=5
@@ -344,14 +342,17 @@ class TestSearch:
             assert out[0].source_type == "subagent"
 
     async def test_search_expands_keyword_query_terms(self, memory_search):
-        with patch.object(
-            memory_search,
-            "_embed_texts",
-            new_callable=AsyncMock,
-            return_value=_fake_embedding(["query"]),
-        ), patch.object(
-            memory_search._store, "search", new_callable=AsyncMock, return_value=[]
-        ) as mock_store_search:
+        with (
+            patch.object(
+                memory_search,
+                "_embed_texts",
+                new_callable=AsyncMock,
+                return_value=_fake_embedding(["query"]),
+            ),
+            patch.object(
+                memory_search._store, "search", new_callable=AsyncMock, return_value=[]
+            ) as mock_store_search,
+        ):
             await memory_search.search("opencontext与dev_workflow", top_k=3)
             kwargs = mock_store_search.await_args.kwargs
             query_text = kwargs["query_text"]

@@ -32,11 +32,13 @@ class ChannelManager:
         bus: MessageBus,
         memory_manager: "MemoryManager | None" = None,
         context_inspector: Callable[[str, str, str], Awaitable[dict[str, Any]]] | None = None,
+        outbound_poll_timeout_s: float = 1.0,
     ):
         self.config = config
         self.bus = bus
         self.memory_manager = memory_manager
         self.context_inspector = context_inspector
+        self._outbound_poll_timeout_s = outbound_poll_timeout_s
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -117,7 +119,9 @@ class ChannelManager:
 
         while True:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
+                msg = await asyncio.wait_for(
+                    self.bus.consume_outbound(), timeout=self._outbound_poll_timeout_s
+                )
 
                 channel = self.channels.get(msg.channel)
                 if channel:

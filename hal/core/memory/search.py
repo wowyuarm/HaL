@@ -43,6 +43,9 @@ class MemorySearch:
         api_key: str | None = None,
         api_base: str | None = None,
         embedding_dim: int | None = None,
+        embed_retry_attempts: int = _EMBED_RETRY_ATTEMPTS,
+        embed_retry_base_delay_s: float = _EMBED_RETRY_BASE_DELAY_S,
+        embed_timeout_s: float = 60.0,
     ):
         self._exporter = exporter
         self._chunker = chunker
@@ -52,6 +55,9 @@ class MemorySearch:
         self._api_key = api_key
         self._api_base = api_base
         self._embedding_dim = embedding_dim
+        self._embed_retry_attempts = embed_retry_attempts
+        self._embed_retry_base_delay_s = embed_retry_base_delay_s
+        self._embed_timeout_s = embed_timeout_s
 
     async def initialize(self) -> None:
         """Initialize the vector store."""
@@ -250,19 +256,21 @@ class MemorySearch:
         if not texts:
             return []
 
-        for attempt in range(1, _EMBED_RETRY_ATTEMPTS + 1):
+        for attempt in range(1, self._embed_retry_attempts + 1):
             try:
                 if self._api_base and self._api_key:
                     return await self._embed_texts_direct(texts)
                 return await self._embed_texts_litellm(texts)
             except Exception as e:
-                if attempt >= _EMBED_RETRY_ATTEMPTS:
-                    logger.error(f"Embedding failed after {_EMBED_RETRY_ATTEMPTS} attempts: {e}")
+                if attempt >= self._embed_retry_attempts:
+                    logger.error(
+                        f"Embedding failed after {self._embed_retry_attempts} attempts: {e}"
+                    )
                     return []
 
-                delay = _EMBED_RETRY_BASE_DELAY_S * (2 ** (attempt - 1))
+                delay = self._embed_retry_base_delay_s * (2 ** (attempt - 1))
                 logger.warning(
-                    f"Embedding attempt {attempt}/{_EMBED_RETRY_ATTEMPTS} failed: {e}; "
+                    f"Embedding attempt {attempt}/{self._embed_retry_attempts} failed: {e}; "
                     f"retrying in {delay:.1f}s"
                 )
                 await asyncio.sleep(delay)
@@ -303,7 +311,7 @@ class MemorySearch:
         if self._embedding_dim:
             body["dimensions"] = self._embedding_dim
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=self._embed_timeout_s) as client:
             resp = await client.post(
                 f"{self._api_base.rstrip('/')}/embeddings",
                 json=body,
@@ -321,6 +329,7 @@ class MemorySearch:
         kwargs: dict = {
             "model": self._embedding_model,
             "input": texts,
+            "timeout": self._embed_timeout_s,
         }
         if self._api_key:
             kwargs["api_key"] = self._api_key

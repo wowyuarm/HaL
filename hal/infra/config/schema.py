@@ -3,11 +3,17 @@
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class TelegramConfig(BaseModel):
+class _StrictModel(BaseModel):
+    """Base for all config sub-models. Rejects unknown keys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TelegramConfig(_StrictModel):
     """Telegram channel configuration."""
 
     enabled: bool = False
@@ -18,13 +24,14 @@ class TelegramConfig(BaseModel):
     )
 
 
-class ChannelsConfig(BaseModel):
+class ChannelsConfig(_StrictModel):
     """Configuration for chat channels."""
 
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    outbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Outbound dispatch poll interval
 
 
-class HistoryConfig(BaseModel):
+class HistoryConfig(_StrictModel):
     """Conversation history context configuration.
 
     Controls how historical messages are prepared before sending to the LLM.
@@ -43,7 +50,7 @@ class HistoryConfig(BaseModel):
     recall_max_per_item_tokens: int = 125  # Max tokens per retrieved memory fragment
 
 
-class AgentDefaults(BaseModel):
+class AgentDefaults(_StrictModel):
     """Default agent configuration."""
 
     workspace: str = "~/.hal"
@@ -56,13 +63,13 @@ class AgentDefaults(BaseModel):
     history: HistoryConfig = Field(default_factory=HistoryConfig)
 
 
-class AgentsConfig(BaseModel):
+class AgentsConfig(_StrictModel):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
 
-class ProviderConfig(BaseModel):
+class ProviderConfig(_StrictModel):
     """LLM provider configuration."""
 
     api_key: str = ""
@@ -72,7 +79,7 @@ class ProviderConfig(BaseModel):
     request_params: dict[str, Any] | None = None  # Optional per-request LiteLLM params
 
 
-class ProvidersConfig(BaseModel):
+class ProvidersConfig(_StrictModel):
     """Configuration for LLM providers."""
 
     anyrouter: ProviderConfig = Field(default_factory=ProviderConfig)  # AnyRouter (Anthropic relay)
@@ -88,33 +95,44 @@ class ProvidersConfig(BaseModel):
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
 
 
-class GatewayConfig(BaseModel):
+class GatewayConfig(_StrictModel):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
 
 
-class WebSearchConfig(BaseModel):
+class WebSearchConfig(_StrictModel):
     """Web search tool configuration."""
 
     api_key: str = ""  # Tavily Search API key
-    max_results: int = 5
+    max_results: int = Field(default=5, ge=1, le=10)
+    timeout_s: float = Field(default=10.0, gt=0)  # HTTP timeout for search API calls
 
 
-class WebToolsConfig(BaseModel):
+class WebFetchConfig(_StrictModel):
+    """Web fetch tool configuration."""
+
+    default_max_chars: int = Field(default=50000, ge=100)  # Max chars extracted from fetched pages
+    timeout_s: float = Field(default=30.0, gt=0)  # HTTP timeout for page fetches
+    max_redirects: int = Field(default=5, ge=1)  # Max HTTP redirects (DoS prevention)
+
+
+class WebToolsConfig(_StrictModel):
     """Web tools configuration."""
 
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
-class ExecToolConfig(BaseModel):
+class ExecToolConfig(_StrictModel):
     """Shell exec tool configuration."""
 
-    timeout: int = 60
+    timeout: int = Field(default=60, gt=0)  # Command execution timeout (seconds)
+    kill_wait_s: int = Field(default=5, gt=0)  # Grace period after timeout before force-kill
 
 
-class ToolsConfig(BaseModel):
+class ToolsConfig(_StrictModel):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
@@ -122,7 +140,7 @@ class ToolsConfig(BaseModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
-class MemorySearchConfig(BaseModel):
+class MemorySearchConfig(_StrictModel):
     """Semantic memory search configuration."""
 
     enabled: bool = False
@@ -136,6 +154,29 @@ class MemorySearchConfig(BaseModel):
     max_chunk_size: int = 1000
     chunk_overlap_lines: int = 2
     chunk_heading_max_level: int = 2
+    embed_retry_attempts: int = Field(default=3, ge=1)  # Embedding API retry count
+    embed_retry_base_delay_s: float = Field(default=0.5, gt=0)  # Base delay for exponential backoff
+    embed_timeout_s: float = Field(default=60.0, gt=0)  # HTTP timeout for embedding API calls
+
+
+class EngineConfig(_StrictModel):
+    """Agent engine runtime configuration."""
+
+    inbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Bus consume poll interval
+    summary_barrier_timeout_s: float = Field(default=10.0, gt=0)  # Max wait for pending summary
+    operator_max_iterations: int = Field(default=10, ge=1)  # Max tool iterations in OPERATOR mode
+
+
+class HeartbeatConfig(_StrictModel):
+    """Heartbeat service configuration."""
+
+    interval_s: int = Field(default=1800, ge=60)  # Check interval (seconds); min 1 minute
+
+
+class SchedulingConfig(_StrictModel):
+    """Scheduling services configuration."""
+
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
 class Config(BaseSettings):
@@ -147,6 +188,8 @@ class Config(BaseSettings):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     memory_search: MemorySearchConfig = Field(default_factory=MemorySearchConfig)
+    engine: EngineConfig = Field(default_factory=EngineConfig)
+    scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
 
     @property
     def workspace_path(self) -> Path:
@@ -196,4 +239,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = SettingsConfigDict(env_prefix="HAL_", env_nested_delimiter="__", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="HAL_", env_nested_delimiter="__", extra="forbid")

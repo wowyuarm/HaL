@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from hal.infra.config.loader import (
     _deep_merge,
@@ -12,7 +14,14 @@ from hal.infra.config.loader import (
     load_config,
     save_config,
 )
-from hal.infra.config.schema import Config
+from hal.infra.config.schema import (
+    Config,
+    EngineConfig,
+    ExecToolConfig,
+    HeartbeatConfig,
+    WebFetchConfig,
+    WebSearchConfig,
+)
 
 
 def test_deep_merge_overrides_nested() -> None:
@@ -77,14 +86,120 @@ def test_save_and_load_config_roundtrip(tmp_home: Path) -> None:
     assert loaded.providers.openrouter.api_key == "sk-or-test"
 
 
-def test_load_config_invalid_yaml_falls_back_to_default(tmp_home: Path, capsys) -> None:
+def test_load_config_invalid_yaml_raises(tmp_home: Path) -> None:
     path = get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{{not: valid: yaml: [", encoding="utf-8")
 
-    cfg = load_config()
-    assert isinstance(cfg, Config)
+    with pytest.raises(yaml.YAMLError):
+        load_config()
 
-    out = capsys.readouterr().out.lower()
-    assert "failed to parse" in out
-    assert "default" in out
+
+# ---------------------------------------------------------------------------
+# Strict loading: unknown keys rejected (extra="forbid")
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_top_level_key_rejected(tmp_home: Path) -> None:
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("bogus_section:\n  foo: 1\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="bogus_section"):
+        load_config()
+
+
+def test_unknown_nested_key_rejected(tmp_home: Path) -> None:
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("engine:\n  inbound_poll_timeout_s: 2.0\n  typo_key: 42\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="typo_key"):
+        load_config()
+
+
+def test_invalid_config_value_rejected(tmp_home: Path) -> None:
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("agents:\n  defaults:\n    temperature: not_a_number\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        load_config()
+
+
+# ---------------------------------------------------------------------------
+# Field constraints: boundary validation
+# ---------------------------------------------------------------------------
+
+
+def test_timeout_zero_rejected() -> None:
+    with pytest.raises(ValidationError):
+        EngineConfig(inbound_poll_timeout_s=0)
+
+
+def test_timeout_negative_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ExecToolConfig(timeout=-1)
+
+
+def test_heartbeat_below_minimum_rejected() -> None:
+    with pytest.raises(ValidationError):
+        HeartbeatConfig(interval_s=30)  # minimum is 60
+
+
+def test_max_redirects_zero_rejected() -> None:
+    with pytest.raises(ValidationError):
+        WebFetchConfig(max_redirects=0)
+
+
+def test_max_results_out_of_range_rejected() -> None:
+    with pytest.raises(ValidationError):
+        WebSearchConfig(max_results=0)
+    with pytest.raises(ValidationError):
+        WebSearchConfig(max_results=11)
+
+
+def test_valid_constraints_accepted() -> None:
+    """Sanity check that valid values pass validation."""
+    assert EngineConfig(inbound_poll_timeout_s=0.1).inbound_poll_timeout_s == 0.1
+    assert ExecToolConfig(timeout=1).timeout == 1
+    assert HeartbeatConfig(interval_s=60).interval_s == 60
+    assert WebFetchConfig(max_redirects=1).max_redirects == 1
+    assert WebSearchConfig(max_results=10).max_results == 10
+
+
+# ---------------------------------------------------------------------------
+# Default values preserve existing behavior
+# ---------------------------------------------------------------------------
+
+
+def test_defaults_match_original_hardcoded_values() -> None:
+    """Verify that default config values match the original hardcoded constants."""
+    cfg = Config()
+
+    # Engine
+    assert cfg.engine.inbound_poll_timeout_s == 1.0
+    assert cfg.engine.summary_barrier_timeout_s == 10.0
+    assert cfg.engine.operator_max_iterations == 10
+
+    # Web tools
+    assert cfg.tools.web.search.max_results == 5
+    assert cfg.tools.web.search.timeout_s == 10.0
+    assert cfg.tools.web.fetch.default_max_chars == 50000
+    assert cfg.tools.web.fetch.timeout_s == 30.0
+    assert cfg.tools.web.fetch.max_redirects == 5
+
+    # Exec
+    assert cfg.tools.exec.timeout == 60
+    assert cfg.tools.exec.kill_wait_s == 5
+
+    # Memory search
+    assert cfg.memory_search.embed_retry_attempts == 3
+    assert cfg.memory_search.embed_retry_base_delay_s == 0.5
+    assert cfg.memory_search.embed_timeout_s == 60.0
+
+    # Channels
+    assert cfg.channels.outbound_poll_timeout_s == 1.0
+
+    # Scheduling
+    assert cfg.scheduling.heartbeat.interval_s == 1800

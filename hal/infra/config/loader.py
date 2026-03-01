@@ -29,30 +29,17 @@ def load_config(config_path: Path | None = None) -> Config:
 
     data: dict[str, Any] = {}
     if path.exists():
-        try:
-            with open(path) as f:
-                data = yaml.safe_load(f) or {}
-        except yaml.YAMLError as e:
-            print(f"Warning: Failed to parse {path}: {e}")
-            print("Using default configuration.")
-            return Config()
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
 
     # Merge auth secrets
     if auth_path.exists():
-        try:
-            with open(auth_path) as f:
-                auth_data = yaml.safe_load(f) or {}
-            data = _deep_merge(data, auth_data)
-        except yaml.YAMLError as e:
-            print(f"Warning: Failed to parse {auth_path}: {e}")
+        with open(auth_path) as f:
+            auth_data = yaml.safe_load(f) or {}
+        data = _deep_merge(data, auth_data)
 
     if data:
-        try:
-            config = Config.model_validate(data)
-        except ValueError as e:
-            print(f"Warning: Invalid config: {e}")
-            print("Using default configuration.")
-            return Config()
+        config = Config.model_validate(data)
     else:
         config = Config()
 

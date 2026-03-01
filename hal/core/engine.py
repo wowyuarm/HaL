@@ -33,7 +33,13 @@ from hal.infra.providers.base import LLMProvider
 if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.core.memory.search import MemorySearch
-    from hal.infra.config.schema import ExecToolConfig, HistoryConfig
+    from hal.infra.config.schema import (
+        EngineConfig,
+        ExecToolConfig,
+        HistoryConfig,
+        WebFetchConfig,
+        WebSearchConfig,
+    )
 
 
 class AgentEngine:
@@ -68,8 +74,15 @@ class AgentEngine:
         auto_inject_top_k: int = 3,
         recall_min_score: float = 0.0,
         history_config: "HistoryConfig | None" = None,
+        engine_config: "EngineConfig | None" = None,
+        web_search_config: "WebSearchConfig | None" = None,
+        web_fetch_config: "WebFetchConfig | None" = None,
     ):
-        from hal.infra.config.schema import ExecToolConfig, HistoryConfig
+        from hal.infra.config.schema import (
+            EngineConfig,
+            ExecToolConfig,
+            HistoryConfig,
+        )
 
         self.bus = bus
         self.provider = provider
@@ -86,6 +99,9 @@ class AgentEngine:
         self._auto_inject_top_k = auto_inject_top_k
         self._recall_min_score = recall_min_score
         self._history_config = history_config or HistoryConfig()
+        self._engine_config = engine_config or EngineConfig()
+        self._web_search_config = web_search_config
+        self._web_fetch_config = web_fetch_config
         self._pending_summaries: dict[str, asyncio.Task] = {}
         self._metrics_collector = MetricsCollector(workspace / "logs" / "context_metrics.jsonl")
 
@@ -103,6 +119,8 @@ class AgentEngine:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             max_iterations=max_iterations,
+            web_search_config=web_search_config,
+            web_fetch_config=web_fetch_config,
         )
 
         self._running = False
@@ -115,6 +133,8 @@ class AgentEngine:
             exec_config=self.exec_config,
             restrict_to_workspace=self.restrict_to_workspace,
             web_search_api_key=self.web_search_api_key,
+            web_search_config=self._web_search_config,
+            web_fetch_config=self._web_fetch_config,
             bus=self.bus,
             subagent_manager=self.subagents,
             cron_service=self.cron_service,
@@ -137,7 +157,10 @@ class AgentEngine:
 
         while self._running:
             try:
-                msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
+                msg = await asyncio.wait_for(
+                    self.bus.consume_inbound(),
+                    timeout=self._engine_config.inbound_poll_timeout_s,
+                )
                 try:
                     response = await self._dispatch(msg)
                     if response:
@@ -216,7 +239,7 @@ class AgentEngine:
         # Barrier: wait for any pending summary from a previous interaction
         if task := self._pending_summaries.pop(msg.session_key, None):
             try:
-                await asyncio.wait_for(task, timeout=10.0)
+                await asyncio.wait_for(task, timeout=self._engine_config.summary_barrier_timeout_s)
             except (asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"Summary barrier: {e}")
 
@@ -431,7 +454,7 @@ class AgentEngine:
         )
 
         # Operator mode uses fewer iterations
-        max_iter = min(self.max_iterations, 10)
+        max_iter = min(self.max_iterations, self._engine_config.operator_max_iterations)
         final_content, meta, _ = await self._execute_loop(
             messages,
             max_iter,

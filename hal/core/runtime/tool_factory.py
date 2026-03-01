@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from hal.bus.queue import MessageBus
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.core.memory.search import MemorySearch
-    from hal.infra.config.schema import ExecToolConfig
+    from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
 
 def create_tools(
@@ -24,6 +24,8 @@ def create_tools(
     exec_config: "ExecToolConfig | None" = None,
     restrict_to_workspace: bool = False,
     web_search_api_key: str | None = None,
+    web_search_config: "WebSearchConfig | None" = None,
+    web_fetch_config: "WebFetchConfig | None" = None,
     bus: "MessageBus | None" = None,
     subagent_manager: SubagentPort | None = None,
     cron_service: "CronService | None" = None,
@@ -40,14 +42,18 @@ def create_tools(
         exec_config: Shell execution settings.
         restrict_to_workspace: Sandbox file/exec to workspace.
         web_search_api_key: Tavily API key for web search.
+        web_search_config: Web search tool settings (max_results, timeout).
+        web_fetch_config: Web fetch tool settings (max_chars, timeout, redirects).
         bus: Message bus (enables message tool).
         subagent_manager: Subagent manager (enables spawn tool).
         cron_service: Cron service (enables cron tool).
         memory_search: Memory search (enables recall tool).
     """
-    from hal.infra.config.schema import ExecToolConfig
+    from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
     exec_config = exec_config or ExecToolConfig()
+    ws_cfg = web_search_config or WebSearchConfig()
+    wf_cfg = web_fetch_config or WebFetchConfig()
     allowed_dir = workspace if restrict_to_workspace else None
 
     tools = ToolRegistry()
@@ -58,11 +64,24 @@ def create_tools(
         ExecTool(
             working_dir=str(workspace),
             timeout=exec_config.timeout,
+            kill_wait_s=exec_config.kill_wait_s,
             restrict_to_workspace=restrict_to_workspace,
         )
     )
-    tools.register(WebSearchTool(api_key=web_search_api_key))
-    tools.register(WebFetchTool())
+    tools.register(
+        WebSearchTool(
+            api_key=web_search_api_key,
+            max_results=ws_cfg.max_results,
+            timeout_s=ws_cfg.timeout_s,
+        )
+    )
+    tools.register(
+        WebFetchTool(
+            max_chars=wf_cfg.default_max_chars,
+            timeout_s=wf_cfg.timeout_s,
+            max_redirects=wf_cfg.max_redirects,
+        )
+    )
 
     # Optional tools (require external dependencies)
     if bus:
