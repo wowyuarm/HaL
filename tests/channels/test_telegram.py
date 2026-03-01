@@ -154,6 +154,60 @@ def test_markdown_to_telegram_html_enhanced_patterns() -> None:
     assert "In a sentence, <i>word</i> should be italic." in html
 
 
+def test_markdown_to_telegram_html_italic_not_greedy() -> None:
+    """*italic* regex must not span across multiple * pairs on the same line."""
+    md = "Some *first* and *second* words"
+    html = _markdown_to_telegram_html(md)
+    assert "<i>first</i>" in html
+    assert "<i>second</i>" in html
+    # Should NOT merge into one giant italic span
+    assert "first* and *second" not in html
+
+
+def test_markdown_to_telegram_html_table() -> None:
+    md = "| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob & Co | 25 |\n"
+    html = _markdown_to_telegram_html(md)
+    assert "<pre>" in html
+    assert "</pre>" in html
+    # Table cell with & should be escaped inside <pre>
+    assert "Bob &amp; Co" in html
+    # Separator row should be rendered as unicode line, not literal dashes
+    assert "───" in html
+
+
+def test_markdown_to_telegram_html_blockquote() -> None:
+    md = "> This is a quote\n> with two lines\nNormal text"
+    html = _markdown_to_telegram_html(md)
+    assert "<blockquote>" in html
+    assert "This is a quote" in html
+    assert "with two lines" in html
+    assert "</blockquote>" in html
+    assert "Normal text" in html
+
+
+def test_markdown_to_telegram_html_blockquote_escapes_html() -> None:
+    md = "> a <b>tag</b> & entity"
+    html = _markdown_to_telegram_html(md)
+    assert "<blockquote>" in html
+    assert "&lt;b&gt;" in html
+    assert "&amp; entity" in html
+
+
+def test_markdown_to_telegram_html_horizontal_rule() -> None:
+    md = "Before\n---\nAfter"
+    html = _markdown_to_telegram_html(md)
+    assert "━━━━" in html
+    assert "Before" in html
+    assert "After" in html
+
+
+def test_markdown_to_telegram_html_header_bold() -> None:
+    md = "# Main Title\n## Subtitle"
+    html = _markdown_to_telegram_html(md)
+    assert "<b>Main Title</b>" in html
+    assert "<b>Subtitle</b>" in html
+
+
 @pytest.mark.asyncio
 async def test_send_returns_when_app_not_running() -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())

@@ -30,7 +30,7 @@ def _markdown_table_to_pre(table_text: str) -> str:
     separator row) and returns an HTML-escaped <pre> block with aligned
     columns.
     """
-    lines = [l.strip() for l in table_text.strip().splitlines() if l.strip()]
+    lines = [ln.strip() for ln in table_text.strip().splitlines() if ln.strip()]
     if not lines:
         return ""
 
@@ -114,23 +114,27 @@ def _markdown_to_telegram_html(text: str) -> str:
         flags=re.MULTILINE,
     )
 
-    # 4. Horizontal rules --- or *** or ___ -> unicode line (before HTML escape)
+    # 4. Extract and protect blockquotes (before HTML escape, like code/tables)
+    blockquote_blocks: list[str] = []
+
+    def save_blockquote(m: re.Match) -> str:
+        lines = m.group(0).rstrip("\n").splitlines()
+        inner = "\n".join(re.sub(r"^>\s?", "", line) for line in lines)
+        # Escape HTML within the blockquote content
+        inner = inner.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        blockquote_blocks.append(f"<blockquote>{inner}</blockquote>")
+        return f"\x00BQ{len(blockquote_blocks) - 1}\x00\n"
+
+    text = re.sub(r"(?:^>.*$\n?)+", save_blockquote, text, flags=re.MULTILINE)
+
+    # 5. Horizontal rules --- or *** or ___ -> unicode line (before HTML escape)
     text = re.sub(r"^[ \t]*[-*_]{3,}[ \t]*$", "━━━━━━━━━━━━━━━━━━━━", text, flags=re.MULTILINE)
 
-    # 5. Escape HTML special characters FIRST (before generating any HTML tags)
+    # 6. Escape HTML special characters FIRST (before generating any HTML tags)
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # 6. Headers # Title -> <b>Title</b> (after escape, so title text is safe)
+    # 7. Headers # Title -> <b>Title</b> (after escape, so title text is safe)
     text = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
-
-    # 7. Blockquotes &gt; text -> <blockquote>text</blockquote>
-    # After HTML escape, > became &gt; so match that
-    def collapse_blockquotes(m: re.Match) -> str:
-        lines = m.group(0).splitlines()
-        inner = "\n".join(re.sub(r"^&gt;\s?", "", l) for l in lines)
-        return f"<blockquote>{inner}</blockquote>\n"
-
-    text = re.sub(r"(?:^&gt;.*$\n?)+", collapse_blockquotes, text, flags=re.MULTILINE)
 
     # 8. Links [text](url) - must be before bold/italic to handle nested cases
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
@@ -149,24 +153,25 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r"^(\s*)[-*]\s+", r"\1• ", text, flags=re.MULTILINE)
 
     # 12.5 Single-asterisk italic *text* (after bold and bullet processing)
-    text = re.sub(r"(?<![a-zA-Z0-9\*])\*([^*]+)\*(?![a-zA-Z0-9\*])", r"<i>\1</i>", text)
+    text = re.sub(r"(?<![a-zA-Z0-9\*])\*([^*\n]+?)\*(?![a-zA-Z0-9\*])", r"<i>\1</i>", text)
 
-    # 13. Ordered lists  1. item -> 1. item (preserve numbering, just clean indent)
-    text = re.sub(r"^(\d+)\.\s+", r"\1. ", text, flags=re.MULTILINE)
-
-    # 14. Restore inline code with HTML tags
+    # 13. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
 
-    # 15. Restore code blocks with HTML tags
+    # 14. Restore code blocks with HTML tags
     for i, code in enumerate(code_blocks):
         escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
-    # 16. Restore table blocks (already contain valid HTML)
+    # 15. Restore table blocks (already contain valid HTML)
     for i, tbl in enumerate(table_blocks):
         text = text.replace(f"\x00TB{i}\x00", tbl)
+
+    # 16. Restore blockquote blocks (already contain valid HTML)
+    for i, bq in enumerate(blockquote_blocks):
+        text = text.replace(f"\x00BQ{i}\x00", bq)
 
     return text
 
