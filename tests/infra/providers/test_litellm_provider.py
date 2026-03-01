@@ -10,10 +10,32 @@ from hal.infra.providers.litellm_provider import LiteLLMProvider
 
 
 class _Usage:
-    def __init__(self, prompt_tokens: int, completion_tokens: int, total_tokens: int):
+    def __init__(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        cache_creation_input_tokens: int | None = None,
+        cache_read_input_tokens: int | None = None,
+        prompt_cache_miss_tokens: int | None = None,
+        prompt_tokens_details=None,
+        _cache_creation_input_tokens: int | None = None,
+        _cache_read_input_tokens: int | None = None,
+    ):
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
         self.total_tokens = total_tokens
+        self.cache_creation_input_tokens = cache_creation_input_tokens
+        self.cache_read_input_tokens = cache_read_input_tokens
+        self.prompt_cache_miss_tokens = prompt_cache_miss_tokens
+        self.prompt_tokens_details = prompt_tokens_details
+        self._cache_creation_input_tokens = _cache_creation_input_tokens
+        self._cache_read_input_tokens = _cache_read_input_tokens
+
+
+class _PromptTokensDetails:
+    def __init__(self, cached_tokens: int):
+        self.cached_tokens = cached_tokens
 
 
 class _Func:
@@ -161,6 +183,27 @@ def test_parse_response_tool_calls_and_usage() -> None:
     assert parsed.tool_calls[1].arguments == {"raw": "not json"}
 
 
+def test_parse_response_usage_includes_cache_fields() -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
+    usage = _Usage(
+        100,
+        20,
+        120,
+        cache_creation_input_tokens=80,
+        cache_read_input_tokens=16,
+        prompt_cache_miss_tokens=24,
+    )
+    resp = _Resp(_Choice(_Msg("ok")), usage=usage)
+
+    parsed = p._parse_response(resp)
+    assert parsed.usage["prompt_tokens"] == 100
+    assert parsed.usage["completion_tokens"] == 20
+    assert parsed.usage["total_tokens"] == 120
+    assert parsed.usage["cache_creation_input_tokens"] == 80
+    assert parsed.usage["cache_read_input_tokens"] == 16
+    assert parsed.usage["prompt_cache_miss_tokens"] == 24
+
+
 @pytest.mark.asyncio
 async def test_chat_applies_model_overrides_and_passes_tools(
     monkeypatch: pytest.MonkeyPatch,
@@ -191,6 +234,105 @@ async def test_chat_applies_model_overrides_and_passes_tools(
     # tool wiring
     assert called["tools"] == tools
     assert called["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_provider_request_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="gpt-4o",
+        request_params={"prompt_cache_key": "k1", "prompt_cache_retention": "in_memory"},
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+
+    await p.chat(messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}])
+
+    assert called["prompt_cache_key"] == "k1"
+    assert called["prompt_cache_retention"] == "in_memory"
+
+
+@pytest.mark.asyncio
+async def test_chat_applies_cache_control_on_anthropic_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude-opus-4-6")
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+
+    tools = [
+        {"type": "function", "function": {"name": "fs", "parameters": {"type": "object"}}},
+        {"type": "function", "function": {"name": "exec", "parameters": {"type": "object"}}},
+    ]
+    await p.chat(
+        messages=[
+            {"role": "system", "content": "stable system prompt"},
+            {"role": "user", "content": "hi"},
+        ],
+        tools=tools,
+    )
+
+    assert isinstance(called["messages"][0]["content"], list)
+    assert called["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert called["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+async def test_chat_does_not_apply_cache_control_on_non_anthropic_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="gpt-4o-mini")
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+
+    await p.chat(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ]
+    )
+
+    assert called["messages"][0]["content"] == "sys"
+
+
+@pytest.mark.asyncio
+async def test_chat_openrouter_non_claude_skips_cache_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(
+        api_key="sk-or-test",
+        api_base="https://openrouter.ai/api/v1",
+        default_model="deepseek-chat",
+        provider_name="openrouter",
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+
+    await p.chat(messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}])
+
+    assert called["model"].startswith("openrouter/")
+    assert called["messages"][0]["content"] == "sys"
 
 
 @pytest.mark.asyncio
@@ -303,3 +445,46 @@ async def test_aggregate_stream_separates_tool_calls_when_index_is_reused() -> N
     assert result.tool_calls[1].id == "call_web"
     assert result.tool_calls[1].name == "web_search"
     assert result.tool_calls[1].arguments == {"query": "abc"}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_stream_usage_includes_cache_fields() -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
+
+    async def _stream():
+        delta = SimpleNamespace(content="hello", reasoning_content=None, tool_calls=None)
+        choice = SimpleNamespace(delta=delta, finish_reason="stop")
+        usage = _Usage(
+            120,
+            20,
+            140,
+            cache_creation_input_tokens=80,
+            cache_read_input_tokens=16,
+            prompt_cache_miss_tokens=30,
+        )
+        yield SimpleNamespace(choices=[choice], usage=usage)
+
+    result = await p._aggregate_stream(_stream())
+
+    assert result.usage["prompt_tokens"] == 120
+    assert result.usage["completion_tokens"] == 20
+    assert result.usage["total_tokens"] == 140
+    assert result.usage["cache_creation_input_tokens"] == 80
+    assert result.usage["cache_read_input_tokens"] == 16
+    assert result.usage["prompt_cache_miss_tokens"] == 30
+
+
+def test_parse_response_reads_cached_tokens_from_prompt_token_details() -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
+    usage = _Usage(
+        10,
+        2,
+        12,
+        cache_creation_input_tokens=None,
+        cache_read_input_tokens=None,
+        prompt_tokens_details=_PromptTokensDetails(cached_tokens=6),
+    )
+    resp = _Resp(_Choice(_Msg("ok")), usage=usage)
+
+    parsed = p._parse_response(resp)
+    assert parsed.usage["cache_read_input_tokens"] == 6

@@ -30,12 +30,14 @@ class LiteLLMProvider(LLMProvider):
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
         compat_mode: str = "",
+        request_params: dict[str, Any] | None = None,
         provider_name: str = "",
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._compat_mode = compat_mode
+        self.request_params = request_params or {}
         self.provider_name = provider_name
 
         # In compat_mode, skip gateway detection — the user explicitly declared
@@ -133,6 +135,155 @@ class LiteLLMProvider(LLMProvider):
                     kwargs.update(overrides)
                     return
 
+    def _supports_cache_control(self, model: str) -> bool:
+        """Return True when this request path supports Anthropic-style cache_control."""
+        spec = self._gateway
+        if spec is None and self.provider_name:
+            spec = find_by_name(self.provider_name)
+        if spec is None:
+            spec = find_by_model(model)
+        if not spec or not spec.supports_prompt_caching:
+            return False
+
+        # OpenRouter can route many providers. Restrict cache_control injection
+        # to Anthropic-family models to avoid cross-provider schema issues.
+        if spec.name == "openrouter":
+            model_lower = model.lower()
+            return "claude" in model_lower or "anthropic/" in model_lower
+        return True
+
+    @staticmethod
+    def _apply_cache_control(
+        messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        """Inject Anthropic-style cache_control breakpoints for stable prefixes."""
+        if not messages:
+            return messages, tools
+
+        updated_messages = [dict(msg) for msg in messages]
+        system_idx = next(
+            (
+                idx
+                for idx in range(len(updated_messages) - 1, -1, -1)
+                if updated_messages[idx].get("role") == "system"
+            ),
+            None,
+        )
+        if system_idx is not None:
+            system_msg = dict(updated_messages[system_idx])
+            content = system_msg.get("content")
+
+            if isinstance(content, str):
+                system_msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": content,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            elif isinstance(content, list):
+                blocks: list[dict[str, Any]] = []
+                for item in content:
+                    if isinstance(item, dict):
+                        blocks.append(dict(item))
+                    elif isinstance(item, str):
+                        blocks.append({"type": "text", "text": item})
+                    else:
+                        blocks.append({"type": "text", "text": str(item)})
+
+                if blocks:
+                    blocks[-1] = {
+                        **blocks[-1],
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                else:
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "text": "",
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    )
+                system_msg["content"] = blocks
+            else:
+                system_msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": str(content),
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+
+            updated_messages[system_idx] = system_msg
+
+        updated_tools = tools
+        if tools:
+            updated_tools = [dict(tool) for tool in tools]
+            updated_tools[-1]["cache_control"] = {"type": "ephemeral"}
+
+        return updated_messages, updated_tools
+
+    @staticmethod
+    def _coerce_usage_int(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        return None
+
+    @classmethod
+    def _read_usage_field(cls, usage: Any, key: str) -> int | None:
+        if isinstance(usage, dict):
+            return cls._coerce_usage_int(usage.get(key))
+        return cls._coerce_usage_int(getattr(usage, key, None))
+
+    @classmethod
+    def _extract_usage(cls, usage: Any) -> dict[str, int]:
+        if not usage:
+            return {}
+
+        extracted: dict[str, int] = {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = cls._read_usage_field(usage, key)
+            if value is not None:
+                extracted[key] = value
+
+        cache_creation = cls._read_usage_field(usage, "cache_creation_input_tokens")
+        if cache_creation is None:
+            cache_creation = cls._read_usage_field(usage, "_cache_creation_input_tokens")
+
+        cache_read = cls._read_usage_field(usage, "cache_read_input_tokens")
+        if cache_read is None:
+            cache_read = cls._read_usage_field(usage, "_cache_read_input_tokens")
+
+        if cache_read is None:
+            prompt_details = (
+                usage.get("prompt_tokens_details")
+                if isinstance(usage, dict)
+                else getattr(usage, "prompt_tokens_details", None)
+            )
+            if prompt_details is not None:
+                cache_read = cls._read_usage_field(prompt_details, "cached_tokens")
+
+        if cache_creation is not None:
+            extracted["cache_creation_input_tokens"] = cache_creation
+        if cache_read is not None:
+            extracted["cache_read_input_tokens"] = cache_read
+        cache_miss = cls._read_usage_field(usage, "prompt_cache_miss_tokens")
+        if cache_miss is not None:
+            extracted["prompt_cache_miss_tokens"] = cache_miss
+
+        if (
+            "total_tokens" not in extracted
+            and "prompt_tokens" in extracted
+            and "completion_tokens" in extracted
+        ):
+            extracted["total_tokens"] = extracted["prompt_tokens"] + extracted["completion_tokens"]
+
+        return extracted
+
     # Allowed keys per message role (OpenAI chat format).
     _ALLOWED_KEYS: dict[str, set[str]] = {
         "system": {"role", "content"},
@@ -191,6 +342,8 @@ class LiteLLMProvider(LLMProvider):
         """
         model = self.resolve_model(model)
         messages = self._sanitize_messages(messages)
+        if self._supports_cache_control(model):
+            messages, tools = self._apply_cache_control(messages, tools)
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -198,6 +351,13 @@ class LiteLLMProvider(LLMProvider):
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+
+        if self.request_params:
+            reserved_keys = {"model", "messages", "tools", "tool_choice"}
+            for key, value in self.request_params.items():
+                if key in reserved_keys:
+                    continue
+                kwargs[key] = value
 
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
@@ -318,11 +478,7 @@ class LiteLLMProvider(LLMProvider):
 
             # Usage (usually on the last chunk)
             if hasattr(chunk, "usage") and chunk.usage:
-                usage = {
-                    "prompt_tokens": chunk.usage.prompt_tokens or 0,
-                    "completion_tokens": chunk.usage.completion_tokens or 0,
-                    "total_tokens": chunk.usage.total_tokens or 0,
-                }
+                usage = self._extract_usage(chunk.usage)
 
         # Build tool calls list preserving first-seen order
         tool_calls: list[ToolCallRequest] = []
@@ -371,11 +527,7 @@ class LiteLLMProvider(LLMProvider):
 
         usage = {}
         if hasattr(response, "usage") and response.usage:
-            usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
+            usage = self._extract_usage(response.usage)
 
         # Capture reasoning_content from thinking/reasoning models (e.g. kimi-k2.5,
         # DeepSeek-R1). LiteLLM unifies this across providers.

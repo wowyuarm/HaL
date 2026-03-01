@@ -29,6 +29,12 @@ class ContextMetrics:
     first_prompt_tokens: int | None = None
     first_completion_tokens: int | None = None
     first_total_tokens: int | None = None
+    first_cache_creation_tokens: int | None = None
+    first_cache_read_tokens: int | None = None
+    first_cache_miss_tokens: int | None = None
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_miss_tokens: int = 0
     loop_iterations: int = 0
     tools_used: list[str] = field(default_factory=list)
     spawn_count: int = 0

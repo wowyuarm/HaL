@@ -33,6 +33,9 @@ class LoopMetadata:
     total_tool_calls: int = 0
     has_side_effects: bool = False
     skipped_tool_calls: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_miss_tokens: int = 0
     first_response_usage: dict[str, int] = field(default_factory=dict)
     total_usage: dict[str, int] = field(default_factory=dict)
     loop_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -201,6 +204,9 @@ async def run_tool_loop(
                 meta.first_response_usage = dict(usage)
             for key, value in usage.items():
                 meta.total_usage[key] = meta.total_usage.get(key, 0) + value
+            meta.cache_creation_tokens += usage.get("cache_creation_input_tokens", 0)
+            meta.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
+            meta.cache_miss_tokens += usage.get("prompt_cache_miss_tokens", 0)
 
         if response.has_tool_calls:
             # Build assistant message with tool calls
@@ -342,20 +348,32 @@ async def run_tool_loop(
 def _normalize_usage(usage: dict[str, Any]) -> dict[str, int]:
     """Normalize response usage dict into integer counters.
 
-    Only standard OpenAI fields are extracted. Cache-specific fields
-    (Anthropic's cache_creation_input_tokens / cache_read_input_tokens,
-    OpenAI's prompt_tokens_details.cached_tokens) are NOT captured here
-    because our current provider path (anyrouter bridge) does not
-    reliably forward them. Revisit when switching to a direct provider.
+    Extracts standard token counters and cache counters when available.
     """
     if not usage:
         return {}
 
     normalized: dict[str, int] = {}
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "prompt_cache_miss_tokens",
+    ):
         value = usage.get(key)
         if isinstance(value, int):
             normalized[key] = value
         elif isinstance(value, float):
             normalized[key] = int(value)
+
+    if "cache_read_input_tokens" not in normalized:
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            cached_tokens = prompt_details.get("cached_tokens")
+            if isinstance(cached_tokens, int):
+                normalized["cache_read_input_tokens"] = cached_tokens
+            elif isinstance(cached_tokens, float):
+                normalized["cache_read_input_tokens"] = int(cached_tokens)
     return normalized

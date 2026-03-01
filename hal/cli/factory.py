@@ -46,6 +46,7 @@ def make_provider(config):
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         compat_mode=p.compat_mode if p else "",
+        request_params=p.request_params if p else None,
         provider_name=provider_name,
     )
 
@@ -91,6 +92,7 @@ def _make_alternate_provider(config, model_name: str):
         default_model=model_name,
         extra_headers=sp.extra_headers if sp else None,
         compat_mode=sp.compat_mode if sp else "",
+        request_params=sp.request_params if sp else None,
         provider_name=provider_name,
     )
 

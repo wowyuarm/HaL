@@ -309,6 +309,18 @@ class AgentEngine:
         pre_metrics.first_prompt_tokens = meta.first_response_usage.get("prompt_tokens")
         pre_metrics.first_completion_tokens = meta.first_response_usage.get("completion_tokens")
         pre_metrics.first_total_tokens = meta.first_response_usage.get("total_tokens")
+        pre_metrics.first_cache_creation_tokens = meta.first_response_usage.get(
+            "cache_creation_input_tokens"
+        )
+        pre_metrics.first_cache_read_tokens = meta.first_response_usage.get(
+            "cache_read_input_tokens"
+        )
+        pre_metrics.first_cache_miss_tokens = meta.first_response_usage.get(
+            "prompt_cache_miss_tokens"
+        )
+        pre_metrics.total_cache_creation_tokens = meta.cache_creation_tokens
+        pre_metrics.total_cache_read_tokens = meta.cache_read_tokens
+        pre_metrics.total_cache_miss_tokens = meta.cache_miss_tokens
         pre_metrics.loop_iterations = meta.iterations
         pre_metrics.tools_used = list(meta.tools_used)
         pre_metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)
@@ -430,6 +442,18 @@ class AgentEngine:
         pre_metrics.first_prompt_tokens = meta.first_response_usage.get("prompt_tokens")
         pre_metrics.first_completion_tokens = meta.first_response_usage.get("completion_tokens")
         pre_metrics.first_total_tokens = meta.first_response_usage.get("total_tokens")
+        pre_metrics.first_cache_creation_tokens = meta.first_response_usage.get(
+            "cache_creation_input_tokens"
+        )
+        pre_metrics.first_cache_read_tokens = meta.first_response_usage.get(
+            "cache_read_input_tokens"
+        )
+        pre_metrics.first_cache_miss_tokens = meta.first_response_usage.get(
+            "prompt_cache_miss_tokens"
+        )
+        pre_metrics.total_cache_creation_tokens = meta.cache_creation_tokens
+        pre_metrics.total_cache_read_tokens = meta.cache_read_tokens
+        pre_metrics.total_cache_miss_tokens = meta.cache_miss_tokens
         pre_metrics.loop_iterations = meta.iterations
         pre_metrics.tools_used = list(meta.tools_used)
         pre_metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)

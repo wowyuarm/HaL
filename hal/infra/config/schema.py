@@ -1,6 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -68,6 +69,7 @@ class ProviderConfig(BaseModel):
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom request headers for provider endpoints
     compat_mode: str = ""  # Protocol hint for proxies: "openai" = OpenAI-compatible endpoint
+    request_params: dict[str, Any] | None = None  # Optional per-request LiteLLM params
 
 
 class ProvidersConfig(BaseModel):
@@ -194,6 +196,4 @@ class Config(BaseSettings):
                 return spec.default_api_base
         return None
 
-    model_config = SettingsConfigDict(
-        env_prefix="HAL_", env_nested_delimiter="__", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_prefix="HAL_", env_nested_delimiter="__", extra="ignore")

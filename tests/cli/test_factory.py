@@ -43,6 +43,31 @@ def test_make_alternate_provider_passes_resolved_provider_name(monkeypatch) -> N
     assert captured["provider_name"] == "anyrouter"
 
 
+def test_make_provider_passes_request_params(monkeypatch) -> None:
+    config = Config()
+    config.agents.defaults.model = "gpt-4o"
+    config.providers.openai.api_key = "openai-key"
+    config.providers.openai.request_params = {
+        "prompt_cache_key": "hal-cache-key",
+        "prompt_cache_retention": "24h",
+    }
+
+    captured = {}
+
+    class DummyProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("hal.infra.providers.litellm_provider.LiteLLMProvider", DummyProvider)
+
+    provider = factory.make_provider(config)
+    assert isinstance(provider, DummyProvider)
+    assert captured["request_params"] == {
+        "prompt_cache_key": "hal-cache-key",
+        "prompt_cache_retention": "24h",
+    }
+
+
 def test_make_memory_search_returns_none_when_pymilvus_missing(monkeypatch) -> None:
     config = Config()
     calls: list[str] = []

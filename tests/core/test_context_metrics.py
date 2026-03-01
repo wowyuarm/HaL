@@ -10,7 +10,7 @@ import pytest
 
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.core.context.metrics import ContextMetrics, MetricsCollector
-from hal.core.runtime.loop import run_tool_loop
+from hal.core.runtime.loop import _normalize_usage, run_tool_loop
 from hal.infra.providers.base import LLMProvider, LLMResponse
 
 
@@ -36,6 +36,12 @@ def test_metrics_collector_record_writes_jsonl(tmp_path: Path) -> None:
     assert data["system_prompt_chars"] == 123
     assert data["total_input_chars"] == 456
     assert data["first_prompt_tokens"] is None  # not set in this row
+    assert data["first_cache_creation_tokens"] is None
+    assert data["first_cache_read_tokens"] is None
+    assert data["first_cache_miss_tokens"] is None
+    assert data["total_cache_creation_tokens"] == 0
+    assert data["total_cache_read_tokens"] == 0
+    assert data["total_cache_miss_tokens"] == 0
 
 
 def test_metrics_collector_summary_returns_stats(tmp_path: Path) -> None:
@@ -72,7 +78,9 @@ def test_metrics_collector_get_latest_with_filters(tmp_path: Path) -> None:
         ContextMetrics.create(channel="telegram", chat_id="1", mode="collab", total_input_chars=20)
     )
     collector.record(
-        ContextMetrics.create(channel="telegram", chat_id="2", mode="operator", total_input_chars=30)
+        ContextMetrics.create(
+            channel="telegram", chat_id="2", mode="operator", total_input_chars=30
+        )
     )
 
     latest_tg = collector.get_latest(channel="telegram")
@@ -118,3 +126,68 @@ async def test_run_tool_loop_records_first_response_usage() -> None:
         "completion_tokens": 22,
         "total_tokens": 133,
     }
+
+
+@pytest.mark.asyncio
+async def test_run_tool_loop_records_cache_usage_counters() -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(
+            content="done",
+            tool_calls=[],
+            usage={
+                "prompt_tokens": 200,
+                "completion_tokens": 20,
+                "total_tokens": 220,
+                "cache_creation_input_tokens": 160,
+                "cache_read_input_tokens": 0,
+                "prompt_cache_miss_tokens": 40,
+            },
+            finish_reason="stop",
+        )
+    )
+
+    final_content, meta = await run_tool_loop(
+        provider=provider,
+        model="test-model",
+        tools=ToolRegistry(),
+        messages=[{"role": "system", "content": "test"}],
+        max_iterations=1,
+    )
+
+    assert final_content == "done"
+    assert meta.cache_creation_tokens == 160
+    assert meta.cache_read_tokens == 0
+    assert meta.cache_miss_tokens == 40
+    assert meta.total_usage["cache_creation_input_tokens"] == 160
+    assert meta.total_usage["cache_read_input_tokens"] == 0
+    assert meta.total_usage["prompt_cache_miss_tokens"] == 40
+
+
+def test_normalize_usage_reads_prompt_tokens_details_cached_tokens() -> None:
+    normalized = _normalize_usage(
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 48},
+        }
+    )
+
+    assert normalized["prompt_tokens"] == 100
+    assert normalized["completion_tokens"] == 20
+    assert normalized["total_tokens"] == 120
+    assert normalized["cache_read_input_tokens"] == 48
+
+
+def test_normalize_usage_reads_prompt_cache_miss_tokens() -> None:
+    normalized = _normalize_usage(
+        {
+            "prompt_tokens": 140,
+            "completion_tokens": 20,
+            "total_tokens": 160,
+            "prompt_cache_miss_tokens": 60,
+        }
+    )
+
+    assert normalized["prompt_cache_miss_tokens"] == 60
