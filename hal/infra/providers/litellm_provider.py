@@ -133,6 +133,41 @@ class LiteLLMProvider(LLMProvider):
                     kwargs.update(overrides)
                     return
 
+    # Allowed keys per message role (OpenAI chat format).
+    _ALLOWED_KEYS: dict[str, set[str]] = {
+        "system": {"role", "content"},
+        "user": {"role", "content"},
+        "assistant": {"role", "content", "tool_calls"},
+        "tool": {"role", "tool_call_id", "name", "content"},
+    }
+
+    @staticmethod
+    def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Sanitize messages before LLM dispatch.
+
+        - Converts null/missing content to empty string.
+        - Strips non-standard keys per role (e.g. reasoning_content).
+        - Preserves multimodal content lists for user messages.
+        """
+        sanitized: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            allowed = LiteLLMProvider._ALLOWED_KEYS.get(role)
+
+            if allowed is None:
+                # Unknown role — pass through as-is (future-proofing)
+                sanitized.append(msg)
+                continue
+
+            cleaned: dict[str, Any] = {k: v for k, v in msg.items() if k in allowed}
+
+            # Ensure content is never None (providers may reject null content)
+            if cleaned.get("content") is None:
+                cleaned["content"] = ""
+
+            sanitized.append(cleaned)
+        return sanitized
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -155,6 +190,7 @@ class LiteLLMProvider(LLMProvider):
             LLMResponse with content and/or tool calls.
         """
         model = self.resolve_model(model)
+        messages = self._sanitize_messages(messages)
 
         kwargs: dict[str, Any] = {
             "model": model,
@@ -299,9 +335,7 @@ class LiteLLMProvider(LLMProvider):
                 args = {"raw": args_str}
 
             tool_call_id = entry["id"] or f"call_{pos}"
-            tool_calls.append(
-                ToolCallRequest(id=tool_call_id, name=entry["name"], arguments=args)
-            )
+            tool_calls.append(ToolCallRequest(id=tool_call_id, name=entry["name"], arguments=args))
 
         return LLMResponse(
             content="".join(content_parts) or None,

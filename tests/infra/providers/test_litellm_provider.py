@@ -46,6 +46,62 @@ class _Resp:
         self.usage = usage
 
 
+# --- sanitize_messages tests ---
+
+
+class TestSanitizeMessages:
+    """Tests for _sanitize_messages static method."""
+
+    def test_drops_unknown_keys(self) -> None:
+        messages = [
+            {"role": "assistant", "content": "hi", "reasoning_content": "thinking..."},
+            {"role": "user", "content": "hello", "extra_field": True},
+        ]
+        result = LiteLLMProvider._sanitize_messages(messages)
+        assert result[0] == {"role": "assistant", "content": "hi"}
+        assert result[1] == {"role": "user", "content": "hello"}
+
+    def test_converts_null_content_to_empty_string(self) -> None:
+        messages = [
+            {"role": "assistant", "content": None, "tool_calls": []},
+            {"role": "system", "content": None},
+        ]
+        result = LiteLLMProvider._sanitize_messages(messages)
+        assert result[0]["content"] == ""
+        assert result[0]["tool_calls"] == []
+        assert result[1]["content"] == ""
+
+    def test_preserves_multimodal_content(self) -> None:
+        content = [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+            {"type": "text", "text": "describe this"},
+        ]
+        messages = [{"role": "user", "content": content}]
+        result = LiteLLMProvider._sanitize_messages(messages)
+        assert result[0]["content"] is content
+
+    def test_preserves_valid_tool_messages(self) -> None:
+        messages = [
+            {"role": "tool", "tool_call_id": "call_1", "name": "fs", "content": '{"ok": true}'},
+        ]
+        result = LiteLLMProvider._sanitize_messages(messages)
+        assert result[0] == messages[0]
+
+    def test_preserves_assistant_tool_calls(self) -> None:
+        tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "fs"}}]
+        messages = [{"role": "assistant", "content": "", "tool_calls": tool_calls}]
+        result = LiteLLMProvider._sanitize_messages(messages)
+        assert result[0]["tool_calls"] == tool_calls
+
+    def test_unknown_role_passes_through(self) -> None:
+        messages = [{"role": "developer", "content": "hello", "extra": True}]
+        result = LiteLLMProvider._sanitize_messages(messages)
+        assert result[0] == messages[0]
+
+    def test_empty_messages_list(self) -> None:
+        assert LiteLLMProvider._sanitize_messages([]) == []
+
+
 def test_gateway_detection_and_env_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     # OpenRouter keys start with sk-or-
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
