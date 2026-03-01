@@ -135,6 +135,25 @@ def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     assert '<a href="https://example.com">link</a>' in html
 
 
+def test_markdown_to_telegram_html_enhanced_patterns() -> None:
+    md = (
+        "**bold** and *italic*\n"
+        "* list item\n"
+        "  - nested item\n"
+        "some_var_name should stay plain\n"
+        "In a sentence, *word* should be italic.\n"
+    )
+
+    html = _markdown_to_telegram_html(md)
+
+    assert "<b>bold</b> and <i>italic</i>" in html
+    assert "• list item" in html
+    assert "  • nested item" in html
+    assert "some_var_name" in html
+    assert "some<i>" not in html
+    assert "In a sentence, <i>word</i> should be italic." in html
+
+
 @pytest.mark.asyncio
 async def test_send_returns_when_app_not_running() -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
