@@ -4,6 +4,14 @@ from typing import Any
 
 from hal.capabilities.tools.base import Tool
 
+_HINT_RETRY = "Check the parameters and try again."
+_HINT_AVAILABLE = "Available tools: {tools}"
+
+
+def _with_hint(error: str, hint: str) -> str:
+    """Append a hint line to an error message."""
+    return f"{error}\nHint: {hint}"
+
 
 class ToolRegistry:
     """
@@ -51,15 +59,21 @@ class ToolRegistry:
         """
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: Tool '{name}' not found"
+            return _with_hint(
+                f"Error: Tool '{name}' not found",
+                _HINT_AVAILABLE.format(tools=", ".join(self.tool_names)),
+            )
 
         try:
             errors = tool.validate_params(params)
             if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+                return _with_hint(
+                    f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors),
+                    _HINT_RETRY,
+                )
             return await tool.execute(**params)
         except Exception as e:
-            return f"Error executing {name}: {str(e)}"
+            return _with_hint(f"Error executing {name}: {str(e)}", _HINT_RETRY)
 
     @property
     def tool_names(self) -> list[str]:
