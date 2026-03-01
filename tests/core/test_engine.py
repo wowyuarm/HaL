@@ -622,6 +622,65 @@ class TestMidLoopInjection:
         progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
         assert len(progress_msgs) == 0
 
+    async def test_no_progress_for_message_only_tool_calls(self, engine, mock_provider):
+        """Message-only tool calls should not emit separate progress notifications."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="message", arguments={"content": "hello"}),
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        outbound_messages: list[OutboundMessage] = []
+
+        async def capture_outbound(msg: OutboundMessage) -> None:
+            outbound_messages.append(msg)
+
+        engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
+        mock_provider.chat.side_effect = [
+            LLMResponse(content="我来给你发一条消息", tool_calls=tool_calls),
+            LLMResponse(content="done", tool_calls=[]),
+        ]
+
+        await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            channel="telegram",
+            chat_id="c1",
+        )
+
+        progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
+        assert len(progress_msgs) == 0
+
+    async def test_progress_hides_message_tool_when_mixed_with_others(self, engine, mock_provider):
+        """Progress should include actionable tools but hide message tool lines."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="message", arguments={"content": "hello"}),
+            ToolCallRequest(id="t2", name="fs", arguments={"action": "list", "path": "."}),
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        outbound_messages: list[OutboundMessage] = []
+
+        async def capture_outbound(msg: OutboundMessage) -> None:
+            outbound_messages.append(msg)
+
+        engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
+        mock_provider.chat.side_effect = [
+            LLMResponse(content="先发消息再查目录", tool_calls=tool_calls),
+            LLMResponse(content="done", tool_calls=[]),
+        ]
+
+        await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            channel="telegram",
+            chat_id="c1",
+        )
+
+        progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
+        assert len(progress_msgs) == 1
+        assert "↳ fs(" in progress_msgs[0].content
+        assert "↳ message(" not in progress_msgs[0].content
+
 
 class TestRunLoop:
     async def test_run_publishes_dispatch_response(self, engine):

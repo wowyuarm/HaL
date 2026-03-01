@@ -1023,7 +1023,13 @@ class _EngineLoopHooks:
         if not (self._channel and self._chat_id):
             return None
 
-        text = _format_progress_message(assistant_content, tool_calls)
+        # Hide message-tool progress in chat channels to avoid duplicated user-facing output:
+        # the message tool already sends its own outbound message.
+        visible_tool_calls = [tc for tc in tool_calls if getattr(tc, "name", "") != "message"]
+        if not visible_tool_calls:
+            return None
+
+        text = _format_progress_message(assistant_content, visible_tool_calls)
         if not text:
             return None
 
