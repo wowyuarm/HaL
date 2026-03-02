@@ -13,7 +13,6 @@ from hal.core.ports import SubagentPort
 
 if TYPE_CHECKING:
     from hal.bus.queue import MessageBus
-    from hal.capabilities.scheduling.cron_service import CronService
     from hal.core.memory.search import MemorySearch
     from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
@@ -28,13 +27,12 @@ def create_tools(
     web_fetch_config: "WebFetchConfig | None" = None,
     bus: "MessageBus | None" = None,
     subagent_manager: SubagentPort | None = None,
-    cron_service: "CronService | None" = None,
     memory_search: "MemorySearch | None" = None,
 ) -> ToolRegistry:
     """Build a ToolRegistry with the requested capabilities.
 
     Core tools (fs, exec, web_search, web_fetch) are always registered.
-    Optional tools (message, spawn, cron, recall) are registered only when
+    Optional tools (message, spawn, recall) are registered only when
     their dependencies are provided.
 
     Args:
@@ -46,7 +44,6 @@ def create_tools(
         web_fetch_config: Web fetch tool settings (max_chars, timeout, redirects).
         bus: Message bus (enables message tool).
         subagent_manager: Subagent manager (enables spawn tool).
-        cron_service: Cron service (enables cron tool).
         memory_search: Memory search (enables recall tool).
     """
     from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
@@ -94,11 +91,6 @@ def create_tools(
 
         send_cb = bus.publish_outbound if bus else None
         tools.register(SpawnTool(manager=subagent_manager, send_callback=send_cb))
-
-    if cron_service:
-        from hal.capabilities.tools.schedule import CronTool
-
-        tools.register(CronTool(cron_service))
 
     if memory_search:
         from hal.capabilities.tools.recall import RecallTool

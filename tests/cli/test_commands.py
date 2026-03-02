@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -27,75 +26,6 @@ def test_resolve_worker_model_uses_primary_when_default() -> None:
 
 def test_resolve_worker_model_uses_worker_override() -> None:
     assert commands._resolve_worker_model("claude-opus", "gpt-5.3-codex") == "gpt-5.3-codex"
-
-
-def _read_cron_store(home: Path) -> tuple[Path, dict]:
-    store_path = home / ".hal" / "cron" / "jobs.json"
-    assert store_path.exists()
-    return store_path, json.loads(store_path.read_text(encoding="utf-8"))
-
-
-def test_cron_add_list_run_enable_remove(tmp_home: Path) -> None:
-    # Add job (every)
-    add = runner.invoke(
-        commands.app,
-        [
-            "cron",
-            "add",
-            "--name",
-            "daily",
-            "--message",
-            "hello",
-            "--every",
-            "60",
-        ],
-    )
-    assert add.exit_code == 0
-
-    store_path, data = _read_cron_store(tmp_home)
-    assert data.get("jobs"), f"Expected jobs in {store_path}"
-    job_id = data["jobs"][0]["id"]
-
-    # List jobs
-    lst = runner.invoke(commands.app, ["cron", "list"])
-    assert lst.exit_code == 0
-
-    # Disable
-    dis = runner.invoke(commands.app, ["cron", "enable", job_id, "--disable"])
-    assert dis.exit_code == 0
-
-    # Run job with --force even if disabled
-    run = runner.invoke(commands.app, ["cron", "run", job_id, "--force"])
-    assert run.exit_code == 0
-    assert "Job executed" in run.output
-
-    # Re-load store and ensure lastStatus updated
-    _, data2 = _read_cron_store(tmp_home)
-    state = data2["jobs"][0].get("state") or {}
-    assert state.get("lastStatus") in {"ok", "error"}
-
-    # Remove
-    rm = runner.invoke(commands.app, ["cron", "remove", job_id])
-    assert rm.exit_code == 0
-
-    # Store should be empty
-    _, data3 = _read_cron_store(tmp_home)
-    assert data3.get("jobs") == []
-
-
-def test_cron_add_requires_schedule(tmp_home: Path) -> None:
-    result = runner.invoke(
-        commands.app,
-        [
-            "cron",
-            "add",
-            "--name",
-            "x",
-            "--message",
-            "hi",
-        ],
-    )
-    assert result.exit_code != 0
 
 
 def test_anyrouter_bridge_requires_api_key(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

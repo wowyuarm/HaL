@@ -34,7 +34,7 @@ class ExecutionMode(str, Enum):
 
     COLLAB = "collab"  # Real-time collaborative (user message → response)
     ASYNC = "async"  # Background tasks
-    OPERATOR = "operator"  # Scheduled monitoring / cron
+    OPERATOR = "operator"  # Focused background execution
 
 
 # ------------------------------------------------------------------
@@ -211,7 +211,6 @@ Layout:
   skills/    — skill packages (each has SKILL.md)
   logs/      — daily interaction logs (JSONL)
   artifacts/ — generated artifacts (subagent full reports under artifacts/subagent/)
-  cron/      — scheduled job store
   scripts/   — reusable scripts you can create and execute
   projects/  — project working files and artifacts
   media/     — received and generated media files

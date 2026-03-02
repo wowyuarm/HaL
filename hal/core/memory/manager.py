@@ -83,7 +83,7 @@ class MemoryManager:
         Record a conversation entry in the daily log.
 
         Args:
-            channel: Channel name (e.g., "telegram", "cli", "cron")
+            channel: Channel name (e.g., "telegram", "cli")
             chat_id: Chat identifier
             role: "user", "assistant", or "tool"
             content: Message content

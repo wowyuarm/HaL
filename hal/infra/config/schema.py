@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,7 +59,7 @@ class AgentDefaults(_StrictModel):
     temperature: float = 0.7
     max_tool_iterations: int = 20
     summary_model: str = "default"  # Model for post-loop summaries; "default" uses main model
-    worker_model: str = "default"  # Model for workers (subagents, cron); "default" uses main
+    worker_model: str = "default"  # Model for worker agents; "default" uses main
     history: HistoryConfig = Field(default_factory=HistoryConfig)
 
 
@@ -154,9 +154,7 @@ class MemorySearchConfig(_StrictModel):
     max_chunk_size: int = 1000
     chunk_overlap_lines: int = 2
     chunk_heading_max_level: int = 2
-    exclude_channels: list[str] = Field(
-        default_factory=lambda: ["cron"]
-    )  # Channels excluded from memory export/index
+    exclude_channels: list[str] = Field(default_factory=list)  # Channels excluded from export/index
     embed_retry_attempts: int = Field(default=3, ge=1)  # Embedding API retry count
     embed_retry_base_delay_s: float = Field(default=0.5, gt=0)  # Base delay for exponential backoff
     embed_timeout_s: float = Field(default=60.0, gt=0)  # HTTP timeout for embedding API calls
@@ -170,54 +168,6 @@ class EngineConfig(_StrictModel):
     operator_max_iterations: int = Field(default=10, ge=1)  # Max tool iterations in OPERATOR mode
 
 
-class HeartbeatConfig(_StrictModel):
-    """Heartbeat service configuration."""
-
-    interval_s: int = Field(default=1800, ge=60)  # Check interval (seconds); min 1 minute
-
-
-class CronConfig(_StrictModel):
-    """Cron service configuration."""
-
-    summary_window: int = Field(
-        default=5,
-        ge=1,
-        validation_alias=AliasChoices("summary_window", "summary_windows"),
-    )  # Number of recent summaries to include for cron runs
-    tools: list[str] = Field(
-        default_factory=lambda: ["fs", "exec", "web_search", "web_fetch"],
-        min_length=1,
-    )  # Allowed tools for all isolated cron agents
-
-    @field_validator("tools")
-    @classmethod
-    def _validate_tools(cls, value: list[str]) -> list[str]:
-        allowed = {"fs", "exec", "web_search", "web_fetch"}
-        cleaned: list[str] = []
-        seen: set[str] = set()
-        for raw in value:
-            name = raw.strip()
-            if not name:
-                continue
-            if name not in allowed:
-                raise ValueError(
-                    f"Unsupported cron tool '{name}'. Allowed: {', '.join(sorted(allowed))}"
-                )
-            if name not in seen:
-                cleaned.append(name)
-                seen.add(name)
-        if not cleaned:
-            raise ValueError("Cron tools cannot be empty")
-        return cleaned
-
-
-class SchedulingConfig(_StrictModel):
-    """Scheduling services configuration."""
-
-    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
-    cron: CronConfig = Field(default_factory=CronConfig)
-
-
 class Config(BaseSettings):
     """Root configuration for HaL."""
 
@@ -228,7 +178,8 @@ class Config(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     memory_search: MemorySearchConfig = Field(default_factory=MemorySearchConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
-    scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
+    # Kept as untyped legacy section so older config files remain loadable.
+    scheduling: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def workspace_path(self) -> Path:

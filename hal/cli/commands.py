@@ -2,13 +2,11 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import typer
 from rich.console import Console
 
 from hal import __logo__, __version__
-from hal.cli.cron_commands import cron_app
 from hal.cli.factory import (
     make_memory_search,
     make_provider,
@@ -21,7 +19,6 @@ app = typer.Typer(
     help=f"{__logo__} HaL - Digital Butler",
     no_args_is_help=True,
 )
-app.add_typer(cron_app, name="cron")
 anyrouter_app = typer.Typer(help="Manage AnyRouter bridge")
 app.add_typer(anyrouter_app, name="anyrouter")
 
@@ -181,13 +178,9 @@ def gateway(
 ):
     """Start the HaL gateway."""
     from hal.bus.queue import MessageBus
-    from hal.capabilities.scheduling.cron_service import CronService
-    from hal.capabilities.scheduling.heartbeat import HeartbeatService
-    from hal.capabilities.scheduling.runner import CronAgentRunner
-    from hal.capabilities.scheduling.types import CronJob
     from hal.channels.manager import ChannelManager
     from hal.core.engine import AgentLoop
-    from hal.infra.config.loader import get_data_dir, load_config
+    from hal.infra.config.loader import load_config
 
     if verbose:
         import logging
@@ -200,33 +193,8 @@ def gateway(
     bus = MessageBus()
     provider = make_provider(config)
 
-    # Create cron service first (callback set after agent creation)
-    cron_store_path = get_data_dir() / "cron" / "jobs.json"
-    cron = CronService(cron_store_path)
-
-    # Create agent with cron service
     memory_search = make_memory_search(config) if config.memory_search.enabled else None
-    worker_model = _resolve_worker_model(
-        config.agents.defaults.model, config.agents.defaults.worker_model
-    )
     worker_provider = make_worker_provider(config) or provider
-    cron_runner = CronAgentRunner(
-        cron_dir=cron_store_path.parent,
-        provider=worker_provider,
-        model=worker_model,
-        workspace=config.workspace_path,
-        exec_config=config.tools.exec,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        web_search_api_key=config.tools.web.search.api_key or None,
-        summary_window=config.scheduling.cron.summary_window,
-        allowed_tools=config.scheduling.cron.tools,
-        max_iterations=min(
-            config.agents.defaults.max_tool_iterations,
-            config.engine.operator_max_iterations,
-        ),
-        web_search_config=config.tools.web.search,
-        web_fetch_config=config.tools.web.fetch,
-    )
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -235,8 +203,6 @@ def gateway(
         max_iterations=config.agents.defaults.max_tool_iterations,
         web_search_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
-        cron_service=cron,
-        cron_runner=cron_runner,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
         summary_provider=make_summary_provider(config),
@@ -247,60 +213,8 @@ def gateway(
         recall_min_score=config.memory_search.recall_min_score,
         history_config=config.agents.defaults.history,
         engine_config=config.engine,
-        cron_summary_window=config.scheduling.cron.summary_window,
         web_search_config=config.tools.web.search,
         web_fetch_config=config.tools.web.fetch,
-    )
-
-    # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
-        """Publish a cron job to the MessageBus for processing."""
-        from hal.bus.events import InboundMessage
-
-        metadata: dict[str, Any] = {
-            "cron_job_id": job.id,
-            "cron_job_name": job.name,
-            "deliver": job.payload.deliver and bool(job.payload.to),
-        }
-        if metadata["deliver"]:
-            metadata["deliver_channel"] = job.payload.channel or "cli"
-            metadata["deliver_chat_id"] = job.payload.to
-
-        await bus.publish_inbound(
-            InboundMessage(
-                channel="cron",
-                sender_id="cron",
-                chat_id=job.id,
-                content=job.payload.message,
-                origin="cron",
-                metadata=metadata,
-            )
-        )
-        return None
-
-    cron.on_job = on_cron_job
-
-    # Create heartbeat service
-    async def on_heartbeat(prompt: str) -> str | None:
-        """Publish heartbeat to the MessageBus for processing."""
-        from hal.bus.events import InboundMessage
-
-        await bus.publish_inbound(
-            InboundMessage(
-                channel="heartbeat",
-                sender_id="heartbeat",
-                chat_id="system",
-                content=prompt,
-                origin="heartbeat",
-            )
-        )
-        return None
-
-    heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
-        on_heartbeat=on_heartbeat,
-        interval_s=config.scheduling.heartbeat.interval_s,
-        enabled=True,
     )
 
     # Create channel manager
@@ -316,13 +230,6 @@ def gateway(
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
-
-    cron_status = cron.status()
-    if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-
-    hb_min = config.scheduling.heartbeat.interval_s // 60
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_min}m")
 
     async def run():
         nonlocal memory_search
@@ -342,9 +249,6 @@ def gateway(
                     console.print(f"[yellow]Memory search init failed: {e}[/yellow]")
                     agent.disable_memory_search()
                     memory_search = None
-
-            await cron.start()
-            await heartbeat.start()
 
             tasks = [
                 agent.run(),
@@ -380,8 +284,6 @@ def gateway(
             await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
-            heartbeat.stop()
-            cron.stop()
             agent.stop()
             await channels.stop_all()
 

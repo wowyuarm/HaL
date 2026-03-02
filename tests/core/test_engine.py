@@ -76,34 +76,6 @@ def engine(bus, mock_provider, workspace):
         yield eng
 
 
-@pytest.fixture
-def engine_with_cron(bus, mock_provider, workspace):
-    """AgentEngine with a cron_service provided (registers CronTool)."""
-    cron = MagicMock()
-    with (
-        patch("hal.core.engine.ContextBuilder") as mock_ctx,
-        patch("hal.core.engine.MemoryManager") as mock_mem,
-        patch("hal.core.engine.SubagentManager"),
-    ):
-        builder_instance = mock_ctx.return_value
-        builder_instance.build_messages.return_value = [
-            {"role": "system", "content": "You are a test agent."},
-        ]
-        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc, **kw: msgs
-        builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
-
-        mem_instance = mock_mem.return_value
-
-        eng = AgentEngine(
-            bus=bus,
-            provider=mock_provider,
-            workspace=workspace,
-            cron_service=cron,
-            memory_manager=mem_instance,
-        )
-        yield eng
-
-
 # ------------------------------------------------------------------
 # Init & alias
 # ------------------------------------------------------------------
@@ -130,9 +102,6 @@ class TestRegisterDefaultTools:
         registered = set(engine.tools.tool_names)
         assert expected.issubset(registered), f"Missing tools: {expected - registered}"
 
-    def test_cron_tool_registered_when_cron_service_provided(self, engine_with_cron):
-        assert "cron" in set(engine_with_cron.tools.tool_names)
-
 
 # ------------------------------------------------------------------
 # _update_tool_contexts
@@ -151,12 +120,6 @@ class TestUpdateToolContexts:
         assert spawn_tool._origin_channel == "telegram"
         assert spawn_tool._origin_chat_id == "chat123"
 
-    def test_sets_context_on_cron_when_present(self, engine_with_cron):
-        engine_with_cron._update_tool_contexts("discord", "c9")
-        cron_tool = engine_with_cron.tools.get("cron")
-        assert cron_tool._channel == "discord"
-        assert cron_tool._chat_id == "c9"
-
 
 # ------------------------------------------------------------------
 # process_direct routing
@@ -164,35 +127,8 @@ class TestUpdateToolContexts:
 
 
 class TestProcessDirect:
-    async def test_cron_session_routes_to_operator(self, engine):
-        """Sessions starting with 'cron:' should be handled by process_operator."""
-        with patch.object(engine, "process_operator", new_callable=AsyncMock) as mock_op:
-            mock_op.return_value = "operator result"
-
-            result = await engine.process_direct(
-                content="check status",
-                session_key="cron:daily-check",
-                channel="cli",
-                chat_id="direct",
-            )
-
-            mock_op.assert_awaited_once()
-            assert result == "operator result"
-
-    async def test_heartbeat_session_routes_to_operator(self, engine):
-        with patch.object(engine, "process_operator", new_callable=AsyncMock) as mock_op:
-            mock_op.return_value = "heartbeat result"
-
-            result = await engine.process_direct(
-                content="heartbeat",
-                session_key="heartbeat",
-            )
-
-            mock_op.assert_awaited_once()
-            assert result == "heartbeat result"
-
     async def test_regular_session_routes_to_collab(self, engine):
-        """Non-cron sessions should be handled by process_collab."""
+        """Direct sessions should be handled by process_collab."""
         with patch.object(engine, "process_collab", new_callable=AsyncMock) as mock_collab:
             mock_collab.return_value = OutboundMessage(
                 channel="cli", chat_id="direct", content="collab result"
@@ -233,155 +169,6 @@ class TestDispatch:
         await engine._dispatch(msg)
         engine.process_collab.assert_awaited_once_with(msg)
 
-    async def test_dispatch_cron_routes_to_operator(self, engine):
-        """Cron-origin messages should route to process_operator, not process_collab."""
-        msg = InboundMessage(
-            channel="cron",
-            sender_id="cron",
-            chat_id="abc123",
-            content="check updates",
-            origin="cron",
-            metadata={"cron_job_id": "abc123", "deliver": False},
-        )
-        engine.process_operator = AsyncMock(return_value="done")  # type: ignore[method-assign]
-
-        result = await engine._dispatch(msg)
-
-        engine.process_operator.assert_awaited_once_with(
-            prompt="check updates",
-            channel="cron",
-            chat_id="abc123",
-            session_key="cron:abc123",
-            origin="cron",
-        )
-        assert result is None  # deliver=False → no outbound
-
-    async def test_dispatch_cron_with_deliver(self, engine):
-        """Cron with deliver=True should return OutboundMessage to target channel."""
-        msg = InboundMessage(
-            channel="cron",
-            sender_id="cron",
-            chat_id="abc123",
-            content="check updates",
-            origin="cron",
-            metadata={
-                "cron_job_id": "abc123",
-                "cron_job_name": "update-check",
-                "deliver": True,
-                "deliver_channel": "telegram",
-                "deliver_chat_id": "999",
-            },
-        )
-        engine.process_operator = AsyncMock(return_value="Update found!")  # type: ignore[method-assign]
-
-        result = await engine._dispatch(msg)
-
-        assert result is not None
-        assert result.channel == "telegram"
-        assert result.chat_id == "999"
-        assert "[⏰ cron: update-check]" in result.content
-        assert "Update found!" in result.content
-
-    async def test_dispatch_cron_uses_runner_when_available(self, engine):
-        msg = InboundMessage(
-            channel="cron",
-            sender_id="cron",
-            chat_id="abc123",
-            content="check updates",
-            origin="cron",
-            metadata={"cron_job_id": "abc123", "deliver": False},
-        )
-        runner = MagicMock()
-        runner.run = AsyncMock(return_value=("isolated done", LoopMetadata()))
-        engine._cron_runner = runner
-        engine._find_cron_job = MagicMock(return_value=MagicMock(id="abc123"))  # type: ignore[method-assign]
-        engine._trigger_cron_summary = MagicMock()  # type: ignore[method-assign]
-        engine.process_operator = AsyncMock(return_value="legacy")  # type: ignore[method-assign]
-
-        result = await engine._dispatch(msg)
-
-        assert result is None
-        runner.run.assert_awaited_once()
-        engine.process_operator.assert_not_awaited()
-        engine._trigger_cron_summary.assert_called_once()
-
-    async def test_dispatch_cron_runner_deliver_not_blocked_by_stale_message_flag(self, engine):
-        msg = InboundMessage(
-            channel="cron",
-            sender_id="cron",
-            chat_id="abc123",
-            content="check updates",
-            origin="cron",
-            metadata={
-                "cron_job_id": "abc123",
-                "cron_job_name": "update-check",
-                "deliver": True,
-                "deliver_channel": "telegram",
-                "deliver_chat_id": "999",
-            },
-        )
-        runner = MagicMock()
-        runner.run = AsyncMock(return_value=("isolated done", LoopMetadata()))
-        engine._cron_runner = runner
-        engine._find_cron_job = MagicMock(return_value=MagicMock(id="abc123"))  # type: ignore[method-assign]
-        engine._trigger_cron_summary = MagicMock()  # type: ignore[method-assign]
-        engine.process_operator = AsyncMock(return_value="legacy")  # type: ignore[method-assign]
-
-        # Simulate stale state from previous turn.
-        message_tool = engine.tools.get("message")
-        message_tool._sent_in_turn = True
-
-        result = await engine._dispatch(msg)
-
-        assert result is not None
-        assert result.channel == "telegram"
-        assert result.chat_id == "999"
-        assert "isolated done" in result.content
-        engine.process_operator.assert_not_awaited()
-
-    async def test_dispatch_cron_falls_back_when_runner_returns_none(self, engine):
-        msg = InboundMessage(
-            channel="cron",
-            sender_id="cron",
-            chat_id="abc123",
-            content="check updates",
-            origin="cron",
-            metadata={"cron_job_id": "abc123", "deliver": False},
-        )
-        runner = MagicMock()
-        runner.run = AsyncMock(return_value=None)
-        engine._cron_runner = runner
-        engine._find_cron_job = MagicMock(return_value=MagicMock(id="abc123"))  # type: ignore[method-assign]
-        engine.process_operator = AsyncMock(return_value="legacy done")  # type: ignore[method-assign]
-
-        result = await engine._dispatch(msg)
-
-        assert result is None
-        runner.run.assert_awaited_once()
-        engine.process_operator.assert_awaited_once()
-
-    async def test_dispatch_heartbeat_routes_to_operator(self, engine):
-        """Heartbeat-origin messages should route to process_operator, return None."""
-        msg = InboundMessage(
-            channel="heartbeat",
-            sender_id="heartbeat",
-            chat_id="system",
-            content="check tasks",
-            origin="heartbeat",
-        )
-        engine.process_operator = AsyncMock(return_value="HEARTBEAT_OK")  # type: ignore[method-assign]
-
-        result = await engine._dispatch(msg)
-
-        engine.process_operator.assert_awaited_once_with(
-            prompt="check tasks",
-            channel="heartbeat",
-            chat_id="system",
-            session_key="heartbeat:system",
-            origin="heartbeat",
-        )
-        assert result is None
-
     async def test_defaults_final_content_when_execute_loop_returns_none(self, engine):
         engine._execute_loop = AsyncMock(return_value=(None, LoopMetadata(tools_used=["fs"]), []))  # type: ignore[method-assign]
 
@@ -409,23 +196,6 @@ class TestProcessOperator:
         assert result == "Monitoring complete. Nothing to report."
         # second arg to _execute_loop is max_iter
         assert engine._execute_loop.await_args.args[1] == 10
-
-    async def test_operator_cron_uses_summary_window_for_history(self, engine):
-        engine._cron_summary_window = 2
-        engine.memory.get_conversation_history.return_value = []
-        engine._execute_loop = AsyncMock(return_value=("done", LoopMetadata(), []))  # type: ignore[method-assign]
-
-        await engine.process_operator(
-            prompt="check",
-            channel="cron",
-            chat_id="job1",
-            origin="cron",
-        )
-
-        kwargs = engine.memory.get_conversation_history.call_args.kwargs
-        assert kwargs["max_messages"] == 6
-        assert kwargs["recent_full_turns"] == 0
-
 
 class TestExecuteLoop:
     async def test_tool_calls_are_executed_and_tools_used_is_deduped(self, engine, mock_provider):

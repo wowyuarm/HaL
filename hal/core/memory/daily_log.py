@@ -19,14 +19,14 @@ class LogEntry(BaseModel):
     """A single entry in the daily log."""
 
     timestamp: str  # ISO format timestamp
-    channel: str  # "telegram", "cli", "cron", "discord", etc.
+    channel: str  # "telegram", "cli", "discord", etc.
     chat_id: str  # Chat identifier (e.g., "123456789" for Telegram, "cli" for CLI)
     role: str  # "user", "assistant", "tool"
     content: str
     tool_name: str | None = None  # Only for role="tool"
     tool_result: str | None = None  # Only for role="tool"
     entry_type: str = "message"  # "message" | "summary"
-    origin: str = "user"  # "user" | "cron" | "heartbeat"
+    origin: str = "user"
 
 
 class DailyLog:
@@ -35,7 +35,7 @@ class DailyLog:
 
     Features:
     - Daily files: YYYY-MM-DD.jsonl
-    - All channels unified (telegram, cli, cron, etc.)
+    - All channels unified (telegram, cli, discord, etc.)
     - Tool messages are recorded but can be filtered out for context building
     - Simple append-only format
     """
@@ -86,7 +86,7 @@ class DailyLog:
         Append a new entry to the daily log.
 
         Args:
-            channel: Channel name (e.g., "telegram", "cli", "cron")
+            channel: Channel name (e.g., "telegram", "cli")
             chat_id: Chat identifier
             role: "user", "assistant", or "tool"
             content: Message content
