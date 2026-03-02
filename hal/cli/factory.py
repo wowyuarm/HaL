@@ -56,9 +56,9 @@ def make_summary_provider(config):
     return _make_alternate_provider(config, config.agents.defaults.summary_model)
 
 
-def make_subagent_provider(config):
-    """Create a separate LiteLLMProvider for subagent model if needed. Returns None if same provider."""
-    return _make_alternate_provider(config, config.agents.defaults.subagent_model)
+def make_worker_provider(config):
+    """Create a separate LiteLLMProvider for worker model if needed. Returns None if same provider."""
+    return _make_alternate_provider(config, config.agents.defaults.worker_model)
 
 
 def _make_alternate_provider(config, model_name: str):

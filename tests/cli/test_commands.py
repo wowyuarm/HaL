@@ -21,6 +21,14 @@ def test_version_flag_exits_0() -> None:
     assert "hal v" in result.output
 
 
+def test_resolve_worker_model_uses_primary_when_default() -> None:
+    assert commands._resolve_worker_model("claude-opus", "default") == "claude-opus"
+
+
+def test_resolve_worker_model_uses_worker_override() -> None:
+    assert commands._resolve_worker_model("claude-opus", "gpt-5.3-codex") == "gpt-5.3-codex"
+
+
 def _read_cron_store(home: Path) -> tuple[Path, dict]:
     store_path = home / ".hal" / "cron" / "jobs.json"
     assert store_path.exists()

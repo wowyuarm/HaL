@@ -12,8 +12,8 @@ from hal.cli.cron_commands import cron_app
 from hal.cli.factory import (
     make_memory_search,
     make_provider,
-    make_subagent_provider,
     make_summary_provider,
+    make_worker_provider,
 )
 
 app = typer.Typer(
@@ -31,6 +31,14 @@ ANYROUTER_DEFAULT_BETA = (
     "interleaved-thinking-2025-05-14"
 )
 ANYROUTER_DEFAULT_USER_AGENT = "claude-cli/2.1.2 (external, cli)"
+
+
+_DEFAULT_MODEL_SENTINEL = "default"
+
+
+def _resolve_worker_model(primary_model: str, worker_model: str) -> str:
+    """Resolve worker model config where 'default' means using the primary model."""
+    return primary_model if worker_model == _DEFAULT_MODEL_SENTINEL else worker_model
 
 
 def version_callback(value: bool):
@@ -198,10 +206,14 @@ def gateway(
 
     # Create agent with cron service
     memory_search = make_memory_search(config) if config.memory_search.enabled else None
+    worker_model = _resolve_worker_model(
+        config.agents.defaults.model, config.agents.defaults.worker_model
+    )
+    worker_provider = make_worker_provider(config) or provider
     cron_runner = CronAgentRunner(
         cron_dir=cron_store_path.parent,
-        provider=provider,
-        model=config.agents.defaults.model,
+        provider=worker_provider,
+        model=worker_model,
         workspace=config.workspace_path,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -228,8 +240,8 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
         summary_provider=make_summary_provider(config),
-        subagent_model=config.agents.defaults.subagent_model,
-        subagent_provider=make_subagent_provider(config),
+        worker_model=config.agents.defaults.worker_model,
+        worker_provider=worker_provider,
         memory_search=memory_search,
         auto_inject_top_k=config.memory_search.auto_inject_top_k,
         recall_min_score=config.memory_search.recall_min_score,
