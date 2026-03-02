@@ -75,6 +75,7 @@ class CronService:
                 data = json.loads(self.store_path.read_text())
                 jobs = []
                 for j in data.get("jobs", []):
+                    payload_data = j.get("payload") or {}
                     jobs.append(
                         CronJob(
                             id=j["id"],
@@ -88,11 +89,11 @@ class CronService:
                                 tz=j["schedule"].get("tz"),
                             ),
                             payload=CronPayload(
-                                kind=j["payload"].get("kind", "agent_turn"),
-                                message=j["payload"].get("message", ""),
-                                deliver=j["payload"].get("deliver", False),
-                                channel=j["payload"].get("channel"),
-                                to=j["payload"].get("to"),
+                                # Legacy stores may include payload.kind; ignore it.
+                                message=payload_data.get("message", ""),
+                                deliver=payload_data.get("deliver", False),
+                                channel=payload_data.get("channel"),
+                                to=payload_data.get("to"),
                             ),
                             state=CronJobState(
                                 next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -137,7 +138,6 @@ class CronService:
                         "tz": j.schedule.tz,
                     },
                     "payload": {
-                        "kind": j.payload.kind,
                         "message": j.payload.message,
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
@@ -304,7 +304,6 @@ class CronService:
             enabled=True,
             schedule=schedule,
             payload=CronPayload(
-                kind="agent_turn",
                 message=message,
                 deliver=deliver,
                 channel=channel,

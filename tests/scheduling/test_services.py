@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -244,6 +245,60 @@ def test_cron_service_load_store_invalid_json(tmp_path: Path) -> None:
     service = CronService(store_path=store)
     st = service.status()
     assert st["jobs"] == 0
+
+
+def test_cron_service_load_legacy_payload_kind_ignored(tmp_path: Path) -> None:
+    store = tmp_path / "jobs.json"
+    store.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": [
+                    {
+                        "id": "legacy1",
+                        "name": "legacy",
+                        "enabled": True,
+                        "schedule": {"kind": "every", "everyMs": 60000},
+                        "payload": {
+                            "kind": "agent_turn",
+                            "message": "check updates",
+                            "deliver": True,
+                            "channel": "telegram",
+                            "to": "123",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = CronService(store_path=store)
+    jobs = service.list_jobs(include_disabled=True)
+
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job.payload.message == "check updates"
+    assert job.payload.deliver is True
+    assert job.payload.channel == "telegram"
+    assert job.payload.to == "123"
+    assert not hasattr(job.payload, "kind")
+
+
+def test_cron_service_save_store_omits_payload_kind(tmp_path: Path) -> None:
+    store = tmp_path / "jobs.json"
+    service = CronService(store_path=store)
+
+    service.add_job(
+        name="daily",
+        schedule=CronSchedule(kind="every", every_ms=60000),
+        message="hello",
+    )
+
+    saved = json.loads(store.read_text(encoding="utf-8"))
+    payload = saved["jobs"][0]["payload"]
+    assert "kind" not in payload
+    assert payload["message"] == "hello"
 
 
 def test_is_heartbeat_empty_logic() -> None:

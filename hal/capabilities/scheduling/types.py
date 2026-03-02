@@ -21,9 +21,8 @@ class CronSchedule:
 
 @dataclass
 class CronPayload:
-    """What to do when the job runs."""
+    """Operator-mode prompt and optional delivery target for a cron run."""
 
-    kind: Literal["system_event", "agent_turn"] = "agent_turn"
     message: str = ""
     # Deliver response to channel
     deliver: bool = False
