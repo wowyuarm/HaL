@@ -305,6 +305,40 @@ class TestDispatch:
         engine.process_operator.assert_not_awaited()
         engine._trigger_cron_summary.assert_called_once()
 
+    async def test_dispatch_cron_runner_deliver_not_blocked_by_stale_message_flag(self, engine):
+        msg = InboundMessage(
+            channel="cron",
+            sender_id="cron",
+            chat_id="abc123",
+            content="check updates",
+            origin="cron",
+            metadata={
+                "cron_job_id": "abc123",
+                "cron_job_name": "update-check",
+                "deliver": True,
+                "deliver_channel": "telegram",
+                "deliver_chat_id": "999",
+            },
+        )
+        runner = MagicMock()
+        runner.run = AsyncMock(return_value=("isolated done", LoopMetadata()))
+        engine._cron_runner = runner
+        engine._find_cron_job = MagicMock(return_value=MagicMock(id="abc123"))  # type: ignore[method-assign]
+        engine._trigger_cron_summary = MagicMock()  # type: ignore[method-assign]
+        engine.process_operator = AsyncMock(return_value="legacy")  # type: ignore[method-assign]
+
+        # Simulate stale state from previous turn.
+        message_tool = engine.tools.get("message")
+        message_tool._sent_in_turn = True
+
+        result = await engine._dispatch(msg)
+
+        assert result is not None
+        assert result.channel == "telegram"
+        assert result.chat_id == "999"
+        assert "isolated done" in result.content
+        engine.process_operator.assert_not_awaited()
+
     async def test_dispatch_cron_falls_back_when_runner_returns_none(self, engine):
         msg = InboundMessage(
             channel="cron",

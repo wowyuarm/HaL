@@ -200,10 +200,15 @@ class MemorySearch:
                 for c in chunks
                 if _extract_channel_from_heading(c.heading) not in self._exclude_channels
             ]
+        source = str(md_path.relative_to(self._daily_dir))
         if not chunks:
+            # Source now fully excluded (or empty): clear any previously indexed chunks
+            # so backfill/index checks do not keep flagging this file for reindex.
+            existing_ids = await self._store.get_chunk_ids_by_source(source)
+            if existing_ids:
+                await self._store.delete_by_source(source)
             return 0
 
-        source = str(md_path.relative_to(self._daily_dir))
         new_ids = {self._chunk_id(c) for c in chunks}
         existing_ids = await self._store.get_chunk_ids_by_source(source)
 

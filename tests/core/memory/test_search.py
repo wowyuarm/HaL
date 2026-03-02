@@ -166,6 +166,36 @@ class TestIndexDate:
             # Should not call embed again since chunks are already indexed
             assert mock_embed.call_count == first_calls
 
+    async def test_index_file_clears_stale_source_when_all_chunks_excluded(
+        self, memory_search, daily_dir
+    ):
+        source = "2026-02-12.md"
+        md_path = daily_dir / source
+        md_path.write_text(
+            "# 2026-02-12\n\n## cron / job-1\n\n**[10:30] User**: should be excluded\n",
+            encoding="utf-8",
+        )
+        memory_search._exclude_channels = {"cron"}
+
+        await memory_search._store.upsert(
+            [
+                {
+                    "chunk_id": "stale-1",
+                    "embedding": [0.1] * 8,
+                    "content": "old cron content",
+                    "source": source,
+                    "heading": "cron / job-1",
+                    "source_type": "raw",
+                }
+            ]
+        )
+
+        count = await memory_search._index_file(md_path)
+        remaining = await memory_search._store.get_chunk_ids_by_source(source)
+
+        assert count == 0
+        assert remaining == set()
+
 
 class TestSearch:
     async def test_search_returns_results(self, memory_search, daily_log, daily_dir):

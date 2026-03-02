@@ -201,6 +201,9 @@ class AgentEngine:
         job_id = str(msg.metadata.get("cron_job_id", msg.chat_id))
         response: str
 
+        # Reset per-turn tool state (notably message.sent_in_turn) for this cron dispatch.
+        self._update_tool_contexts(msg.channel, msg.chat_id)
+
         isolated_result: tuple[str | None, LoopMetadata] | None = None
         if self._cron_runner:
             job = self._find_cron_job(job_id)
