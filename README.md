@@ -236,3 +236,6 @@ docker build -t hal .
 docker run -v ~/.hal:/root/.hal --rm hal onboard
 docker run -v ~/.hal:/root/.hal -p 18790:18790 hal gateway
 ```
+
+---
+_Managed by HaL_ 🤖
