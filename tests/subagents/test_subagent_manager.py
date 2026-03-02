@@ -408,7 +408,7 @@ def test_build_skills_section_uses_workspace_skill_script_path(tmp_path) -> None
 name: deepwiki
 description: DeepWiki helper
 ---
-Run `scripts/deepwiki.sh` to inspect repository docs.
+Run `scripts/deepwiki.sh` to inspect repository context.
 """,
         encoding="utf-8",
     )

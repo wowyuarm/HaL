@@ -1,13 +1,13 @@
 [project]
-name = "hal-agent"
-version = "0.1.3.post5"
-description = "A reliable, precise, and independent digital butler framework"
+name = "HaL"
+version = "0.1.0"
+description = "Yu's personal digital butler - orchestrator and leader"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "hal contributors"}
 ]
-keywords = ["ai", "agent", "butler", "hal"]
+keywords = ["ai", "agent"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -60,25 +60,17 @@ packages = ["hal"]
 [tool.hatch.build.targets.wheel.sources]
 "hal" = "hal"
 
-# Include non-Python files in skills
+# Include package Python code and bundled Node bridge script.
 [tool.hatch.build]
 include = [
     "hal/**/*.py",
-    "hal/**/*.mjs",
-    "hal/skills/**/*.md",
-    "hal/skills/**/*.sh",
+    "hal/**/*.mjs"
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "hal/",
-    "bridge/",
-    "README.md",
-    "LICENSE",
 ]
-
-# [tool.hatch.build.targets.wheel.force-include]
-# "bridge" = "hal/bridge"  # Uncomment when bridge directory exists
 
 [tool.ruff]
 line-length = 100
