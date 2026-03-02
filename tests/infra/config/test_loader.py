@@ -16,6 +16,7 @@ from hal.infra.config.loader import (
 )
 from hal.infra.config.schema import (
     Config,
+    CronConfig,
     EngineConfig,
     ExecToolConfig,
     HeartbeatConfig,
@@ -147,6 +148,11 @@ def test_heartbeat_below_minimum_rejected() -> None:
         HeartbeatConfig(interval_s=30)  # minimum is 60
 
 
+def test_summary_window_below_minimum_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CronConfig(summary_window=0)
+
+
 def test_max_redirects_zero_rejected() -> None:
     with pytest.raises(ValidationError):
         WebFetchConfig(max_redirects=0)
@@ -197,9 +203,11 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.memory_search.embed_retry_attempts == 3
     assert cfg.memory_search.embed_retry_base_delay_s == 0.5
     assert cfg.memory_search.embed_timeout_s == 60.0
+    assert cfg.memory_search.exclude_channels == ["cron"]
 
     # Channels
     assert cfg.channels.outbound_poll_timeout_s == 1.0
 
     # Scheduling
     assert cfg.scheduling.heartbeat.interval_s == 1800
+    assert cfg.scheduling.cron.summary_window == 5

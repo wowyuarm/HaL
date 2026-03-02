@@ -106,6 +106,14 @@ tools:
   web:
     search:
       max_results: 5
+
+memory_search:
+  enabled: false
+  exclude_channels: ["cron"]  # prevent cron sessions from entering recall index
+
+scheduling:
+  cron:
+    summary_window: 5
 ```
 
 **`auth.yaml`** — Secrets (gitignored):
@@ -135,6 +143,8 @@ hal anyrouter bridge
 
 # Cron management
 hal cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
+# Delivery is set per job at creation time (not global config):
+# hal cron add ... --deliver --channel telegram --to <chat_id>
 hal cron list
 hal cron remove <job_id>
 ```

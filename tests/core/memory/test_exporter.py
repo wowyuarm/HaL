@@ -77,6 +77,15 @@ class TestFilterEntries:
         result = DailyExporter._filter_entries(entries)
         assert len(result) == 1
 
+    def test_excludes_configured_channels(self):
+        entries = [
+            _make_entry(channel="cron", chat_id="job1", role="user", content="cron note"),
+            _make_entry(channel="telegram", chat_id="123", role="user", content="user note"),
+        ]
+        result = DailyExporter._filter_entries(entries, exclude_channels={"cron"})
+        assert len(result) == 1
+        assert result[0].channel == "telegram"
+
 
 class TestFormatMarkdown:
     def test_groups_by_channel(self):

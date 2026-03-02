@@ -30,10 +30,17 @@ class DailyExporter:
     Idempotent: skips dates whose .md already exists.
     """
 
-    def __init__(self, daily_log: DailyLog, output_dir: Path):
+    def __init__(
+        self,
+        daily_log: DailyLog,
+        output_dir: Path,
+        *,
+        exclude_channels: list[str] | None = None,
+    ):
         self._log = daily_log
         self._output_dir = output_dir
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._exclude_channels = {c.strip().lower() for c in (exclude_channels or []) if c.strip()}
 
     def export_date(self, target_date: date) -> Path | None:
         """Export a single date to markdown. Returns path if written, None if skipped."""
@@ -43,7 +50,7 @@ class DailyExporter:
             return None
 
         entries = self._log.get_all_entries(start_date=target_date, end_date=target_date)
-        filtered = self._filter_entries(entries)
+        filtered = self._filter_entries(entries, exclude_channels=self._exclude_channels)
         if not filtered:
             logger.debug(f"No exportable entries for {target_date}")
             return None
@@ -69,14 +76,19 @@ class DailyExporter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _filter_entries(entries: list[LogEntry]) -> list[LogEntry]:
+    def _filter_entries(
+        entries: list[LogEntry], *, exclude_channels: set[str] | None = None
+    ) -> list[LogEntry]:
         """Apply export filtering rules.
 
         Keep: role in (user, assistant) with entry_type in (message, injection)
         Skip: role=system, role=tool with entry_type != injection
         """
         result: list[LogEntry] = []
+        excluded = exclude_channels or set()
         for e in entries:
+            if e.channel.lower() in excluded:
+                continue
             if e.role == "system":
                 continue
             if e.role == "tool" and e.entry_type != "injection":

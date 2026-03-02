@@ -154,6 +154,9 @@ class MemorySearchConfig(_StrictModel):
     max_chunk_size: int = 1000
     chunk_overlap_lines: int = 2
     chunk_heading_max_level: int = 2
+    exclude_channels: list[str] = Field(
+        default_factory=lambda: ["cron"]
+    )  # Channels excluded from memory export/index
     embed_retry_attempts: int = Field(default=3, ge=1)  # Embedding API retry count
     embed_retry_base_delay_s: float = Field(default=0.5, gt=0)  # Base delay for exponential backoff
     embed_timeout_s: float = Field(default=60.0, gt=0)  # HTTP timeout for embedding API calls
@@ -173,10 +176,19 @@ class HeartbeatConfig(_StrictModel):
     interval_s: int = Field(default=1800, ge=60)  # Check interval (seconds); min 1 minute
 
 
+class CronConfig(_StrictModel):
+    """Cron service configuration."""
+
+    summary_window: int = Field(
+        default=5, ge=1
+    )  # Number of recent summaries to include for cron runs
+
+
 class SchedulingConfig(_StrictModel):
     """Scheduling services configuration."""
 
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    cron: CronConfig = Field(default_factory=CronConfig)
 
 
 class Config(BaseSettings):

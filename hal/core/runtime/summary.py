@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from loguru import logger
 
+from hal.capabilities.scheduling.cron_log import CronLog
+from hal.core.memory.daily_log import LogEntry
 from hal.core.memory.manager import MemoryManager
 from hal.core.runtime.loop import LoopMetadata
 from hal.infra.providers.base import LLMProvider
@@ -63,6 +67,45 @@ async def generate_summary(
             logger.info(f"[summary] recorded for {channel}:{chat_id}")
     except Exception as e:
         logger.warning(f"Failed to generate loop summary: {e}")
+
+
+async def generate_cron_summary(
+    *,
+    meta: LoopMetadata,
+    final_content: str,
+    cron_log: CronLog,
+    provider: LLMProvider,
+    model: str,
+    job_id: str,
+) -> None:
+    """Generate a concise summary for a cron run and append to per-job log."""
+    try:
+        prompt = _build_summary_prompt(meta, final_content)
+
+        response = await provider.chat(
+            messages=[
+                {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            tools=[],
+            model=model,
+        )
+
+        if response.content:
+            cron_log.append(
+                LogEntry(
+                    timestamp=datetime.now().isoformat(),
+                    channel="cron",
+                    chat_id=job_id,
+                    role="user",
+                    content=f"[System Summary]\n{response.content}",
+                    entry_type="summary",
+                    origin="cron",
+                )
+            )
+            logger.info(f"[summary] recorded for cron:{job_id}")
+    except Exception as e:
+        logger.warning(f"Failed to generate cron loop summary: {e}")
 
 
 def _build_summary_prompt(meta: LoopMetadata, final_content: str) -> str:

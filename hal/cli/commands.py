@@ -175,6 +175,7 @@ def gateway(
     from hal.bus.queue import MessageBus
     from hal.capabilities.scheduling.cron_service import CronService
     from hal.capabilities.scheduling.heartbeat import HeartbeatService
+    from hal.capabilities.scheduling.runner import CronAgentRunner
     from hal.capabilities.scheduling.types import CronJob
     from hal.channels.manager import ChannelManager
     from hal.core.engine import AgentLoop
@@ -197,6 +198,22 @@ def gateway(
 
     # Create agent with cron service
     memory_search = make_memory_search(config) if config.memory_search.enabled else None
+    cron_runner = CronAgentRunner(
+        cron_dir=cron_store_path.parent,
+        provider=provider,
+        model=config.agents.defaults.model,
+        workspace=config.workspace_path,
+        exec_config=config.tools.exec,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        web_search_api_key=config.tools.web.search.api_key or None,
+        summary_window=config.scheduling.cron.summary_window,
+        max_iterations=min(
+            config.agents.defaults.max_tool_iterations,
+            config.engine.operator_max_iterations,
+        ),
+        web_search_config=config.tools.web.search,
+        web_fetch_config=config.tools.web.fetch,
+    )
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -206,6 +223,7 @@ def gateway(
         web_search_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         cron_service=cron,
+        cron_runner=cron_runner,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         summary_model=config.agents.defaults.summary_model,
         summary_provider=make_summary_provider(config),
@@ -216,6 +234,7 @@ def gateway(
         recall_min_score=config.memory_search.recall_min_score,
         history_config=config.agents.defaults.history,
         engine_config=config.engine,
+        cron_summary_window=config.scheduling.cron.summary_window,
         web_search_config=config.tools.web.search,
         web_fetch_config=config.tools.web.fetch,
     )

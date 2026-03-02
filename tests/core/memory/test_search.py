@@ -7,7 +7,12 @@ import pytest
 
 from hal.core.memory.chunker import MarkdownChunker
 from hal.core.memory.exporter import DailyExporter
-from hal.core.memory.search import MemorySearch, _build_keyword_query, _build_keyword_terms
+from hal.core.memory.search import (
+    MemorySearch,
+    _build_keyword_query,
+    _build_keyword_terms,
+    _extract_channel_from_heading,
+)
 from hal.core.memory.store import SearchResult
 
 
@@ -198,6 +203,40 @@ class TestSearch:
         ):
             results = await memory_search.search("anything")
             assert results == []
+
+    async def test_search_excludes_channels(self, memory_search):
+        memory_search._exclude_channels = {"cron"}
+        fake_results = [
+            SearchResult(
+                content="cron update",
+                source="2026-02-12.md",
+                heading="cron / job-1",
+                score=0.95,
+                source_type="raw",
+            ),
+            SearchResult(
+                content="user update",
+                source="2026-02-12.md",
+                heading="telegram / 123",
+                score=0.9,
+                source_type="raw",
+            ),
+        ]
+        with (
+            patch.object(
+                memory_search,
+                "_embed_texts",
+                new_callable=AsyncMock,
+                return_value=_fake_embedding(["query"]),
+            ),
+            patch.object(
+                memory_search._store, "search", new_callable=AsyncMock, return_value=fake_results
+            ),
+        ):
+            results = await memory_search.search("update", top_k=5)
+
+        assert len(results) == 1
+        assert results[0].heading == "telegram / 123"
 
     async def test_summary_penalty_applied(self, memory_search, daily_log, daily_dir):
         """Summary chunks should have their scores reduced by the penalty factor."""
@@ -447,3 +486,9 @@ class TestEmbeddingResilience:
             source_name, indexed_sources={source_name}
         )
         assert needs_reindex is True
+
+
+def test_extract_channel_from_heading() -> None:
+    assert _extract_channel_from_heading("cron / job-1") == "cron"
+    assert _extract_channel_from_heading("telegram / 123") == "telegram"
+    assert _extract_channel_from_heading("section-without-channel") is None

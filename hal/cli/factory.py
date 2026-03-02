@@ -177,7 +177,7 @@ def make_memory_search(config):
     daily_log = DailyLog(log_dir)
     daily_dir = config.workspace_path / "memory" / "daily"
 
-    exporter = DailyExporter(daily_log, daily_dir)
+    exporter = DailyExporter(daily_log, daily_dir, exclude_channels=ms_cfg.exclude_channels)
     chunker = MarkdownChunker(
         max_size=ms_cfg.max_chunk_size,
         overlap_lines=ms_cfg.chunk_overlap_lines,
@@ -195,6 +195,7 @@ def make_memory_search(config):
         store=store,
         embedding_model=ms_cfg.embedding_model,
         daily_dir=daily_dir,
+        exclude_channels=ms_cfg.exclude_channels,
         embedding_dim=ms_cfg.embedding_dim,
         embed_retry_attempts=ms_cfg.embed_retry_attempts,
         embed_retry_base_delay_s=ms_cfg.embed_retry_base_delay_s,

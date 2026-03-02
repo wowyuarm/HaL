@@ -282,6 +282,50 @@ class TestDispatch:
         assert "[⏰ cron: update-check]" in result.content
         assert "Update found!" in result.content
 
+    async def test_dispatch_cron_uses_runner_when_available(self, engine):
+        msg = InboundMessage(
+            channel="cron",
+            sender_id="cron",
+            chat_id="abc123",
+            content="check updates",
+            origin="cron",
+            metadata={"cron_job_id": "abc123", "deliver": False},
+        )
+        runner = MagicMock()
+        runner.run = AsyncMock(return_value=("isolated done", LoopMetadata()))
+        engine._cron_runner = runner
+        engine._find_cron_job = MagicMock(return_value=MagicMock(id="abc123"))  # type: ignore[method-assign]
+        engine._trigger_cron_summary = MagicMock()  # type: ignore[method-assign]
+        engine.process_operator = AsyncMock(return_value="legacy")  # type: ignore[method-assign]
+
+        result = await engine._dispatch(msg)
+
+        assert result is None
+        runner.run.assert_awaited_once()
+        engine.process_operator.assert_not_awaited()
+        engine._trigger_cron_summary.assert_called_once()
+
+    async def test_dispatch_cron_falls_back_when_runner_returns_none(self, engine):
+        msg = InboundMessage(
+            channel="cron",
+            sender_id="cron",
+            chat_id="abc123",
+            content="check updates",
+            origin="cron",
+            metadata={"cron_job_id": "abc123", "deliver": False},
+        )
+        runner = MagicMock()
+        runner.run = AsyncMock(return_value=None)
+        engine._cron_runner = runner
+        engine._find_cron_job = MagicMock(return_value=MagicMock(id="abc123"))  # type: ignore[method-assign]
+        engine.process_operator = AsyncMock(return_value="legacy done")  # type: ignore[method-assign]
+
+        result = await engine._dispatch(msg)
+
+        assert result is None
+        runner.run.assert_awaited_once()
+        engine.process_operator.assert_awaited_once()
+
     async def test_dispatch_heartbeat_routes_to_operator(self, engine):
         """Heartbeat-origin messages should route to process_operator, return None."""
         msg = InboundMessage(
@@ -331,6 +375,22 @@ class TestProcessOperator:
         assert result == "Monitoring complete. Nothing to report."
         # second arg to _execute_loop is max_iter
         assert engine._execute_loop.await_args.args[1] == 10
+
+    async def test_operator_cron_uses_summary_window_for_history(self, engine):
+        engine._cron_summary_window = 2
+        engine.memory.get_conversation_history.return_value = []
+        engine._execute_loop = AsyncMock(return_value=("done", LoopMetadata(), []))  # type: ignore[method-assign]
+
+        await engine.process_operator(
+            prompt="check",
+            channel="cron",
+            chat_id="job1",
+            origin="cron",
+        )
+
+        kwargs = engine.memory.get_conversation_history.call_args.kwargs
+        assert kwargs["max_messages"] == 6
+        assert kwargs["recent_full_turns"] == 0
 
 
 class TestExecuteLoop:

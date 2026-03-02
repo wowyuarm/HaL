@@ -40,6 +40,7 @@ class MemorySearch:
         store: VectorStore,
         embedding_model: str,
         daily_dir: Path,
+        exclude_channels: list[str] | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
         embedding_dim: int | None = None,
@@ -52,6 +53,9 @@ class MemorySearch:
         self._store = store
         self._embedding_model = embedding_model
         self._daily_dir = daily_dir
+        self._exclude_channels = {
+            c.strip().lower() for c in (exclude_channels or []) if c and c.strip()
+        }
         self._api_key = api_key
         self._api_base = api_base
         self._embedding_dim = embedding_dim
@@ -113,6 +117,13 @@ class MemorySearch:
             query_text=keyword_query,
             top_k=fetch_k,
         )
+
+        if self._exclude_channels:
+            results = [
+                r
+                for r in results
+                if _extract_channel_from_heading(r.heading) not in self._exclude_channels
+            ]
 
         # Apply source-type penalties and re-rank.
         # For subagent chunks, keep full score when multiple query terms match
@@ -183,6 +194,12 @@ class MemorySearch:
     async def _index_file(self, md_path: Path) -> int:
         """Index a single markdown file with incremental upsert."""
         chunks = self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+        if self._exclude_channels:
+            chunks = [
+                c
+                for c in chunks
+                if _extract_channel_from_heading(c.heading) not in self._exclude_channels
+            ]
         if not chunks:
             return 0
 
@@ -286,7 +303,9 @@ class MemorySearch:
             return True
 
         expected = {
-            self._chunk_id(c) for c in self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+            self._chunk_id(c)
+            for c in self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+            if _extract_channel_from_heading(c.heading) not in self._exclude_channels
         }
         existing = await self._store.get_chunk_ids_by_source(source_name)
         return expected != existing
@@ -338,6 +357,14 @@ class MemorySearch:
 
         response = await litellm.aembedding(**kwargs)
         return [item["embedding"] for item in response.data]
+
+
+def _extract_channel_from_heading(heading: str) -> str | None:
+    """Extract channel from exporter heading format: '<channel> / <chat_id>'."""
+    if not heading or "/" not in heading:
+        return None
+    channel = heading.split("/", 1)[0].strip().lower()
+    return channel or None
 
 
 def _build_keyword_terms(query: str) -> list[str]:

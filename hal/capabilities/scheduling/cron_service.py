@@ -76,6 +76,12 @@ class CronService:
                 jobs = []
                 for j in data.get("jobs", []):
                     payload_data = j.get("payload") or {}
+                    tools = payload_data.get("tools")
+                    if not isinstance(tools, list):
+                        tools = None
+                    summary_window = payload_data.get("summaryWindow")
+                    if not isinstance(summary_window, int):
+                        summary_window = None
                     jobs.append(
                         CronJob(
                             id=j["id"],
@@ -94,6 +100,8 @@ class CronService:
                                 deliver=payload_data.get("deliver", False),
                                 channel=payload_data.get("channel"),
                                 to=payload_data.get("to"),
+                                tools=tools,
+                                summary_window=summary_window,
                             ),
                             state=CronJobState(
                                 next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -142,6 +150,8 @@ class CronService:
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
+                        "tools": j.payload.tools,
+                        "summaryWindow": j.payload.summary_window,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,
@@ -292,6 +302,8 @@ class CronService:
         deliver: bool = False,
         channel: str | None = None,
         to: str | None = None,
+        tools: list[str] | None = None,
+        summary_window: int | None = None,
         delete_after_run: bool = False,
     ) -> CronJob:
         """Add a new job."""
@@ -308,6 +320,8 @@ class CronService:
                 deliver=deliver,
                 channel=channel,
                 to=to,
+                tools=tools,
+                summary_window=summary_window,
             ),
             state=CronJobState(next_run_at_ms=_compute_next_run(schedule, now)),
             created_at_ms=now,
@@ -316,6 +330,10 @@ class CronService:
         )
 
         store.jobs.append(job)
+
+        # Create per-job directory for isolated cron context/log files.
+        (self.store_path.parent / job.id).mkdir(parents=True, exist_ok=True)
+
         self._save_store()
         self._arm_timer()
 

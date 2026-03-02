@@ -28,6 +28,10 @@ class CronPayload:
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
+    # Optional tool whitelist for isolated cron runners (future use).
+    tools: list[str] | None = None
+    # Optional per-job override for number of recent summaries in prompt context.
+    summary_window: int | None = None
 
 
 @dataclass

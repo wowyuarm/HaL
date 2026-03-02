@@ -25,13 +25,15 @@ from hal.core.context.token_budget import (
 )
 from hal.core.memory.manager import MemoryManager
 from hal.core.runtime.loop import LoopMetadata, run_tool_loop
-from hal.core.runtime.summary import generate_summary
+from hal.core.runtime.summary import generate_cron_summary, generate_summary
 from hal.core.runtime.tool_factory import create_tools
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider
 
 if TYPE_CHECKING:
     from hal.capabilities.scheduling.cron_service import CronService
+    from hal.capabilities.scheduling.runner import CronAgentRunner
+    from hal.capabilities.scheduling.types import CronJob
     from hal.core.memory.search import MemorySearch
     from hal.infra.config.schema import (
         EngineConfig,
@@ -64,6 +66,7 @@ class AgentEngine:
         web_search_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         cron_service: "CronService | None" = None,
+        cron_runner: "CronAgentRunner | None" = None,
         restrict_to_workspace: bool = False,
         memory_manager: MemoryManager | None = None,
         summary_model: str = "default",
@@ -75,6 +78,7 @@ class AgentEngine:
         recall_min_score: float = 0.0,
         history_config: "HistoryConfig | None" = None,
         engine_config: "EngineConfig | None" = None,
+        cron_summary_window: int = 5,
         web_search_config: "WebSearchConfig | None" = None,
         web_fetch_config: "WebFetchConfig | None" = None,
     ):
@@ -92,6 +96,7 @@ class AgentEngine:
         self.web_search_api_key = web_search_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
+        self._cron_runner = cron_runner
         self.restrict_to_workspace = restrict_to_workspace
         self._summary_model = summary_model
         self._summary_provider = summary_provider
@@ -100,6 +105,7 @@ class AgentEngine:
         self._recall_min_score = recall_min_score
         self._history_config = history_config or HistoryConfig()
         self._engine_config = engine_config or EngineConfig()
+        self._cron_summary_window = max(1, cron_summary_window)
         self._web_search_config = web_search_config
         self._web_fetch_config = web_fetch_config
         self._pending_summaries: dict[str, asyncio.Task] = {}
@@ -192,13 +198,29 @@ class AgentEngine:
 
     async def _dispatch_cron(self, msg: InboundMessage) -> OutboundMessage | None:
         """Handle a cron-origin message: run in OPERATOR mode, optionally deliver."""
-        response = await self.process_operator(
-            prompt=msg.content,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            session_key=msg.session_key,
-            origin="cron",
-        )
+        job_id = str(msg.metadata.get("cron_job_id", msg.chat_id))
+        response: str
+
+        isolated_result: tuple[str | None, LoopMetadata] | None = None
+        if self._cron_runner:
+            job = self._find_cron_job(job_id)
+            if job:
+                isolated_result = await self._cron_runner.run(job, msg.content)
+
+        if isolated_result is not None:
+            response, meta = isolated_result
+            if response is None:
+                response = "Monitoring complete. Nothing to report."
+            self._trigger_cron_summary(meta, response, job_id)
+        else:
+            response = await self.process_operator(
+                prompt=msg.content,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                session_key=msg.session_key,
+                origin="cron",
+            )
+
         if msg.metadata.get("deliver"):
             # Suppress deliver if message tool already sent during this turn
             message_tool = self.tools.get("message")
@@ -412,13 +434,19 @@ class AgentEngine:
 
         # Get conversation history from log
         hc = self._history_config
+        history_max_messages = hc.max_messages
+        history_recent_full_turns = hc.recent_full_turns
+        if origin == "cron":
+            # Cron sessions keep a compact history and prefer summarized turns.
+            history_max_messages = min(hc.max_messages, max(self._cron_summary_window * 3, 3))
+            history_recent_full_turns = 0
         resolved_model = self.provider.resolve_model(self.model)
         history = self.memory.get_conversation_history(
             channel=channel,
             chat_id=chat_id,
-            max_messages=hc.max_messages,
+            max_messages=history_max_messages,
             include_tools=False,
-            recent_full_turns=hc.recent_full_turns,
+            recent_full_turns=history_recent_full_turns,
             assistant_truncate_tokens=hc.assistant_truncate_tokens,
             max_tokens=hc.max_history_tokens,
             history_days=hc.history_days,
@@ -591,6 +619,35 @@ class AgentEngine:
                 memory=self.memory,
             )
         )
+
+    def _trigger_cron_summary(
+        self, meta: LoopMetadata, final_content: str, job_id: str
+    ) -> asyncio.Task | None:
+        """Create an async per-job summary task for isolated cron execution."""
+        if not meta.needs_summary or not self._cron_runner:
+            return None
+        return asyncio.create_task(
+            generate_cron_summary(
+                meta=meta,
+                final_content=final_content,
+                cron_log=self._cron_runner.get_log(job_id),
+                provider=self._summary_provider or self.provider,
+                model=self._summary_model_id(),
+                job_id=job_id,
+            )
+        )
+
+    def _find_cron_job(self, job_id: str) -> "CronJob | None":
+        """Find a cron job in the service store by ID."""
+        if not self.cron_service:
+            return None
+        try:
+            for job in self.cron_service.list_jobs(include_disabled=True):
+                if job.id == job_id:
+                    return job
+        except Exception as e:
+            logger.warning(f"[cron] failed to lookup job '{job_id}': {e}")
+        return None
 
     def _update_tool_contexts(self, channel: str, chat_id: str) -> None:
         """Update context-dependent tools with current channel/chat info."""

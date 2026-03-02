@@ -58,6 +58,24 @@ async def test_cron_tool_add_list_remove(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cron_tool_add_persists_tools_whitelist(tmp_path: Path) -> None:
+    service = CronService(tmp_path / "jobs.json")
+    tool = CronTool(service)
+    tool.set_context("telegram", "123")
+
+    created = await tool.execute(
+        action="add",
+        message="hello world",
+        every_seconds=60,
+        tools=["fs", "web_search"],
+    )
+    assert "Created job" in created
+
+    job = service.list_jobs(include_disabled=True)[0]
+    assert job.payload.tools == ["fs", "web_search"]
+
+
+@pytest.mark.asyncio
 async def test_cron_tool_list_empty(tmp_path: Path) -> None:
     tool = CronTool(CronService(tmp_path / "jobs.json"))
     tool.set_context("cli", "direct")

@@ -282,6 +282,8 @@ def test_cron_service_load_legacy_payload_kind_ignored(tmp_path: Path) -> None:
     assert job.payload.deliver is True
     assert job.payload.channel == "telegram"
     assert job.payload.to == "123"
+    assert job.payload.tools is None
+    assert job.payload.summary_window is None
     assert not hasattr(job.payload, "kind")
 
 
@@ -299,6 +301,33 @@ def test_cron_service_save_store_omits_payload_kind(tmp_path: Path) -> None:
     payload = saved["jobs"][0]["payload"]
     assert "kind" not in payload
     assert payload["message"] == "hello"
+    assert payload["tools"] is None
+    assert payload["summaryWindow"] is None
+
+
+def test_cron_service_add_job_persists_payload_fields_and_creates_job_dir(tmp_path: Path) -> None:
+    store = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path=store)
+
+    job = service.add_job(
+        name="daily",
+        schedule=CronSchedule(kind="every", every_ms=60000),
+        message="hello",
+        tools=["fs", "web_search"],
+        summary_window=7,
+    )
+
+    assert (store.parent / job.id).is_dir()
+
+    saved = json.loads(store.read_text(encoding="utf-8"))
+    payload = saved["jobs"][0]["payload"]
+    assert payload["tools"] == ["fs", "web_search"]
+    assert payload["summaryWindow"] == 7
+
+    service2 = CronService(store_path=store)
+    loaded = service2.list_jobs(include_disabled=True)[0]
+    assert loaded.payload.tools == ["fs", "web_search"]
+    assert loaded.payload.summary_window == 7
 
 
 def test_is_heartbeat_empty_logic() -> None:
