@@ -114,6 +114,7 @@ memory_search:
 scheduling:
   cron:
     summary_window: 5
+    tools: ["fs", "exec", "web_search", "web_fetch"]
 ```
 
 **`auth.yaml`** — Secrets (gitignored):

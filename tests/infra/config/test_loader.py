@@ -153,6 +153,16 @@ def test_summary_window_below_minimum_rejected() -> None:
         CronConfig(summary_window=0)
 
 
+def test_cron_tools_empty_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CronConfig(tools=[])
+
+
+def test_cron_tools_invalid_entry_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CronConfig(tools=["fs", "spawn"])
+
+
 def test_max_redirects_zero_rejected() -> None:
     with pytest.raises(ValidationError):
         WebFetchConfig(max_redirects=0)
@@ -211,3 +221,13 @@ def test_defaults_match_original_hardcoded_values() -> None:
     # Scheduling
     assert cfg.scheduling.heartbeat.interval_s == 1800
     assert cfg.scheduling.cron.summary_window == 5
+    assert cfg.scheduling.cron.tools == ["fs", "exec", "web_search", "web_fetch"]
+
+
+def test_load_config_accepts_summary_windows_alias(tmp_home: Path) -> None:
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("scheduling:\n  cron:\n    summary_windows: 7\n", encoding="utf-8")
+
+    loaded = load_config()
+    assert loaded.scheduling.cron.summary_window == 7

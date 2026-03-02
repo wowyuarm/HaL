@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -180,8 +180,35 @@ class CronConfig(_StrictModel):
     """Cron service configuration."""
 
     summary_window: int = Field(
-        default=5, ge=1
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices("summary_window", "summary_windows"),
     )  # Number of recent summaries to include for cron runs
+    tools: list[str] = Field(
+        default_factory=lambda: ["fs", "exec", "web_search", "web_fetch"],
+        min_length=1,
+    )  # Allowed tools for all isolated cron agents
+
+    @field_validator("tools")
+    @classmethod
+    def _validate_tools(cls, value: list[str]) -> list[str]:
+        allowed = {"fs", "exec", "web_search", "web_fetch"}
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            name = raw.strip()
+            if not name:
+                continue
+            if name not in allowed:
+                raise ValueError(
+                    f"Unsupported cron tool '{name}'. Allowed: {', '.join(sorted(allowed))}"
+                )
+            if name not in seen:
+                cleaned.append(name)
+                seen.add(name)
+        if not cleaned:
+            raise ValueError("Cron tools cannot be empty")
+        return cleaned
 
 
 class SchedulingConfig(_StrictModel):

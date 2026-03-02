@@ -107,6 +107,23 @@ def test_cron_runner_toolset_is_restricted(tmp_path: Path) -> None:
     assert "recall" not in tools.tool_names
 
 
+def test_cron_runner_toolset_uses_global_allowed_tools(tmp_path: Path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+
+    runner = CronAgentRunner(
+        cron_dir=tmp_path / "cron",
+        provider=provider,
+        model="test-model",
+        workspace=tmp_path,
+        allowed_tools=["fs", "web_fetch"],
+    )
+
+    tools = runner._build_tools(_job("job1"))
+
+    assert set(tools.tool_names) == {"fs", "web_fetch"}
+
+
 @pytest.mark.asyncio
 async def test_generate_cron_summary_writes_to_per_job_log(tmp_path: Path) -> None:
     provider = MagicMock(spec=LLMProvider)

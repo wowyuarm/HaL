@@ -26,6 +26,12 @@ Ruff is the style authority (`E,F,I,N,W`, line length 100, `E501` ignored).
 Naming conventions: `snake_case` for modules/functions/variables, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.  
 When adding tools or providers, register them in existing registries (for example `hal/core/runtime/tool_factory.py` and `hal/infra/providers/registry.py`).
 
+## Configuration & Constants Policy
+- Key runtime behaviors must be configurable via global config (`hal/infra/config/schema.py` + `~/.hal/config.yaml`), not hidden in call sites or constructor hardcoding.
+- New config keys must include clear inline comments in the config template/docs so operators understand intent and safe ranges.
+- Avoid magic numbers/strings inside execution logic; define module-level `UPPER_SNAKE_CASE` constants near the top of the file and reference those symbols in code paths.
+- Per-job/user payload can carry task data, but global guardrail policies (for example tool allowlists, default windows, limits) should come from global config.
+
 ## Testing Guidelines
 Testing uses `pytest` with `pytest-asyncio` (`asyncio_mode = auto`).  
 Place tests in mirrored paths and name files `test_<feature>.py`.  

@@ -35,6 +35,7 @@ class CronAgentRunner:
         restrict_to_workspace: bool = False,
         web_search_api_key: str | None = None,
         summary_window: int = 5,
+        allowed_tools: list[str] | None = None,
         max_iterations: int = 10,
         web_search_config: "WebSearchConfig | None" = None,
         web_fetch_config: "WebFetchConfig | None" = None,
@@ -47,6 +48,7 @@ class CronAgentRunner:
         self.restrict_to_workspace = restrict_to_workspace
         self.web_search_api_key = web_search_api_key
         self.summary_window = max(1, summary_window)
+        self.allowed_tools = _normalize_allowed_tools(allowed_tools)
         self.max_iterations = max(1, max_iterations)
         self._web_search_config = web_search_config
         self._web_fetch_config = web_fetch_config
@@ -68,7 +70,7 @@ class CronAgentRunner:
             )
         )
 
-        summaries = log.get_recent_summaries(self._summary_window_for(job))
+        summaries = log.get_recent_summaries(self._summary_window_for())
         system_prompt = self._build_system_prompt(
             job=job, context_content=context_content, summaries=summaries
         )
@@ -119,10 +121,7 @@ class CronAgentRunner:
             logger.warning(f"Failed to read cron context {context_path}: {exc}")
             return None
 
-    def _summary_window_for(self, job: CronJob) -> int:
-        value = job.payload.summary_window
-        if isinstance(value, int) and value > 0:
-            return value
+    def _summary_window_for(self) -> int:
         return self.summary_window
 
     def _build_tools(self, job: CronJob) -> "ToolRegistry":
@@ -135,10 +134,14 @@ class CronAgentRunner:
             web_fetch_config=self._web_fetch_config,
         )
 
-        # TODO: enforce per-job tool whitelist from `job.payload.tools`.
+        allowed = set(self.allowed_tools)
+        for name in list(tools.tool_names):
+            if name not in allowed:
+                tools.unregister(name)
+
         if job.payload.tools:
             logger.debug(
-                "Cron job {} has tools whitelist configured (not yet enforced): {}",
+                "Cron job {} has legacy payload.tools configured (ignored; global config applies): {}",
                 job.id,
                 job.payload.tools,
             )
@@ -267,3 +270,19 @@ def _make_entry(
         entry_type=entry_type,
         origin=origin,
     )
+
+
+def _normalize_allowed_tools(allowed_tools: list[str] | None) -> list[str]:
+    valid = {"fs", "exec", "web_search", "web_fetch"}
+    defaults = ["fs", "exec", "web_search", "web_fetch"]
+    if allowed_tools is None:
+        return defaults
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in allowed_tools:
+        name = raw.strip()
+        if not name or name not in valid or name in seen:
+            continue
+        cleaned.append(name)
+        seen.add(name)
+    return cleaned or defaults

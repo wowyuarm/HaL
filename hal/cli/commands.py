@@ -207,6 +207,7 @@ def gateway(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         web_search_api_key=config.tools.web.search.api_key or None,
         summary_window=config.scheduling.cron.summary_window,
+        allowed_tools=config.scheduling.cron.tools,
         max_iterations=min(
             config.agents.defaults.max_tool_iterations,
             config.engine.operator_max_iterations,
