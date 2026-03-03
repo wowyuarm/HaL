@@ -52,6 +52,33 @@ class _BrokenTool(Tool):
         raise RuntimeError("something broke")
 
 
+class _ContextTool(Tool):
+    """Tool that opts into ContextAwareTool via set_context()."""
+
+    def __init__(self) -> None:
+        self.channel = ""
+        self.chat_id = ""
+
+    def set_context(self, channel: str, chat_id: str) -> None:
+        self.channel = channel
+        self.chat_id = chat_id
+
+    @property
+    def name(self) -> str:
+        return "ctx"
+
+    @property
+    def description(self) -> str:
+        return "Context tool."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, **kwargs: Any) -> str:
+        return "ok"
+
+
 @pytest.fixture
 def registry() -> ToolRegistry:
     reg = ToolRegistry()
@@ -91,3 +118,16 @@ async def test_successful_execution_unchanged(registry: ToolRegistry) -> None:
     result = await registry.execute("echo", {"text": "hello"})
     assert result == "hello"
     assert "Hint:" not in result
+
+
+def test_update_context_updates_opt_in_tools_only() -> None:
+    reg = ToolRegistry()
+    ctx = _ContextTool()
+    echo = _EchoTool()
+    reg.register(ctx)
+    reg.register(echo)
+
+    reg.update_context("telegram", "123")
+
+    assert ctx.channel == "telegram"
+    assert ctx.chat_id == "123"

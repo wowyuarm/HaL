@@ -27,5 +27,7 @@ try:
         "SearchResult",
         "VectorStore",
     ]
-except ImportError:
+except Exception:
+    # Optional memory-search stack should not break base memory imports.
+    # Some third-party dependency failures are raised as non-ImportError.
     pass

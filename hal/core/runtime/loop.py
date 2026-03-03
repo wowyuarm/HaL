@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Awaitable, Protocol
 
 from loguru import logger
 
@@ -52,7 +52,9 @@ class LoopHooks(Protocol):
     callers only need to override the hooks they care about.
     """
 
-    def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
+    def before_llm_call(
+        self, messages: list[dict[str, Any]], meta: LoopMetadata
+    ) -> None | Awaitable[None]:
         """Called before each LLM call. Modify messages in place (e.g. inject pending)."""
         ...
 
@@ -64,7 +66,7 @@ class LoopHooks(Protocol):
         result: str,
         messages: list[dict[str, Any]],
         meta: LoopMetadata,
-    ) -> None:
+    ) -> None | Awaitable[None]:
         """Called after each tool execution. Record memory, track side effects, etc."""
         ...
 
@@ -193,7 +195,7 @@ async def run_tool_loop(
         meta.iterations = iteration
 
         # Hook: inject pending messages, etc.
-        h.before_llm_call(messages, meta)
+        await _maybe_await(h.before_llm_call(messages, meta))
 
         response = await provider.chat(
             messages=messages, tools=tools.get_definitions(), model=model
@@ -286,13 +288,15 @@ async def run_tool_loop(
                                 "content": skip_msg,
                             }
                         )
-                    h.on_tool_result(
-                        tool_call.name,
-                        tool_call.id,
-                        tool_call.arguments,
-                        skip_msg,
-                        messages,
-                        meta,
+                    await _maybe_await(
+                        h.on_tool_result(
+                            tool_call.name,
+                            tool_call.id,
+                            tool_call.arguments,
+                            skip_msg,
+                            messages,
+                            meta,
+                        )
                     )
                 continue
 
@@ -316,8 +320,10 @@ async def run_tool_loop(
                     )
 
                 # Hook: record memory, persist spawn results, etc.
-                h.on_tool_result(
-                    tool_call.name, tool_call.id, tool_call.arguments, result, messages, meta
+                await _maybe_await(
+                    h.on_tool_result(
+                        tool_call.name, tool_call.id, tool_call.arguments, result, messages, meta
+                    )
                 )
         else:
             # No tool calls — check if caller wants to continue (e.g. subagent injection)
@@ -343,6 +349,13 @@ async def run_tool_loop(
     meta.loop_messages = messages[start_idx:]
 
     return final_content, meta
+
+
+async def _maybe_await(value: None | Awaitable[None]) -> None:
+    """Await values that are awaitable; ignore plain None."""
+    if value is None:
+        return
+    await value
 
 
 def _normalize_usage(usage: dict[str, Any]) -> dict[str, int]:

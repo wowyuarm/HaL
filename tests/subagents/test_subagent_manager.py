@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import hal.core.subagent.manager as subagent_manager_module
+from hal.bus.events import SubagentCompleteEvent
+from hal.bus.queue import MessageBus
 from hal.core.ports import SubagentExecutionResult
 from hal.core.subagent import SubagentManager
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -313,6 +317,63 @@ async def test_await_pending_empty_returns_empty_list(tmp_path) -> None:
     mgr = SubagentManager(provider=provider, workspace=tmp_path)
     results = await mgr.await_pending()
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_completed_results_buffer_is_bounded(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop"),
+    )
+
+    monkeypatch.setattr(subagent_manager_module, "_COMPLETED_RESULTS_MAX", 2)
+    mgr = subagent_manager_module.SubagentManager(provider=provider, workspace=tmp_path)
+
+    await mgr.spawn_background(task="task1", label="T1")
+    await mgr.spawn_background(task="task2", label="T2")
+    await mgr.spawn_background(task="task3", label="T3")
+    await asyncio.sleep(0.05)
+
+    assert len(mgr._completed_results) == 2
+    results = await mgr.await_pending()
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_spawn_background_emits_completion_event(tmp_path: Path) -> None:
+    provider = MagicMock(spec=LLMProvider)
+    provider.get_default_model.return_value = "test-model"
+    provider.chat = AsyncMock(
+        return_value=LLMResponse(content="done", tool_calls=[], finish_reason="stop"),
+    )
+    bus = MessageBus()
+    events: list[SubagentCompleteEvent] = []
+
+    async def on_complete(event: SubagentCompleteEvent) -> None:
+        events.append(event)
+
+    bus.subscribe(SubagentCompleteEvent, on_complete)
+    mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=bus)
+    await mgr.spawn_background(
+        task="task1",
+        label="T1",
+        channel="telegram",
+        chat_id="42",
+        session_key="telegram:42",
+    )
+
+    await mgr.await_pending()
+    await asyncio.sleep(0)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.label == "T1"
+    assert event.status == "completed"
+    assert event.background is True
+    assert event.channel == "telegram"
+    assert event.chat_id == "42"
+    assert event.session_key == "telegram:42"
 
 
 # ------------------------------------------------------------------

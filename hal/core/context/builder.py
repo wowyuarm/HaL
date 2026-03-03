@@ -5,7 +5,7 @@ Implements a 5-layer context system optimized for prompt cache hits:
     Layer 0 — Identity (stable, rarely changes)
     Layer 1 — Personality (per-agent instance)
     Layer 2 — Capabilities (tools, skills)
-    Layer 3 — Situation (stable per session: mode directive, long-term memory)
+    Layer 3 — Situation (stable directive + long-term memory)
     Layer 4 — Conversation (current session + message with dynamic context prefix)
 
 Dynamic per-request content (time, channel, chat_id, memory search results) is
@@ -18,7 +18,6 @@ from __future__ import annotations
 import base64
 import mimetypes
 import platform
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,32 +28,10 @@ if TYPE_CHECKING:
     from hal.core.memory.manager import MemoryManager
 
 
-class ExecutionMode(str, Enum):
-    """Agent execution mode — determines context assembly strategy."""
-
-    COLLAB = "collab"  # Real-time collaborative (user message → response)
-    ASYNC = "async"  # Background tasks
-    OPERATOR = "operator"  # Focused background execution
-
-
-# ------------------------------------------------------------------
-# Mode-specific behavioral directives
-# ------------------------------------------------------------------
-
-_MODE_DIRECTIVES: dict[ExecutionMode, str] = {
-    ExecutionMode.COLLAB: """\
-## Mode: Collaborative
-Real-time conversation. Be responsive and concise. \
-Use 'spawn' to delegate tasks that need independent work.""",
-    ExecutionMode.ASYNC: """\
-## Mode: Focused Task
-You are executing a specific task. Stay focused — complete the assigned task only. \
-Be thorough in execution and concise in your final report.""",
-    ExecutionMode.OPERATOR: """\
-## Mode: Operator
-Running autonomously via scheduled trigger. \
-Only report when there is something actionable. High signal-to-noise.""",
-}
+_DEFAULT_SITUATION_DIRECTIVE = """\
+## Collaboration
+Real-time conversation. Be responsive and concise.
+Use 'spawn' to delegate tasks that need independent work."""
 
 
 class ContextBuilder:
@@ -84,7 +61,6 @@ class ContextBuilder:
 
     def build_system_prompt(
         self,
-        mode: ExecutionMode = ExecutionMode.COLLAB,
         memory_budget_tokens: int | None = None,
         token_model: str | None = None,
     ) -> str:
@@ -92,7 +68,7 @@ class ContextBuilder:
 
         Layers 0-2 are stable prefix (maximize prompt cache hits).
         Layer 3 (situation) contains only stable-per-session content:
-        mode directive and long-term memory.
+        directive and long-term memory.
         """
         parts: list[str] = []
 
@@ -109,9 +85,8 @@ class ContextBuilder:
         if capabilities:
             parts.append(capabilities)
 
-        # Layer 3 — Situation (stable per session: mode, long-term memory)
+        # Layer 3 — Situation (stable directive + long-term memory)
         situation = self._build_situation(
-            mode,
             memory_budget_tokens=memory_budget_tokens,
             token_model=token_model,
         )
@@ -127,7 +102,6 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
-        mode: ExecutionMode = ExecutionMode.COLLAB,
         memory_search_results: list[Any] | None = None,
         memory_budget_tokens: int | None = None,
         recall_max_total_tokens: int = 500,
@@ -148,7 +122,6 @@ class ContextBuilder:
 
         # Layers 0-3: stable system prompt (no per-request dynamic content)
         system_prompt = self.build_system_prompt(
-            mode,
             memory_budget_tokens=memory_budget_tokens,
             token_model=token_model,
         )
@@ -252,22 +225,17 @@ Layout:
 
     def _build_situation(
         self,
-        mode: ExecutionMode,
         memory_budget_tokens: int | None = None,
         token_model: str | None = None,
     ) -> str:
-        """Layer 3 — Situation: mode directive + long-term memory.
+        """Layer 3 — Situation: directive + long-term memory.
 
         Stable per session — no time or per-request search results.
         """
         parts: list[str] = []
 
         parts.append("# Situation")
-
-        # Mode-specific behavioral directive
-        directive = _MODE_DIRECTIVES.get(mode)
-        if directive:
-            parts.append(directive)
+        parts.append(_DEFAULT_SITUATION_DIRECTIVE)
 
         # Long-term memory (stable per session — loaded from MEMORY.md)
         memory_ctx = self._get_memory_context(

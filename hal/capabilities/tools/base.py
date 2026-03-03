@@ -1,7 +1,16 @@
 """Base class for agent tools."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class ContextAwareTool(Protocol):
+    """Optional protocol for tools that need per-session context."""
+
+    def set_context(self, channel: str, chat_id: str) -> None:
+        """Update channel/chat context before a new engine turn."""
+        ...
 
 
 class Tool(ABC):

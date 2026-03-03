@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hal.bus.events import OutboundMessage
+from hal.bus.events import OutboundMessage, SystemStartupEvent
 from hal.bus.queue import MessageBus
 from hal.channels.telegram import TelegramChannel, _markdown_to_telegram_html
 from hal.infra.config.schema import TelegramConfig
@@ -764,6 +764,7 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
     cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
     mm = MagicMock()
     ch = TelegramChannel(cfg, MessageBus(), memory_manager=mm)
+    ch.bus.emit = AsyncMock()  # type: ignore[method-assign]
 
     # Mock the Application and bot
     mock_bot = AsyncMock()
@@ -801,6 +802,12 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
     call_kwargs = mm.record_conversation.call_args.kwargs
     assert call_kwargs["entry_type"] == "injection"
     assert "self-update" in call_kwargs["content"]
+    ch.bus.emit.assert_awaited_once()
+    event = ch.bus.emit.await_args.args[0]  # type: ignore[union-attr]
+    assert isinstance(event, SystemStartupEvent)
+    assert event.channel == "telegram"
+    assert event.chat_id == "42"
+    assert event.update_info is not None
 
 
 @pytest.mark.asyncio
@@ -809,6 +816,7 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
     cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
     mm = MagicMock()
     ch = TelegramChannel(cfg, MessageBus(), memory_manager=mm)
+    ch.bus.emit = AsyncMock()  # type: ignore[method-assign]
 
     mock_bot = AsyncMock()
     ch._app = MagicMock()
@@ -840,3 +848,9 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
     call_kwargs = mm.record_conversation.call_args.kwargs
     assert call_kwargs["entry_type"] == "injection"
     assert "service started" in call_kwargs["content"]
+    ch.bus.emit.assert_awaited_once()
+    event = ch.bus.emit.await_args.args[0]  # type: ignore[union-attr]
+    assert isinstance(event, SystemStartupEvent)
+    assert event.channel == "telegram"
+    assert event.chat_id == "42"
+    assert event.update_info is None

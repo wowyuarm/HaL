@@ -73,6 +73,9 @@ class ChannelManager:
         try:
             await channel.start()
         except Exception as e:
+            # Error policy:
+            # - channel startup errors are logged with context
+            # - manager keeps other channels running instead of failing globally
             logger.error(f"Failed to start channel {name}: {e}")
 
     async def start_all(self) -> None:
@@ -128,6 +131,9 @@ class ChannelManager:
                     try:
                         await channel.send(msg)
                     except Exception as e:
+                        # Error policy:
+                        # - delivery failures are isolated to the current message
+                        # - dispatcher continues serving other outbound traffic
                         logger.error(f"Error sending to {msg.channel}: {e}")
                 else:
                     logger.warning(f"Unknown channel: {msg.channel}")

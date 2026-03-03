@@ -78,9 +78,7 @@ def test_metrics_collector_get_latest_with_filters(tmp_path: Path) -> None:
         ContextMetrics.create(channel="telegram", chat_id="1", mode="collab", total_input_chars=20)
     )
     collector.record(
-        ContextMetrics.create(
-            channel="telegram", chat_id="2", mode="operator", total_input_chars=30
-        )
+        ContextMetrics.create(channel="telegram", chat_id="2", mode="default", total_input_chars=30)
     )
 
     latest_tg = collector.get_latest(channel="telegram")
@@ -90,6 +88,10 @@ def test_metrics_collector_get_latest_with_filters(tmp_path: Path) -> None:
     latest_tg_collab = collector.get_latest(channel="telegram", mode="collab")
     assert latest_tg_collab is not None
     assert latest_tg_collab["chat_id"] == "1"
+
+    latest_tg_default = collector.get_latest(channel="telegram", mode="default")
+    assert latest_tg_default is not None
+    assert latest_tg_default["chat_id"] == "2"
 
     none_match = collector.get_latest(channel="discord")
     assert none_match is None

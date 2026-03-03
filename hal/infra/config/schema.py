@@ -165,7 +165,6 @@ class EngineConfig(_StrictModel):
 
     inbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Bus consume poll interval
     summary_barrier_timeout_s: float = Field(default=10.0, gt=0)  # Max wait for pending summary
-    operator_max_iterations: int = Field(default=10, ge=1)  # Max tool iterations in OPERATOR mode
 
 
 class Config(BaseSettings):
@@ -178,8 +177,6 @@ class Config(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     memory_search: MemorySearchConfig = Field(default_factory=MemorySearchConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
-    # Kept as untyped legacy section so older config files remain loadable.
-    scheduling: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def workspace_path(self) -> Path:

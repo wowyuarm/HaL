@@ -48,6 +48,10 @@ class SubagentPort(Protocol):
         self,
         task: str,
         label: str | None = None,
+        *,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        session_key: str | None = None,
     ) -> str: ...
 
     def get_running_count(self) -> int: ...

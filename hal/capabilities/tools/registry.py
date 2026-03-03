@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from hal.capabilities.tools.base import Tool
+from hal.capabilities.tools.base import ContextAwareTool, Tool
 
 _HINT_RETRY = "Check the parameters and try again."
 _HINT_AVAILABLE = "Available tools: {tools}"
@@ -42,6 +42,12 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get all tool definitions in OpenAI format."""
         return [tool.to_schema() for tool in self._tools.values()]
+
+    def update_context(self, channel: str, chat_id: str) -> None:
+        """Update per-turn context for tools that opt into ContextAwareTool."""
+        for tool in self._tools.values():
+            if isinstance(tool, ContextAwareTool):
+                tool.set_context(channel, chat_id)
 
     async def execute(self, name: str, params: dict[str, Any]) -> str:
         """

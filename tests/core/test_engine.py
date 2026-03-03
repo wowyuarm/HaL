@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hal.bus.events import InboundMessage, OutboundMessage
+from hal.bus.events import InboundMessage, OutboundMessage, SubagentCompleteEvent
 from hal.bus.queue import MessageBus
 from hal.core.engine import (
     AgentEngine,
@@ -127,11 +127,11 @@ class TestUpdateToolContexts:
 
 
 class TestProcessDirect:
-    async def test_regular_session_routes_to_collab(self, engine):
-        """Direct sessions should be handled by process_collab."""
-        with patch.object(engine, "process_collab", new_callable=AsyncMock) as mock_collab:
-            mock_collab.return_value = OutboundMessage(
-                channel="cli", chat_id="direct", content="collab result"
+    async def test_regular_session_routes_to_process(self, engine):
+        """Direct sessions should be handled by process()."""
+        with patch.object(engine, "process", new_callable=AsyncMock) as mock_process:
+            mock_process.return_value = OutboundMessage(
+                channel="cli", chat_id="direct", content="process result"
             )
 
             result = await engine.process_direct(
@@ -139,9 +139,9 @@ class TestProcessDirect:
                 session_key="cli:direct",
             )
 
-            mock_collab.assert_awaited_once()
+            mock_process.assert_awaited_once()
             # process_direct extracts .content from the OutboundMessage
-            assert result == "collab result"
+            assert result == "process result"
 
 
 # ------------------------------------------------------------------
@@ -162,40 +162,24 @@ class TestStop:
 
 
 class TestDispatch:
-    async def test_dispatch_routes_to_process_collab(self, engine):
+    async def test_dispatch_routes_to_process(self, engine):
         msg = InboundMessage(channel="telegram", sender_id="u", chat_id="c", content="hi")
-        engine.process_collab = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        engine.process = AsyncMock(return_value=None)  # type: ignore[method-assign]
 
         await engine._dispatch(msg)
-        engine.process_collab.assert_awaited_once_with(msg)
+        engine.process.assert_awaited_once_with(msg)
 
     async def test_defaults_final_content_when_execute_loop_returns_none(self, engine):
         engine._execute_loop = AsyncMock(return_value=(None, LoopMetadata(tools_used=["fs"]), []))  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
-        out = await engine.process_collab(msg)
+        out = await engine.process(msg)
 
         assert out is not None
         assert out.channel == "telegram"
         assert out.chat_id == "c1"
         assert out.content == "(No response generated.)"
 
-
-class TestProcessOperator:
-    async def test_operator_uses_max_10_iterations_and_default_message(self, engine):
-        engine._execute_loop = AsyncMock(
-            return_value=(None, LoopMetadata(tools_used=["web_search"]), [])
-        )  # type: ignore[method-assign]
-
-        result = await engine.process_operator(
-            prompt="check",
-            channel="cli",
-            chat_id="direct",
-        )
-
-        assert result == "Monitoring complete. Nothing to report."
-        # second arg to _execute_loop is max_iter
-        assert engine._execute_loop.await_args.args[1] == 10
 
 class TestExecuteLoop:
     async def test_tool_calls_are_executed_and_tools_used_is_deduped(self, engine, mock_provider):
@@ -514,6 +498,107 @@ class TestMidLoopInjection:
         progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
         assert len(progress_msgs) == 0
 
+    async def test_background_completion_event_injected_without_polling(
+        self, engine, bus, mock_provider
+    ):
+        """Background completion should be injected via events, not await_pending polling."""
+
+        async def chat_side_effect(messages, tools, model):
+            if mock_provider.chat.await_count == 1:
+                await bus.emit(
+                    SubagentCompleteEvent(
+                        label="bg-task",
+                        status="completed",
+                        content="background done",
+                        background=True,
+                        messages=[],
+                        channel="telegram",
+                        chat_id="c1",
+                        session_key="telegram:c1",
+                    )
+                )
+                return LLMResponse(content="intermediate", tool_calls=[])
+            return LLMResponse(content="final", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        final, _, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_key="telegram:c1",
+            channel="telegram",
+            chat_id="c1",
+        )
+
+        assert final == "final"
+        engine.subagents.await_pending.assert_not_awaited()
+
+        second_call_msgs = mock_provider.chat.await_args_list[1].kwargs["messages"]
+        assert any(
+            "[Background subagent 'bg-task' completed]" in m.get("content", "")
+            for m in second_call_msgs
+            if m.get("role") == "user"
+        )
+
+    async def test_background_completion_event_persisted_by_global_subscriber(self, engine, bus):
+        await bus.emit(
+            SubagentCompleteEvent(
+                label="bg-task",
+                status="completed",
+                content="background done",
+                background=True,
+                messages=[],
+                channel="telegram",
+                chat_id="c1",
+                session_key="telegram:c1",
+            )
+        )
+
+        assert engine.memory.record_conversation.called
+        kwargs = engine.memory.record_conversation.call_args.kwargs
+        assert kwargs["channel"] == "telegram"
+        assert kwargs["chat_id"] == "c1"
+        assert kwargs["entry_type"] == "injection"
+        assert "[Background subagent 'bg-task' completed]" in kwargs["content"]
+
+    async def test_background_completion_after_loop_end_resumes_same_session(self, engine, bus):
+        first_meta = LoopMetadata(iterations=1, has_side_effects=False)
+        resumed_meta = LoopMetadata(iterations=1, has_side_effects=False)
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                ("started", first_meta, []),
+                ("bg-final", resumed_meta, []),
+            ]
+        )
+        engine.bus.publish_outbound = AsyncMock()  # type: ignore[method-assign]
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="run bg")
+        out = await engine.process(msg)
+        assert out is not None
+        assert out.content == "started"
+
+        await bus.emit(
+            SubagentCompleteEvent(
+                label="bg-task",
+                status="completed",
+                content="background done",
+                background=True,
+                messages=[],
+                channel="telegram",
+                chat_id="c1",
+                session_key="telegram:c1",
+            )
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0.05)
+
+        assert engine._execute_loop.await_count >= 2
+        engine.bus.publish_outbound.assert_awaited()
+        published = engine.bus.publish_outbound.await_args.args[0]
+        assert published.channel == "telegram"
+        assert published.chat_id == "c1"
+        assert published.content == "bg-final"
+
     async def test_progress_hides_message_tool_when_mixed_with_others(self, engine, mock_provider):
         """Progress should include actionable tools but hide message tool lines."""
         tool_calls = [
@@ -696,7 +781,7 @@ class TestExecuteLoopMetadata:
 
 
 class TestSummaryTrigger:
-    """Test that summary is triggered/skipped correctly in process_collab."""
+    """Test that summary is triggered/skipped correctly in process()."""
 
     async def test_summary_not_triggered_when_needs_summary_false(self, engine):
         """No summary task created when loop doesn't qualify."""
@@ -705,7 +790,7 @@ class TestSummaryTrigger:
         )
 
         msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
-        await engine.process_collab(msg)
+        await engine.process(msg)
 
         assert msg.session_key not in engine._pending_summaries
 
@@ -718,7 +803,7 @@ class TestSummaryTrigger:
         engine._generate_summary = AsyncMock()  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
-        await engine.process_collab(msg)
+        await engine.process(msg)
 
         assert msg.session_key in engine._pending_summaries
 
@@ -731,12 +816,12 @@ class TestSummaryTrigger:
         engine._generate_summary = AsyncMock()  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
-        await engine.process_collab(msg)
+        await engine.process(msg)
 
         assert msg.session_key in engine._pending_summaries
 
     async def test_summary_barrier_waits_for_pending_task(self, engine):
-        """process_collab waits for a pending summary before proceeding."""
+        """process() waits for a pending summary before proceeding."""
         engine._summary_model = "cheap-model"
         completed = False
 
@@ -755,7 +840,7 @@ class TestSummaryTrigger:
         )
 
         msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="follow up")
-        await engine.process_collab(msg)
+        await engine.process(msg)
 
         assert completed is True
         assert session_key not in engine._pending_summaries

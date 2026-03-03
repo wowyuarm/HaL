@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from hal.infra.config.schema import Config
 
@@ -47,10 +48,12 @@ def load_config(config_path: Path | None = None) -> Config:
     old_workspace = Path.home() / ".hal" / "workspace"
     new_soul = config.workspace_path / "SOUL.md"
     if old_workspace.is_dir() and not new_soul.exists():
-        print(
-            f"Warning: Detected old layout {old_workspace}.\n"
-            f"  Run: mv {old_workspace}/* {config.workspace_path}/ "
-            f"&& rmdir {old_workspace}"
+        logger.warning(
+            "Detected old layout {}. Run: mv {}/* {} && rmdir {}",
+            old_workspace,
+            old_workspace,
+            config.workspace_path,
+            old_workspace,
         )
 
     return config

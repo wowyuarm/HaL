@@ -173,7 +173,6 @@ def test_defaults_match_original_hardcoded_values() -> None:
     # Engine
     assert cfg.engine.inbound_poll_timeout_s == 1.0
     assert cfg.engine.summary_barrier_timeout_s == 10.0
-    assert cfg.engine.operator_max_iterations == 10
 
     # Web tools
     assert cfg.tools.web.search.max_results == 5
@@ -194,6 +193,3 @@ def test_defaults_match_original_hardcoded_values() -> None:
 
     # Channels
     assert cfg.channels.outbound_poll_timeout_s == 1.0
-
-    # Legacy scheduling section remains accepted as untyped config.
-    assert cfg.scheduling == {}
