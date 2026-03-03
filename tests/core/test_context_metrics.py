@@ -35,13 +35,12 @@ def test_metrics_collector_record_writes_jsonl(tmp_path: Path) -> None:
     assert data["chat_id"] == "direct"
     assert data["system_prompt_chars"] == 123
     assert data["total_input_chars"] == 456
-    assert data["first_prompt_tokens"] is None  # not set in this row
-    assert data["first_cache_creation_tokens"] is None
-    assert data["first_cache_read_tokens"] is None
-    assert data["first_cache_miss_tokens"] is None
-    assert data["total_cache_creation_tokens"] == 0
-    assert data["total_cache_read_tokens"] == 0
-    assert data["total_cache_miss_tokens"] == 0
+    assert data["estimated_input_tokens"] == 0
+    assert data["prompt_tokens"] is None
+    assert data["completion_tokens"] is None
+    assert data["total_tokens"] is None
+    assert data["usage_available"] is False
+    assert data["usage_source"] == "none"
 
 
 def test_metrics_collector_summary_returns_stats(tmp_path: Path) -> None:
@@ -193,3 +192,16 @@ def test_normalize_usage_reads_prompt_cache_miss_tokens() -> None:
     )
 
     assert normalized["prompt_cache_miss_tokens"] == 60
+
+
+def test_normalize_usage_reads_anthropic_input_output_tokens() -> None:
+    normalized = _normalize_usage(
+        {
+            "input_tokens": 91,
+            "output_tokens": 13,
+        }
+    )
+
+    assert normalized["prompt_tokens"] == 91
+    assert normalized["completion_tokens"] == 13
+    assert normalized["total_tokens"] == 104

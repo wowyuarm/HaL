@@ -9,6 +9,9 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+USAGE_SOURCE_NONE = "none"
+USAGE_SOURCE_PROVIDER = "provider"
+
 
 @dataclass
 class ContextMetrics:
@@ -22,24 +25,20 @@ class ContextMetrics:
     history_message_count: int = 0
     history_chars: int = 0
     recall_count: int = 0
-    recall_scores: list[float] = field(default_factory=list)
+    recall_max_score: float = 0.0
     recall_chars: int = 0
     current_message_chars: int = 0
     total_input_chars: int = 0
-    first_prompt_tokens: int | None = None
-    first_completion_tokens: int | None = None
-    first_total_tokens: int | None = None
-    first_cache_creation_tokens: int | None = None
-    first_cache_read_tokens: int | None = None
-    first_cache_miss_tokens: int | None = None
-    total_cache_creation_tokens: int = 0
-    total_cache_read_tokens: int = 0
-    total_cache_miss_tokens: int = 0
+    estimated_input_tokens: int = 0
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    usage_available: bool = False
+    usage_source: str = USAGE_SOURCE_NONE
     loop_iterations: int = 0
     tools_used: list[str] = field(default_factory=list)
     spawn_count: int = 0
     has_side_effects: bool = False
-    spawn_total_tokens: int = 0
 
     @classmethod
     def create(cls, *, channel: str, chat_id: str, mode: str, **kwargs: Any) -> "ContextMetrics":

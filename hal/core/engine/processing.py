@@ -9,11 +9,14 @@ from typing import Any
 from loguru import logger
 
 from hal.bus.events import OutboundMessage
-from hal.core.context.metrics import ContextMetrics
-from hal.core.context.token_budget import trim_text_to_token_budget
+from hal.core.context.metrics import (
+    USAGE_SOURCE_NONE,
+    USAGE_SOURCE_PROVIDER,
+    ContextMetrics,
+)
+from hal.core.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
 
 from .inspect import _content_char_len
-from .subagent_injection import _extract_spawn_total_tokens
 
 
 def _message_sent_in_turn(tool: Any) -> bool:
@@ -77,6 +80,20 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
         token_model=resolved_model,
     )
+    history_chars = sum(_content_char_len(h.get("content", "")) for h in history)
+    recall_max_score = max((float(getattr(r, "score", 0.0)) for r in search_results), default=0.0)
+    recall_chars = sum(
+        len(
+            trim_text_to_token_budget(
+                str(getattr(r, "content", "")),
+                hc.recall_max_per_item_tokens,
+                model=resolved_model,
+            )
+        )
+        for r in search_results
+    )
+    total_input_chars = sum(_content_char_len(m.get("content", "")) for m in messages)
+
     pre_metrics = ContextMetrics(
         timestamp=datetime.now().isoformat(),
         channel=msg.channel,
@@ -84,21 +101,13 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         mode=mode,
         system_prompt_chars=_content_char_len(messages[0].get("content", "")) if messages else 0,
         history_message_count=len(history),
-        history_chars=sum(_content_char_len(h.get("content", "")) for h in history),
+        history_chars=history_chars,
         recall_count=len(search_results),
-        recall_scores=[float(getattr(r, "score", 0.0)) for r in search_results],
-        recall_chars=sum(
-            len(
-                trim_text_to_token_budget(
-                    str(getattr(r, "content", "")),
-                    hc.recall_max_per_item_tokens,
-                    model=resolved_model,
-                )
-            )
-            for r in search_results
-        ),
+        recall_max_score=recall_max_score,
+        recall_chars=recall_chars,
         current_message_chars=len(msg.content),
-        total_input_chars=sum(_content_char_len(m.get("content", "")) for m in messages),
+        total_input_chars=total_input_chars,
+        estimated_input_tokens=rough_tokens_from_chars(total_input_chars),
     )
 
     engine._set_session_active(msg.session_key, True)
@@ -112,22 +121,30 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         )
     finally:
         engine._set_session_active(msg.session_key, False)
-    pre_metrics.first_prompt_tokens = meta.first_response_usage.get("prompt_tokens")
-    pre_metrics.first_completion_tokens = meta.first_response_usage.get("completion_tokens")
-    pre_metrics.first_total_tokens = meta.first_response_usage.get("total_tokens")
-    pre_metrics.first_cache_creation_tokens = meta.first_response_usage.get(
-        "cache_creation_input_tokens"
+    pre_metrics.prompt_tokens = meta.total_usage.get("prompt_tokens")
+    pre_metrics.completion_tokens = meta.total_usage.get("completion_tokens")
+    pre_metrics.total_tokens = meta.total_usage.get("total_tokens")
+    if (
+        pre_metrics.total_tokens is None
+        and pre_metrics.prompt_tokens is not None
+        and pre_metrics.completion_tokens is not None
+    ):
+        pre_metrics.total_tokens = pre_metrics.prompt_tokens + pre_metrics.completion_tokens
+    pre_metrics.usage_available = any(
+        v is not None
+        for v in (
+            pre_metrics.prompt_tokens,
+            pre_metrics.completion_tokens,
+            pre_metrics.total_tokens,
+        )
     )
-    pre_metrics.first_cache_read_tokens = meta.first_response_usage.get("cache_read_input_tokens")
-    pre_metrics.first_cache_miss_tokens = meta.first_response_usage.get("prompt_cache_miss_tokens")
-    pre_metrics.total_cache_creation_tokens = meta.cache_creation_tokens
-    pre_metrics.total_cache_read_tokens = meta.cache_read_tokens
-    pre_metrics.total_cache_miss_tokens = meta.cache_miss_tokens
+    pre_metrics.usage_source = (
+        USAGE_SOURCE_PROVIDER if pre_metrics.usage_available else USAGE_SOURCE_NONE
+    )
     pre_metrics.loop_iterations = meta.iterations
     pre_metrics.tools_used = list(meta.tools_used)
     pre_metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)
     pre_metrics.has_side_effects = meta.has_side_effects
-    pre_metrics.spawn_total_tokens = _extract_spawn_total_tokens(messages)
     engine._record_metrics(pre_metrics)
 
     if not final_content:

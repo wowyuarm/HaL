@@ -161,6 +161,35 @@ def _parse_bool_marker(match: re.Match[str] | None) -> bool:
     return match.group(1).strip().lower() in {"1", "true", "yes", "y"}
 
 
+def _truncate_subagent_body(content: str, status: str, max_tokens: int) -> tuple[str, bool]:
+    """Trim successful subagent output for history payloads."""
+    is_error = status in {"failed", "error"} or content.startswith("Error:")
+    if is_error or max_tokens <= 0:
+        return content, False
+
+    trimmed = trim_text_to_token_budget(content, max_tokens, suffix=" [...]")
+    return trimmed, trimmed != content
+
+
+def _build_subagent_header(*, label: str, status: str, background: bool, body: str) -> str:
+    """Build initial human-readable injection block."""
+    if background:
+        return f"[Background subagent '{label}' {status}]\n\nResult:\n{body}"
+    return f"[Subagent Result: {label}]\n\n{body}"
+
+
+def _append_optional_line(lines: list[str], prefix: str, value: str | None) -> None:
+    """Append line with prefix when value is non-empty."""
+    if value:
+        lines.append(f"{prefix}{value}")
+
+
+def _append_optional_json_line(lines: list[str], prefix: str, value: list[str] | dict[str, int]) -> None:
+    """Append JSON-encoded line when list/dict has content."""
+    if value:
+        lines.append(f"{prefix}{json.dumps(value, ensure_ascii=False)}")
+
+
 def _build_subagent_injection(
     *,
     label: str,
@@ -180,42 +209,25 @@ def _build_subagent_injection(
     max_tokens: int = _SUBAGENT_HISTORY_MAX_TOKENS,
 ) -> str:
     """Build compact subagent injection content for next-loop context."""
-    is_error = status in {"failed", "error"} or content.startswith("Error:")
-    body = content
-    truncated = False
-    if not is_error and max_tokens > 0:
-        trimmed = trim_text_to_token_budget(body, max_tokens, suffix=" [...]")
-        truncated = trimmed != body
-        body = trimmed
-
-    if background:
-        text = f"[Background subagent '{label}' {status}]\n\nResult:\n{body}"
-    else:
-        text = f"[Subagent Result: {label}]\n\n{body}"
+    body, truncated = _truncate_subagent_body(content, status, max_tokens)
+    lines = [_build_subagent_header(label=label, status=status, background=background, body=body)]
 
     if truncated:
-        text += "\n\n[Full result saved to subagent artifact file]"
-    if record_id:
-        text += f"\n[Subagent Record ID] {record_id}"
-    if artifact_path:
-        text += f"\n[Subagent Artifact] {artifact_path}"
-    if total_tokens:
-        text += f"\n[Subagent Total Tokens] {total_tokens}"
-    text += f"\n[Subagent Status] {status}"
+        lines.append("")
+        lines.append("[Full result saved to subagent artifact file]")
 
-    if tools_used:
-        text += f"\n[Subagent Tools Used] {json.dumps(tools_used, ensure_ascii=False)}"
-    if tool_call_counts:
-        text += f"\n[Subagent Tool Counts] {json.dumps(tool_call_counts, ensure_ascii=False)}"
-    text += f"\n[Subagent Has Side Effects] {'true' if has_side_effects else 'false'}"
-    if files_modified:
-        text += f"\n[Subagent Files Modified] {json.dumps(files_modified, ensure_ascii=False)}"
-    if commands_run:
-        text += f"\n[Subagent Commands Run] {json.dumps(commands_run, ensure_ascii=False)}"
-    if tool_errors:
-        text += f"\n[Subagent Tool Errors] {json.dumps(tool_errors, ensure_ascii=False)}"
-    if missing_artifacts:
-        text += (
-            f"\n[Subagent Missing Artifacts] {json.dumps(missing_artifacts, ensure_ascii=False)}"
-        )
-    return text
+    _append_optional_line(lines, "[Subagent Record ID] ", record_id)
+    _append_optional_line(lines, "[Subagent Artifact] ", artifact_path)
+    if total_tokens:
+        lines.append(f"[Subagent Total Tokens] {total_tokens}")
+    lines.append(f"[Subagent Status] {status}")
+
+    _append_optional_json_line(lines, "[Subagent Tools Used] ", tools_used or [])
+    _append_optional_json_line(lines, "[Subagent Tool Counts] ", tool_call_counts or {})
+    lines.append(f"[Subagent Has Side Effects] {'true' if has_side_effects else 'false'}")
+    _append_optional_json_line(lines, "[Subagent Files Modified] ", files_modified or [])
+    _append_optional_json_line(lines, "[Subagent Commands Run] ", commands_run or [])
+    _append_optional_json_line(lines, "[Subagent Tool Errors] ", tool_errors or [])
+    _append_optional_json_line(lines, "[Subagent Missing Artifacts] ", missing_artifacts or [])
+
+    return "\n".join(lines)

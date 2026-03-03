@@ -72,4 +72,46 @@ def test_anyrouter_bridge_invokes_node_process(
     assert called["check"] is True
     assert called["env"]["ANYROUTER_BRIDGE_PORT"] == "4318"
     assert called["env"]["ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM"] == "true"
+    assert (
+        called["env"]["ANYROUTER_ANTHROPIC_BETA"]
+        == "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14"
+    )
+    assert called["env"]["ANYROUTER_DEFAULT_THINKING_EFFORT"] == "high"
     assert called["env"]["ANYROUTER_VERBOSE"] == "true"
+
+
+def test_anyrouter_bridge_uses_configured_header_and_effort_overrides(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = Config()
+    cfg.providers.anyrouter.api_key = "sk-test"
+    cfg.providers.anyrouter.extra_headers = {
+        "User-Agent": "custom-cli/9.9.9",
+        "X-App": "custom-app",
+        "Anthropic-Beta": "claude-code-20250219",
+    }
+    cfg.providers.anyrouter.request_params = {"output_config": {"effort": "max"}}
+    save_config(cfg)
+
+    called = {}
+
+    class Result:
+        def __init__(self, stdout: str = "", stderr: str = ""):
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(cmd, env=None, check=None, capture_output=None, text=None):
+        if cmd == ["node", "--help"]:
+            return Result(stdout="")
+        called["env"] = env
+        return Result()
+
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = runner.invoke(commands.app, ["anyrouter", "bridge", "--port", "4318"])
+    assert result.exit_code == 0
+    assert called["env"]["ANYROUTER_USER_AGENT"] == "custom-cli/9.9.9"
+    assert called["env"]["ANYROUTER_X_APP"] == "custom-app"
+    assert called["env"]["ANYROUTER_ANTHROPIC_BETA"] == "claude-code-20250219"
+    assert called["env"]["ANYROUTER_DEFAULT_THINKING_EFFORT"] == "max"

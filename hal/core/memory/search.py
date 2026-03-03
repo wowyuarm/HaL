@@ -191,73 +191,75 @@ class MemorySearch:
         """Compute model-aware chunk ID."""
         return compute_chunk_id(chunk, self._embedding_model)
 
-    async def _index_file(self, md_path: Path) -> int:
-        """Index a single markdown file with incremental upsert."""
-        chunks = self._chunker.chunk_file(md_path, base_path=self._daily_dir)
-        if self._exclude_channels:
-            chunks = [
-                c
-                for c in chunks
-                if _extract_channel_from_heading(c.heading) not in self._exclude_channels
-            ]
-        source = str(md_path.relative_to(self._daily_dir))
-        if not chunks:
-            # Source now fully excluded (or empty): clear any previously indexed chunks
-            # so backfill/index checks do not keep flagging this file for reindex.
-            existing_ids = await self._store.get_chunk_ids_by_source(source)
-            if existing_ids:
-                await self._store.delete_by_source(source)
-            return 0
+    def _filter_indexable_chunks(self, chunks: list) -> list:
+        """Apply channel exclusion filter to chunk list."""
+        if not self._exclude_channels:
+            return chunks
+        return [
+            chunk
+            for chunk in chunks
+            if _extract_channel_from_heading(chunk.heading) not in self._exclude_channels
+        ]
 
-        new_ids = {self._chunk_id(c) for c in chunks}
+    async def _clear_source_if_present(self, source: str) -> None:
+        """Delete a source from index when it has no indexable chunks."""
+        existing_ids = await self._store.get_chunk_ids_by_source(source)
+        if existing_ids:
+            await self._store.delete_by_source(source)
+
+    async def _compute_chunks_to_add(self, source: str, chunks: list) -> list:
+        """Return chunks that require (re)embedding and upsert for a source."""
+        new_ids = {self._chunk_id(chunk) for chunk in chunks}
         existing_ids = await self._store.get_chunk_ids_by_source(source)
 
-        # Determine what's new / changed / stale
-        to_add = [c for c in chunks if self._chunk_id(c) not in existing_ids]
+        to_add = [chunk for chunk in chunks if self._chunk_id(chunk) not in existing_ids]
         stale_ids = existing_ids - new_ids
-
-        # Remove stale chunks
         if stale_ids:
             await self._store.delete_by_source(source)
-            # Re-add everything since we deleted by source
-            to_add = chunks
+            return chunks
+        return to_add
 
-        if not to_add:
-            return 0
-
-        # Embed new chunks
-        texts = [c.content for c in to_add]
+    async def _embed_chunks_with_fallback(self, md_path: Path, chunks: list) -> list[tuple]:
+        """Embed chunks in batch, then retry per-chunk when batch output mismatches."""
+        texts = [chunk.content for chunk in chunks]
         embeddings = await self._embed_texts(texts)
-        pairs: list[tuple] = []
-        if embeddings and len(embeddings) == len(to_add):
-            pairs = list(zip(to_add, embeddings))
-        else:
-            logger.warning(
-                f"Embedding mismatch for {md_path} "
-                f"(expected {len(to_add)}, got {len(embeddings) if embeddings else 0}); "
-                "falling back to per-chunk retries"
-            )
-            for chunk in to_add:
-                one = await self._embed_texts([chunk.content])
-                if len(one) == 1:
-                    pairs.append((chunk, one[0]))
-                else:
-                    logger.warning(
-                        f"Skipping chunk after retries: {chunk.source}:{chunk.start_line}-{chunk.end_line}"
-                    )
-            if not pairs:
-                return 0
-            if len(pairs) < len(to_add):
-                logger.warning(
-                    f"Partial indexing for {md_path.name}: "
-                    f"{len(pairs)}/{len(to_add)} chunks embedded successfully"
-                )
+        if embeddings and len(embeddings) == len(chunks):
+            return list(zip(chunks, embeddings))
 
-        # Build upsert data
-        data = [
+        logger.warning(
+            f"Embedding mismatch for {md_path} "
+            f"(expected {len(chunks)}, got {len(embeddings) if embeddings else 0}); "
+            "falling back to per-chunk retries"
+        )
+        return await self._embed_chunks_individually(md_path, chunks)
+
+    async def _embed_chunks_individually(self, md_path: Path, chunks: list) -> list[tuple]:
+        """Embed each chunk separately to salvage partial indexing on failures."""
+        pairs: list[tuple] = []
+        for chunk in chunks:
+            one = await self._embed_texts([chunk.content])
+            if len(one) == 1:
+                pairs.append((chunk, one[0]))
+                continue
+            logger.warning(
+                f"Skipping chunk after retries: {chunk.source}:{chunk.start_line}-{chunk.end_line}"
+            )
+
+        if not pairs:
+            return []
+        if len(pairs) < len(chunks):
+            logger.warning(
+                f"Partial indexing for {md_path.name}: "
+                f"{len(pairs)}/{len(chunks)} chunks embedded successfully"
+            )
+        return pairs
+
+    def _build_upsert_payload(self, pairs: list[tuple]) -> list[dict]:
+        """Build vector-store payload for chunk/embedding pairs."""
+        return [
             {
                 "chunk_id": self._chunk_id(chunk),
-                "embedding": emb,
+                "embedding": embedding,
                 "content": chunk.content,
                 "source": chunk.source,
                 "heading": chunk.heading,
@@ -266,9 +268,29 @@ class MemorySearch:
                 "end_line": chunk.end_line,
                 "source_type": chunk.source_type,
             }
-            for chunk, emb in pairs
+            for chunk, embedding in pairs
         ]
 
+    async def _index_file(self, md_path: Path) -> int:
+        """Index a single markdown file with incremental upsert."""
+        chunks = self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+        chunks = self._filter_indexable_chunks(chunks)
+        source = str(md_path.relative_to(self._daily_dir))
+        if not chunks:
+            # Source now fully excluded (or empty): clear any previously indexed chunks
+            # so backfill/index checks do not keep flagging this file for reindex.
+            await self._clear_source_if_present(source)
+            return 0
+
+        to_add = await self._compute_chunks_to_add(source, chunks)
+        if not to_add:
+            return 0
+
+        pairs = await self._embed_chunks_with_fallback(md_path, to_add)
+        if not pairs:
+            return 0
+
+        data = self._build_upsert_payload(pairs)
         count = await self._store.upsert(data)
         logger.info(f"Indexed {count} chunks from {md_path.name}")
         return count

@@ -193,3 +193,5 @@ def test_defaults_match_original_hardcoded_values() -> None:
 
     # Channels
     assert cfg.channels.outbound_poll_timeout_s == 1.0
+    assert cfg.channels.telegram.send_progress is True
+    assert cfg.channels.telegram.send_tool_hints is True

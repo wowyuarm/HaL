@@ -11,8 +11,19 @@ from telegram.ext import ContextTypes
 
 from hal.bus.events import OutboundMessage
 
-from .constants import MSG_SPLIT_MAX_LENGTH, TYPING_INDICATOR_INTERVAL_S
+from .constants import (
+    MSG_SPLIT_MAX_LENGTH,
+    PROGRESS_APPEND_DEFAULT_SEPARATOR,
+    PROGRESS_APPEND_MODE_CONCAT,
+    TYPING_INDICATOR_INTERVAL_S,
+)
 from .formatting import _markdown_to_telegram_html, split_telegram_message
+
+_APPEND_MODE_META_KEY = "append_mode"
+_APPEND_KEY_META_KEY = "append_key"
+_APPEND_RESET_META_KEY = "append_reset"
+_APPEND_SEPARATOR_META_KEY = "append_separator"
+_EMPTY_MESSAGE_SENTINEL = "[empty message]"
 
 
 class TelegramMessagingMixin:
@@ -50,6 +61,98 @@ class TelegramMessagingMixin:
         type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
         return type_map.get(media_type, "")
 
+    async def _send_text_chunk(self, chat_id: int, chunk: str) -> int | None:
+        """Send one text chunk and return Telegram message_id when available."""
+        if not self._app:
+            return None
+        try:
+            html_chunk = _markdown_to_telegram_html(chunk)
+            sent = await self._app.bot.send_message(chat_id=chat_id, text=html_chunk, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"HTML parse failed for one chunk, falling back to plain text: {e}")
+            try:
+                sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+            except Exception as e2:
+                logger.error(f"Error sending Telegram message chunk: {e2}")
+                return None
+        return getattr(sent, "message_id", None)
+
+    async def _edit_text_chunk(self, chat_id: int, message_id: int, chunk: str) -> bool:
+        """Edit one existing Telegram message chunk."""
+        if not self._app:
+            return False
+        try:
+            html_chunk = _markdown_to_telegram_html(chunk)
+            await self._app.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=html_chunk,
+                parse_mode="HTML",
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"HTML edit failed for one chunk, falling back to plain text: {e}")
+            try:
+                await self._app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=chunk,
+                )
+                return True
+            except Exception as e2:
+                logger.error(f"Error editing Telegram message chunk: {e2}")
+                return False
+
+    async def _send_chunked_text(self, chat_id: int, text: str) -> None:
+        """Send text as one or more Telegram-sized chunks."""
+        for chunk in self._split_telegram_message(text, max_length=MSG_SPLIT_MAX_LENGTH):
+            await self._send_text_chunk(chat_id, chunk)
+
+    async def _send_appendable_text(self, chat_id: int, msg: OutboundMessage) -> None:
+        """Append text into a stable message thread by editing prior chunks."""
+        append_key = str(msg.metadata.get(_APPEND_KEY_META_KEY, ""))
+        if not append_key:
+            await self._send_chunked_text(chat_id, msg.content)
+            return
+
+        state_key = (chat_id, append_key)
+        if bool(msg.metadata.get(_APPEND_RESET_META_KEY, False)):
+            self._append_buffers.pop(state_key, None)
+            self._append_message_ids.pop(state_key, None)
+
+        previous = self._append_buffers.get(state_key, "")
+        separator = str(
+            msg.metadata.get(_APPEND_SEPARATOR_META_KEY, PROGRESS_APPEND_DEFAULT_SEPARATOR)
+        )
+        if previous and msg.content:
+            combined = f"{previous}{separator}{msg.content}"
+        else:
+            combined = previous + msg.content
+
+        self._append_buffers[state_key] = combined
+        chunks = self._split_telegram_message(combined, max_length=MSG_SPLIT_MAX_LENGTH)
+        message_ids = list(self._append_message_ids.get(state_key, []))
+
+        for idx, chunk in enumerate(chunks):
+            if idx < len(message_ids):
+                message_id = message_ids[idx]
+                edited = await self._edit_text_chunk(chat_id, message_id, chunk)
+                if edited:
+                    continue
+                sent_id = await self._send_text_chunk(chat_id, chunk)
+                if sent_id is None:
+                    self._append_message_ids.pop(state_key, None)
+                    return
+                message_ids[idx] = sent_id
+            else:
+                sent_id = await self._send_text_chunk(chat_id, chunk)
+                if sent_id is None:
+                    self._append_message_ids.pop(state_key, None)
+                    return
+                message_ids.append(sent_id)
+
+        self._append_message_ids[state_key] = message_ids
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
@@ -83,17 +186,12 @@ class TelegramMessagingMixin:
                         chat_id=chat_id, text=f"[Failed to send file: {media_path}]"
                     )
 
-        if msg.content and msg.content != "[empty message]":
-            for chunk in self._split_telegram_message(msg.content, max_length=MSG_SPLIT_MAX_LENGTH):
-                try:
-                    html_chunk = _markdown_to_telegram_html(chunk)
-                    await self._app.bot.send_message(chat_id=chat_id, text=html_chunk, parse_mode="HTML")
-                except Exception as e:
-                    logger.warning(f"HTML parse failed for one chunk, falling back to plain text: {e}")
-                    try:
-                        await self._app.bot.send_message(chat_id=chat_id, text=chunk)
-                    except Exception as e2:
-                        logger.error(f"Error sending Telegram message chunk: {e2}")
+        if msg.content and msg.content != _EMPTY_MESSAGE_SENTINEL:
+            append_mode = msg.metadata.get(_APPEND_MODE_META_KEY)
+            if append_mode == PROGRESS_APPEND_MODE_CONCAT:
+                await self._send_appendable_text(chat_id, msg)
+            else:
+                await self._send_chunked_text(chat_id, msg.content)
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""

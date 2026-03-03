@@ -8,10 +8,11 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3181;
 const DEFAULT_USER_AGENT = "claude-cli/2.1.2 (external, cli)";
 const DEFAULT_BETA =
-  "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14";
+  "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14";
 const DEFAULT_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
-const MIN_THINKING_BUDGET = 1024;
-const DEFAULT_THINKING_BUDGET = 2048;
+const THINKING_ADAPTIVE_TYPE = "adaptive";
+const DEFAULT_THINKING_EFFORT = "high";
+const VALID_THINKING_EFFORTS = new Set(["low", "medium", "high", "max"]);
 
 const HOP_HEADERS = new Set([
   "connection",
@@ -43,18 +44,6 @@ function envBool(name, fallback) {
     return fallback;
   }
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
-}
-
-function envInt(name, fallback) {
-  const value = process.env[name];
-  if (value === undefined) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return parsed;
 }
 
 function getFirstHeaderValue(value) {
@@ -117,33 +106,55 @@ function ensureClaudeCodeSystem(body) {
   ];
 }
 
-function normalizeThinkingBudget(maxTokens, preferredBudget) {
-  if (!Number.isInteger(preferredBudget) || preferredBudget < MIN_THINKING_BUDGET) {
-    return null;
+function normalizeThinkingEffort(value) {
+  if (typeof value !== "string") {
+    return DEFAULT_THINKING_EFFORT;
   }
-
-  if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
-    return preferredBudget;
+  const normalized = value.trim().toLowerCase();
+  if (!VALID_THINKING_EFFORTS.has(normalized)) {
+    return DEFAULT_THINKING_EFFORT;
   }
-
-  // Anthropic requires: budget_tokens < max_tokens, and minimum is 1024.
-  if (maxTokens <= MIN_THINKING_BUDGET) {
-    return null;
-  }
-  const capped = Math.min(preferredBudget, maxTokens - 1);
-  return capped >= MIN_THINKING_BUDGET ? capped : null;
+  return normalized;
 }
 
-function ensureDefaultThinking(body, preferredBudget) {
+function resolveThinkingType(thinking) {
+  if (!thinking) {
+    return "";
+  }
+  if (typeof thinking === "string") {
+    return thinking.trim().toLowerCase();
+  }
+  if (typeof thinking === "object") {
+    if (Array.isArray(thinking)) {
+      return "";
+    }
+    const value = thinking.type;
+    if (typeof value === "string") {
+      return value.trim().toLowerCase();
+    }
+  }
+  return "";
+}
+
+function ensureDefaultThinking(body) {
   if (body.thinking !== undefined && body.thinking !== null) {
     return;
   }
-  const maxTokens = Number.isInteger(body.max_tokens) ? body.max_tokens : null;
-  const budget = normalizeThinkingBudget(maxTokens, preferredBudget);
-  if (!budget) {
+  body.thinking = { type: THINKING_ADAPTIVE_TYPE };
+}
+
+function ensureDefaultAdaptiveEffort(body, preferredEffort) {
+  if (resolveThinkingType(body.thinking) !== THINKING_ADAPTIVE_TYPE) {
     return;
   }
-  body.thinking = { type: "enabled", budget_tokens: budget };
+  const outputConfig = body.output_config;
+  if (!outputConfig || typeof outputConfig !== "object" || Array.isArray(outputConfig)) {
+    body.output_config = { effort: preferredEffort };
+    return;
+  }
+  if (outputConfig.effort === undefined || outputConfig.effort === null || outputConfig.effort === "") {
+    outputConfig.effort = preferredEffort;
+  }
 }
 
 function copyResponseHeaders(source, target) {
@@ -175,7 +186,7 @@ const allowBrowserAccess = envBool("ANYROUTER_DIRECT_BROWSER_ACCESS", true);
 const forceStream = envBool("ANYROUTER_FORCE_STREAM", true);
 const injectClaudeCodeSystem = envBool("ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM", true);
 const defaultThinking = envBool("ANYROUTER_DEFAULT_THINKING", true);
-const defaultThinkingBudget = envInt("ANYROUTER_DEFAULT_THINKING_BUDGET", DEFAULT_THINKING_BUDGET);
+const defaultThinkingEffort = normalizeThinkingEffort(process.env.ANYROUTER_DEFAULT_THINKING_EFFORT);
 const verboseLogs = envBool("ANYROUTER_VERBOSE", false);
 let requestCounter = 0;
 
@@ -243,7 +254,8 @@ const server = http.createServer(async (req, res) => {
         ensureClaudeCodeSystem(payload);
       }
       if (defaultThinking) {
-        ensureDefaultThinking(payload, defaultThinkingBudget);
+        ensureDefaultThinking(payload);
+        ensureDefaultAdaptiveEffort(payload, defaultThinkingEffort);
       }
       payload.temperature = 1;
       upstreamBody = Buffer.from(JSON.stringify(payload));
@@ -255,6 +267,13 @@ const server = http.createServer(async (req, res) => {
         )} thinking=${
           payload.thinking && typeof payload.thinking === "object"
             ? JSON.stringify(payload.thinking)
+            : "none"
+        } effort=${
+          payload.output_config &&
+          typeof payload.output_config === "object" &&
+          !Array.isArray(payload.output_config) &&
+          payload.output_config.effort
+            ? String(payload.output_config.effort)
             : "none"
         }`,
       );

@@ -47,3 +47,5 @@ class TelegramChannel(
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}
         self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._append_buffers: dict[tuple[int, str], str] = {}
+        self._append_message_ids: dict[tuple[int, str], list[int]] = {}

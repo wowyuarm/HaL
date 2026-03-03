@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`hal/` contains runtime code: `core/` (engine/runtime/memory), `capabilities/` (tools/skills/scheduling), `channels/`, `infra/`, and `cli/` (Typer commands).  
+`hal/` contains runtime code: `core/` (engine/runtime/memory/subagent/bootstrap), `capabilities/` (tools/skills), `channels/`, `infra/`, and `cli/` (Typer command package).  
 `tests/` mirrors package layout (`tests/core/`, `tests/capabilities/tools/`, etc.).  
 Keep source and tests in matching paths.
 
@@ -38,6 +38,20 @@ Place tests in mirrored paths and name files `test_<feature>.py`.
 Mock external LLM/web integrations; do not run real API calls in tests.  
 Use `tmp_path` and the shared `tmp_home` fixture (`tests/conftest.py`) for filesystem/config isolation.  
 No fixed coverage threshold is configured; add regression tests for bug fixes.
+
+## HaL Quality Improvement Playbook
+- Refactor in small, behavior-preserving batches (usually 1-3 related functions/files per batch).
+- After each batch, run both targeted tests and a full quality scan:
+  - `PYTHONPATH=. pytest <targeted test paths> -q`
+  - `uvx pyscn@latest analyze .`
+- Treat full-project `pyscn` output as the source of truth; local function improvements can still reduce global health score.
+- Manage complexity-vs-duplication tradeoffs explicitly:
+  - Prefer helper extraction with strong domain semantics.
+  - Avoid introducing several near-identical helper shapes that clone detection flags as Type-1/Type-2 duplication.
+- If a refactor causes score regression (especially clone score), revert that specific change and try a different decomposition strategy.
+- Keep commits single-purpose and runnable; for quality refactors, use `refactor(scope): ...` style messages.
+- Before PR/merge, run full validation: `pytest tests/`, `ruff check hal/ && ruff format hal/`, and one fresh `pyscn` report.
+- Record the latest `.pyscn/reports/analyze_*.json` or `.html` path in PR notes so reviewers can compare baselines.
 
 ## Commit & Pull Request Guidelines
 Follow observed commit style: `type(scope): imperative summary` (for example `feat(memory): ...`, `fix(exec): ...`, `refactor(cli): ...`).  

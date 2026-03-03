@@ -33,6 +33,7 @@ from .subscribers import _EngineBackgroundSubscribers
 if TYPE_CHECKING:
     from hal.core.memory.search import MemorySearch
     from hal.infra.config.schema import (
+        ChannelsConfig,
         EngineConfig,
         ExecToolConfig,
         HistoryConfig,
@@ -69,6 +70,7 @@ class AgentEngine:
         engine_config: "EngineConfig | None" = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_fetch_config: "WebFetchConfig | None" = None,
+        channels_config: "ChannelsConfig | None" = None,
     ):
         from hal.infra.config.schema import EngineConfig, ExecToolConfig, HistoryConfig
 
@@ -89,6 +91,7 @@ class AgentEngine:
         self._engine_config = engine_config or EngineConfig()
         self._web_search_config = web_search_config
         self._web_fetch_config = web_fetch_config
+        self._channels_config = channels_config
         self._pending_summaries: dict[str, asyncio.Task] = {}
         self._metrics_collector = MetricsCollector(workspace / "logs" / "context_metrics.jsonl")
         self._background_resume = _EngineBackgroundResume(engine=self)
@@ -254,6 +257,19 @@ class AgentEngine:
     def _update_tool_contexts(self, channel: str, chat_id: str) -> None:
         """Update context-dependent tools with current channel/chat info."""
         self.tools.update_context(channel, chat_id)
+
+    def _get_channel_progress_policy(self, channel: str | None) -> tuple[bool, bool]:
+        """Return (send_progress, send_tool_hints) for a channel."""
+        if not channel or not self._channels_config:
+            return True, True
+
+        channel_config = getattr(self._channels_config, channel, None)
+        if channel_config is None:
+            return True, True
+
+        send_progress = bool(getattr(channel_config, "send_progress", True))
+        send_tool_hints = bool(getattr(channel_config, "send_tool_hints", True))
+        return send_progress, send_tool_hints
 
     def _record_metrics(self, metrics: ContextMetrics) -> None:
         """Best-effort metrics recording without affecting user flows."""

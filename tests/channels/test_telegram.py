@@ -12,6 +12,107 @@ from hal.channels.telegram import TelegramChannel, _markdown_to_telegram_html
 from hal.infra.config.schema import TelegramConfig
 
 
+class _DummyApp:
+    def __init__(self, bot: object):
+        self.bot = bot
+
+
+class _SimpleRecordingBot:
+    def __init__(self, *, fail_first_html: bool = False):
+        self.sent: list[tuple[int, str, str | None]] = []
+        self._fail_first_html = fail_first_html
+        self._html_calls = 0
+
+    async def send_message(self, chat_id: int, text: str, parse_mode: str | None = None) -> None:
+        if parse_mode == "HTML":
+            self._html_calls += 1
+            if self._fail_first_html and self._html_calls == 1:
+                raise RuntimeError("bad html")
+        self.sent.append((chat_id, text, parse_mode))
+
+
+class _SentMessage:
+    def __init__(self, message_id: int):
+        self.message_id = message_id
+
+
+class _AppendRecordingBot:
+    def __init__(self):
+        self.sent: list[tuple[int, str, str | None]] = []
+        self.edited: list[tuple[int, int, str, str | None]] = []
+        self._next_id = 100
+
+    async def send_message(
+        self, chat_id: int, text: str, parse_mode: str | None = None
+    ) -> _SentMessage:
+        self.sent.append((chat_id, text, parse_mode))
+        self._next_id += 1
+        return _SentMessage(self._next_id)
+
+    async def edit_message_text(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        parse_mode: str | None = None,
+    ) -> None:
+        self.edited.append((chat_id, message_id, text, parse_mode))
+
+
+def _attach_bot(channel: TelegramChannel, bot: object) -> None:
+    channel._app = _DummyApp(bot)  # type: ignore[attr-defined]
+
+
+def _extract_sent_text(send_message_mock: AsyncMock) -> str:
+    """Extract `text` argument from AsyncMock.await_args."""
+    return send_message_mock.await_args.kwargs.get(  # type: ignore[union-attr]
+        "text",
+        send_message_mock.await_args.args[1]  # type: ignore[union-attr]
+        if len(send_message_mock.await_args.args) > 1  # type: ignore[union-attr]
+        else "",
+    )
+
+
+def _build_startup_notification_channel() -> tuple[TelegramChannel, MagicMock, AsyncMock]:
+    cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
+    memory_manager = MagicMock()
+    channel = TelegramChannel(cfg, MessageBus(), memory_manager=memory_manager)
+    channel.bus.emit = AsyncMock()  # type: ignore[method-assign]
+    mock_bot = AsyncMock()
+    _attach_bot(channel, mock_bot)
+    return channel, memory_manager, mock_bot
+
+
+def _mock_git_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **kw: MagicMock(returncode=0, stdout="abc1234 fix: thing"),
+    )
+
+
+def _assert_startup_injection(
+    channel: TelegramChannel,
+    memory_manager: MagicMock,
+    *,
+    expected_content_fragment: str,
+    expect_update_info: bool,
+) -> None:
+    """Validate memory/event side effects of startup notification."""
+    memory_manager.record_conversation.assert_called_once()
+    call_kwargs = memory_manager.record_conversation.call_args.kwargs
+    assert call_kwargs["entry_type"] == "injection"
+    assert expected_content_fragment in call_kwargs["content"]
+    channel.bus.emit.assert_awaited_once()
+    event = channel.bus.emit.await_args.args[0]  # type: ignore[union-attr]
+    assert isinstance(event, SystemStartupEvent)
+    assert event.channel == "telegram"
+    assert event.chat_id == "42"
+    if expect_update_info:
+        assert event.update_info is not None
+        return
+    assert event.update_info is None
+
+
 def test_split_telegram_message_no_split() -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
     text = "hello"
@@ -216,78 +317,94 @@ async def test_send_returns_when_app_not_running() -> None:
 
 @pytest.mark.asyncio
 async def test_send_invalid_chat_id_is_ignored() -> None:
-    class DummyBot:
-        def __init__(self):
-            self.sent: list[tuple[int, str, str | None]] = []
-
-        async def send_message(
-            self, chat_id: int, text: str, parse_mode: str | None = None
-        ) -> None:
-            self.sent.append((chat_id, text, parse_mode))
-
-    class DummyApp:
-        def __init__(self):
-            self.bot = DummyBot()
-
+    bot = _SimpleRecordingBot()
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
-    ch._app = DummyApp()  # type: ignore[attr-defined]
+    _attach_bot(ch, bot)
 
     await ch.send(OutboundMessage(channel="telegram", chat_id="not-an-int", content="hi"))
-    assert ch._app.bot.sent == []
+    assert bot.sent == []
 
 
 @pytest.mark.asyncio
 async def test_send_falls_back_to_plain_text_on_single_chunk_html_error() -> None:
-    class DummyBot:
-        def __init__(self):
-            self.sent: list[tuple[int, str, str | None]] = []
-            self.html_calls = 0
-
-        async def send_message(
-            self, chat_id: int, text: str, parse_mode: str | None = None
-        ) -> None:
-            if parse_mode == "HTML":
-                self.html_calls += 1
-                if self.html_calls == 1:
-                    raise RuntimeError("bad html")
-            self.sent.append((chat_id, text, parse_mode))
-
-    class DummyApp:
-        def __init__(self):
-            self.bot = DummyBot()
-
+    bot = _SimpleRecordingBot(fail_first_html=True)
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
-    ch._app = DummyApp()  # type: ignore[attr-defined]
+    _attach_bot(ch, bot)
 
     msg = OutboundMessage(channel="telegram", chat_id="123", content="**hi**")
     await ch.send(msg)
 
-    assert ch._app.bot.sent == [(123, "**hi**", None)]
+    assert bot.sent == [(123, "**hi**", None)]
 
 
 @pytest.mark.asyncio
 async def test_send_multiple_chunks_calls_send_message_multiple_times() -> None:
-    class DummyBot:
-        def __init__(self):
-            self.sent: list[tuple[int, str, str | None]] = []
-
-        async def send_message(
-            self, chat_id: int, text: str, parse_mode: str | None = None
-        ) -> None:
-            self.sent.append((chat_id, text, parse_mode))
-
-    class DummyApp:
-        def __init__(self):
-            self.bot = DummyBot()
-
+    bot = _SimpleRecordingBot()
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
-    ch._app = DummyApp()  # type: ignore[attr-defined]
+    _attach_bot(ch, bot)
 
     msg = OutboundMessage(channel="telegram", chat_id="123", content=("a" * 4100))
     await ch.send(msg)
 
-    assert len(ch._app.bot.sent) == 2
-    assert all(item[2] == "HTML" for item in ch._app.bot.sent)
+    assert len(bot.sent) == 2
+    assert all(item[2] == "HTML" for item in bot.sent)
+
+
+@pytest.mark.asyncio
+async def test_send_append_mode_concatenates_by_editing_existing_message() -> None:
+    bot = _AppendRecordingBot()
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    _attach_bot(ch, bot)
+
+    await ch.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="↳ fs('.')",
+            metadata={"append_mode": "concat", "append_key": "k1"},
+        )
+    )
+    await ch.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="↳ exec('ls')",
+            metadata={"append_mode": "concat", "append_key": "k1"},
+        )
+    )
+
+    assert len(bot.sent) == 1
+    assert len(bot.edited) >= 1
+    edited_text = bot.edited[-1][2]
+    assert "fs" in edited_text and "exec" in edited_text
+
+
+@pytest.mark.asyncio
+async def test_send_append_mode_reset_starts_new_message() -> None:
+    bot = _AppendRecordingBot()
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    _attach_bot(ch, bot)
+
+    await ch.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="↳ fs('.')",
+            metadata={"append_mode": "concat", "append_key": "k1"},
+        )
+    )
+    await ch.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="↳ exec('ls')",
+            metadata={"append_mode": "concat", "append_key": "k1", "append_reset": True},
+        )
+    )
+
+    assert len(bot.sent) == 2
+    # reset path should avoid editing old chain for this update
+    assert len(bot.edited) == 0
 
 
 def test_split_then_html_keeps_tags_complete_per_chunk() -> None:
@@ -761,21 +878,9 @@ def test_read_update_marker_missing() -> None:
 @pytest.mark.asyncio
 async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch) -> None:
     """Startup notification includes changelog when update marker exists."""
-    cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
-    mm = MagicMock()
-    ch = TelegramChannel(cfg, MessageBus(), memory_manager=mm)
-    ch.bus.emit = AsyncMock()  # type: ignore[method-assign]
+    ch, mm, mock_bot = _build_startup_notification_channel()
 
-    # Mock the Application and bot
-    mock_bot = AsyncMock()
-    ch._app = MagicMock()
-    ch._app.bot = mock_bot
-
-    # Mock git log
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **kw: MagicMock(returncode=0, stdout="abc1234 fix: thing"),
-    )
+    _mock_git_log(monkeypatch)
 
     # Mock update marker
     update_data = {"before": "000", "after": "abc1234", "changes": "fix: thing"}
@@ -788,44 +893,24 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
 
     # Should send enriched message
     mock_bot.send_message.assert_awaited_once()
-    sent_text = mock_bot.send_message.await_args.kwargs.get(
-        "text",
-        mock_bot.send_message.await_args.args[1]
-        if len(mock_bot.send_message.await_args.args) > 1
-        else "",
-    )
+    sent_text = _extract_sent_text(mock_bot.send_message)
     assert "Changes since" in sent_text
     assert "fix: thing" in sent_text
 
-    # Should write injection to memory
-    mm.record_conversation.assert_called_once()
-    call_kwargs = mm.record_conversation.call_args.kwargs
-    assert call_kwargs["entry_type"] == "injection"
-    assert "self-update" in call_kwargs["content"]
-    ch.bus.emit.assert_awaited_once()
-    event = ch.bus.emit.await_args.args[0]  # type: ignore[union-attr]
-    assert isinstance(event, SystemStartupEvent)
-    assert event.channel == "telegram"
-    assert event.chat_id == "42"
-    assert event.update_info is not None
+    _assert_startup_injection(
+        ch,
+        mm,
+        expected_content_fragment="self-update",
+        expect_update_info=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPatch) -> None:
     """Startup notification writes a generic injection when no update marker exists."""
-    cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
-    mm = MagicMock()
-    ch = TelegramChannel(cfg, MessageBus(), memory_manager=mm)
-    ch.bus.emit = AsyncMock()  # type: ignore[method-assign]
+    ch, mm, mock_bot = _build_startup_notification_channel()
 
-    mock_bot = AsyncMock()
-    ch._app = MagicMock()
-    ch._app.bot = mock_bot
-
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **kw: MagicMock(returncode=0, stdout="abc1234 fix: thing"),
-    )
+    _mock_git_log(monkeypatch)
     monkeypatch.setattr(
         "hal.channels.telegram.TelegramChannel._read_update_marker",
         staticmethod(lambda: None),
@@ -834,23 +919,13 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
     await ch._send_startup_notification()
 
     mock_bot.send_message.assert_awaited_once()
-    sent_text = mock_bot.send_message.await_args.kwargs.get(
-        "text",
-        mock_bot.send_message.await_args.args[1]
-        if len(mock_bot.send_message.await_args.args) > 1
-        else "",
-    )
+    sent_text = _extract_sent_text(mock_bot.send_message)
     assert "HaL online" in sent_text
     assert "Changes since" not in sent_text
 
-    # Should still write a generic injection to daily_log
-    mm.record_conversation.assert_called_once()
-    call_kwargs = mm.record_conversation.call_args.kwargs
-    assert call_kwargs["entry_type"] == "injection"
-    assert "service started" in call_kwargs["content"]
-    ch.bus.emit.assert_awaited_once()
-    event = ch.bus.emit.await_args.args[0]  # type: ignore[union-attr]
-    assert isinstance(event, SystemStartupEvent)
-    assert event.channel == "telegram"
-    assert event.chat_id == "42"
-    assert event.update_info is None
+    _assert_startup_injection(
+        ch,
+        mm,
+        expected_content_fragment="service started",
+        expect_update_info=False,
+    )

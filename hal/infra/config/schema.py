@@ -19,6 +19,8 @@ class TelegramConfig(_StrictModel):
     enabled: bool = False
     token: str = ""  # Bot token from @BotFather
     allow_from: list[str] = Field(default_factory=list)  # Allowed user IDs or usernames
+    send_progress: bool = True  # Send interim assistant intent text before tool execution
+    send_tool_hints: bool = True  # Send interim tool-call hint lines (↳ tool(...))
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )

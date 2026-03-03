@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from hal.infra.providers.base import LLMResponse
-from hal.infra.providers.litellm_provider import LiteLLMProvider
+from hal.infra.providers.litellm import LiteLLMProvider
 
 
 class _Usage:
@@ -82,6 +82,25 @@ class TestSanitizeMessages:
         result = LiteLLMProvider._sanitize_messages(messages)
         assert result[0] == {"role": "assistant", "content": "hi"}
         assert result[1] == {"role": "user", "content": "hello"}
+
+    def test_preserves_reasoning_content_when_enabled(self) -> None:
+        tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "fs"}}]
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "reasoning_content": "thinking...",
+            }
+        ]
+        result = LiteLLMProvider._sanitize_messages(messages, preserve_reasoning_content=True)
+        assert result[0]["reasoning_content"] == "thinking..."
+
+    def test_fills_missing_reasoning_content_for_assistant_tool_call_when_enabled(self) -> None:
+        tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "fs"}}]
+        messages = [{"role": "assistant", "content": "", "tool_calls": tool_calls}]
+        result = LiteLLMProvider._sanitize_messages(messages, preserve_reasoning_content=True)
+        assert result[0]["reasoning_content"] == ""
 
     def test_converts_null_content_to_empty_string(self) -> None:
         messages = [
@@ -204,6 +223,15 @@ def test_parse_response_usage_includes_cache_fields() -> None:
     assert parsed.usage["prompt_cache_miss_tokens"] == 24
 
 
+def test_extract_usage_maps_anthropic_input_output_tokens() -> None:
+    usage = SimpleNamespace(input_tokens=77, output_tokens=9)
+
+    parsed = LiteLLMProvider._extract_usage(usage)
+    assert parsed["prompt_tokens"] == 77
+    assert parsed["completion_tokens"] == 9
+    assert parsed["total_tokens"] == 86
+
+
 @pytest.mark.asyncio
 async def test_chat_applies_model_overrides_and_passes_tools(
     monkeypatch: pytest.MonkeyPatch,
@@ -218,7 +246,7 @@ async def test_chat_applies_model_overrides_and_passes_tools(
         called.update(kwargs)
         return _Resp(_Choice(_Msg("ok")))
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
 
     tools = [{"type": "function", "function": {"name": "fs"}}]
     r = await p.chat(messages=[{"role": "user", "content": "hi"}], tools=tools, temperature=0.1)
@@ -237,6 +265,71 @@ async def test_chat_applies_model_overrides_and_passes_tools(
 
 
 @pytest.mark.asyncio
+async def test_chat_preserves_reasoning_content_for_moonshot_tool_call_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="moonshot/kimi-k2.5",
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
+
+    tool_calls = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "fs", "arguments": '{"action":"list","path":"."}'},
+        }
+    ]
+    await p.chat(
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": tool_calls,
+                "reasoning_content": "thinking...",
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "fs", "content": "[]"},
+            {"role": "user", "content": "continue"},
+        ]
+    )
+
+    assistant_msg = called["messages"][0]
+    assert assistant_msg["reasoning_content"] == "thinking..."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_tokens", [0, -10])
+async def test_chat_clamps_non_positive_max_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+    max_tokens: int,
+) -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="gpt-4o",
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
+
+    await p.chat(messages=[{"role": "user", "content": "hi"}], max_tokens=max_tokens)
+
+    assert called["max_tokens"] == 1
+
+
+@pytest.mark.asyncio
 async def test_chat_passes_provider_request_params(monkeypatch: pytest.MonkeyPatch) -> None:
     p = LiteLLMProvider(
         api_key=None,
@@ -250,7 +343,7 @@ async def test_chat_passes_provider_request_params(monkeypatch: pytest.MonkeyPat
         called.update(kwargs)
         return _Resp(_Choice(_Msg("ok")))
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
 
     await p.chat(messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}])
 
@@ -269,7 +362,7 @@ async def test_chat_applies_cache_control_on_anthropic_paths(
         called.update(kwargs)
         return _Resp(_Choice(_Msg("ok")))
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
 
     tools = [
         {"type": "function", "function": {"name": "fs", "parameters": {"type": "object"}}},
@@ -299,7 +392,7 @@ async def test_chat_does_not_apply_cache_control_on_non_anthropic_models(
         called.update(kwargs)
         return _Resp(_Choice(_Msg("ok")))
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
 
     await p.chat(
         messages=[
@@ -327,7 +420,7 @@ async def test_chat_openrouter_non_claude_skips_cache_control(
         called.update(kwargs)
         return _Resp(_Choice(_Msg("ok")))
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
 
     await p.chat(messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}])
 
@@ -342,7 +435,7 @@ async def test_chat_exception_returns_error_content(monkeypatch: pytest.MonkeyPa
     async def boom(**kwargs):
         raise RuntimeError("fail")
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", boom)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", boom)
 
     r = await p.chat(messages=[{"role": "user", "content": "hi"}])
     assert r.finish_reason == "error"
@@ -366,7 +459,7 @@ async def test_chat_anyrouter_forces_stream_aggregation(monkeypatch: pytest.Monk
     async def fake_aggregate(stream):
         return LLMResponse(content="ok")
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", fake_acompletion)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
     monkeypatch.setattr(p, "_aggregate_stream", fake_aggregate)
 
     r = await p.chat(messages=[{"role": "user", "content": "hi"}])
@@ -385,7 +478,7 @@ async def test_chat_exception_strips_raw_response_payload(monkeypatch: pytest.Mo
             "Original Response: event: message_start\\ndata:{...}"
         )
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.acompletion", boom)
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", boom)
 
     r = await p.chat(messages=[{"role": "user", "content": "hi"}])
     assert r.content is not None

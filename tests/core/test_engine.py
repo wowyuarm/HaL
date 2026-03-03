@@ -15,6 +15,7 @@ from hal.core.engine import (
     _build_subagent_injection,
     _split_subagent_tool_result,
 )
+from hal.infra.config.schema import ChannelsConfig, TelegramConfig
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 # ------------------------------------------------------------------
@@ -74,6 +75,64 @@ def engine(bus, mock_provider, workspace):
         # Ensure subagents.await_pending() is awaitable and returns no results
         eng.subagents.await_pending = AsyncMock(return_value=[])
         yield eng
+
+
+def _set_telegram_progress_policy(
+    engine: AgentEngine, *, send_progress: bool, send_tool_hints: bool
+) -> None:
+    engine._channels_config = ChannelsConfig(
+        telegram=TelegramConfig(
+            enabled=True,
+            send_progress=send_progress,
+            send_tool_hints=send_tool_hints,
+        )
+    )
+
+
+_LOOP_TEST_MESSAGES = [{"role": "system", "content": "x"}]
+_TELEGRAM_TEST_CHANNEL = "telegram"
+_TELEGRAM_TEST_CHAT_ID = "c1"
+
+
+def _capture_outbound_messages(engine: AgentEngine) -> list[OutboundMessage]:
+    """Patch bus.publish_outbound to collect messages for assertions."""
+    outbound_messages: list[OutboundMessage] = []
+
+    async def capture_outbound(msg: OutboundMessage) -> None:
+        outbound_messages.append(msg)
+
+    engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
+    return outbound_messages
+
+
+async def _run_telegram_loop_with_outbound_capture(
+    engine: AgentEngine,
+    mock_provider: MagicMock,
+    *,
+    responses: list[LLMResponse],
+    max_iterations: int = 5,
+) -> list[OutboundMessage]:
+    """Execute one telegram loop and return all outbound messages."""
+    engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+    outbound_messages = _capture_outbound_messages(engine)
+    mock_provider.chat.side_effect = responses
+    await engine._execute_loop(
+        messages=list(_LOOP_TEST_MESSAGES),
+        max_iterations=max_iterations,
+        channel=_TELEGRAM_TEST_CHANNEL,
+        chat_id=_TELEGRAM_TEST_CHAT_ID,
+    )
+    return outbound_messages
+
+
+def _progress_messages(
+    outbound_messages: list[OutboundMessage], *, kind: str | None = None
+) -> list[OutboundMessage]:
+    """Filter captured outbound messages to progress notifications."""
+    progress = [msg for msg in outbound_messages if msg.metadata.get("progress")]
+    if kind is None:
+        return progress
+    return [msg for msg in progress if msg.metadata.get("progress_kind") == kind]
 
 
 # ------------------------------------------------------------------
@@ -432,13 +491,7 @@ class TestMidLoopInjection:
             ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
         ]
         engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
-
-        outbound_messages: list[OutboundMessage] = []
-
-        async def capture_outbound(msg: OutboundMessage) -> None:
-            outbound_messages.append(msg)
-
-        engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
+        outbound_messages = _capture_outbound_messages(engine)
 
         call_count = 0
 
@@ -467,7 +520,7 @@ class TestMidLoopInjection:
         )
 
         # No progress messages should have been sent
-        progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
+        progress_msgs = _progress_messages(outbound_messages)
         assert len(progress_msgs) == 0
 
     async def test_no_progress_for_message_only_tool_calls(self, engine, mock_provider):
@@ -475,27 +528,16 @@ class TestMidLoopInjection:
         tool_calls = [
             ToolCallRequest(id="t1", name="message", arguments={"content": "hello"}),
         ]
-        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
-
-        outbound_messages: list[OutboundMessage] = []
-
-        async def capture_outbound(msg: OutboundMessage) -> None:
-            outbound_messages.append(msg)
-
-        engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
-        mock_provider.chat.side_effect = [
-            LLMResponse(content="我来给你发一条消息", tool_calls=tool_calls),
-            LLMResponse(content="done", tool_calls=[]),
-        ]
-
-        await engine._execute_loop(
-            messages=[{"role": "system", "content": "x"}],
-            max_iterations=5,
-            channel="telegram",
-            chat_id="c1",
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content="我来给你发一条消息", tool_calls=tool_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
         )
 
-        progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
+        progress_msgs = _progress_messages(outbound_messages)
         assert len(progress_msgs) == 0
 
     async def test_background_completion_event_injected_without_polling(
@@ -600,35 +642,139 @@ class TestMidLoopInjection:
         assert published.content == "bg-final"
 
     async def test_progress_hides_message_tool_when_mixed_with_others(self, engine, mock_provider):
-        """Progress should include actionable tools but hide message tool lines."""
+        """Progress text and tool hints are emitted separately when both are enabled."""
         tool_calls = [
             ToolCallRequest(id="t1", name="message", arguments={"content": "hello"}),
             ToolCallRequest(id="t2", name="fs", arguments={"action": "list", "path": "."}),
         ]
-        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
-
-        outbound_messages: list[OutboundMessage] = []
-
-        async def capture_outbound(msg: OutboundMessage) -> None:
-            outbound_messages.append(msg)
-
-        engine.bus.publish_outbound = AsyncMock(side_effect=capture_outbound)  # type: ignore[method-assign]
-        mock_provider.chat.side_effect = [
-            LLMResponse(content="先发消息再查目录", tool_calls=tool_calls),
-            LLMResponse(content="done", tool_calls=[]),
-        ]
-
-        await engine._execute_loop(
-            messages=[{"role": "system", "content": "x"}],
-            max_iterations=5,
-            channel="telegram",
-            chat_id="c1",
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content="先发消息再查目录", tool_calls=tool_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
         )
 
-        progress_msgs = [m for m in outbound_messages if m.metadata.get("progress")]
+        progress_msgs = _progress_messages(outbound_messages)
+        assert len(progress_msgs) == 2
+        text_msgs = _progress_messages(progress_msgs, kind="text")
+        hint_msgs = _progress_messages(progress_msgs, kind="tool_hints")
+        assert len(text_msgs) == 1
+        assert len(hint_msgs) == 1
+        assert text_msgs[0].content == "先发消息再查目录"
+        assert "↳ fs(" in hint_msgs[0].content
+        assert "↳ message(" not in hint_msgs[0].content
+
+    async def test_progress_policy_progress_only(self, engine, mock_provider):
+        """When hints are disabled, only assistant progress text is sent."""
+        _set_telegram_progress_policy(engine, send_progress=True, send_tool_hints=False)
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."}),
+        ]
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content="先确认当前目录", tool_calls=tool_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
+        )
+
+        progress_msgs = _progress_messages(outbound_messages)
+        assert len(progress_msgs) == 1
+        assert progress_msgs[0].content == "先确认当前目录"
+        assert "↳" not in progress_msgs[0].content
+
+    async def test_progress_policy_tool_hints_only(self, engine, mock_provider):
+        """When progress text is disabled, only tool hints are sent."""
+        _set_telegram_progress_policy(engine, send_progress=False, send_tool_hints=True)
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."}),
+        ]
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content="先确认当前目录", tool_calls=tool_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
+        )
+
+        progress_msgs = _progress_messages(outbound_messages)
         assert len(progress_msgs) == 1
         assert "↳ fs(" in progress_msgs[0].content
-        assert "↳ message(" not in progress_msgs[0].content
+        assert "先确认当前目录" not in progress_msgs[0].content
+        assert progress_msgs[0].metadata.get("append_mode") == "concat"
+        assert progress_msgs[0].metadata.get("append_key")
+
+    async def test_progress_policy_disabled_sends_no_interim_message(self, engine, mock_provider):
+        """When both flags are false, no progress outbound is published."""
+        _set_telegram_progress_policy(engine, send_progress=False, send_tool_hints=False)
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."}),
+        ]
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content="先确认当前目录", tool_calls=tool_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
+        )
+
+        progress_msgs = _progress_messages(outbound_messages)
+        assert len(progress_msgs) == 0
+
+    async def test_tool_hints_reuse_append_key_when_no_progress(self, engine, mock_provider):
+        """Consecutive hint-only batches should share one append stream."""
+        _set_telegram_progress_policy(engine, send_progress=True, send_tool_hints=True)
+        first_calls = [ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})]
+        second_calls = [ToolCallRequest(id="t2", name="exec", arguments={"command": "ls"})]
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content=None, tool_calls=first_calls),
+                LLMResponse(content=None, tool_calls=second_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
+        )
+
+        hint_msgs = _progress_messages(outbound_messages, kind="tool_hints")
+        assert len(hint_msgs) == 2
+        first_key = hint_msgs[0].metadata.get("append_key")
+        second_key = hint_msgs[1].metadata.get("append_key")
+        assert first_key == second_key
+        assert hint_msgs[0].metadata.get("append_reset") is False
+        assert hint_msgs[1].metadata.get("append_reset") is False
+
+    async def test_progress_text_resets_tool_hint_append_stream(self, engine, mock_provider):
+        """When progress text is emitted, next tool-hint batch starts a fresh append stream."""
+        _set_telegram_progress_policy(engine, send_progress=True, send_tool_hints=True)
+        first_calls = [ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})]
+        second_calls = [ToolCallRequest(id="t2", name="exec", arguments={"command": "ls"})]
+        third_calls = [ToolCallRequest(id="t3", name="web_search", arguments={"query": "hal"})]
+        outbound_messages = await _run_telegram_loop_with_outbound_capture(
+            engine,
+            mock_provider,
+            responses=[
+                LLMResponse(content=None, tool_calls=first_calls),
+                LLMResponse(content="先看一下命令输出", tool_calls=second_calls),
+                LLMResponse(content=None, tool_calls=third_calls),
+                LLMResponse(content="done", tool_calls=[]),
+            ],
+            max_iterations=6,
+        )
+
+        text_msgs = _progress_messages(outbound_messages, kind="text")
+        hint_msgs = _progress_messages(outbound_messages, kind="tool_hints")
+        assert len(text_msgs) == 1
+        assert text_msgs[0].content == "先看一下命令输出"
+        assert len(hint_msgs) == 3
+        assert hint_msgs[0].metadata.get("append_reset") is False
+        assert hint_msgs[1].metadata.get("append_reset") is True
+        assert hint_msgs[2].metadata.get("append_reset") is False
 
 
 class TestRunLoop:

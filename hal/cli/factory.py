@@ -31,7 +31,7 @@ def _resolve_provider_name(config, model_name: str):
 
 def make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
-    from hal.infra.providers.litellm_provider import LiteLLMProvider
+    from hal.infra.providers.litellm import LiteLLMProvider
 
     p = config.get_provider()
     model = config.agents.defaults.model
@@ -63,7 +63,7 @@ def make_worker_provider(config):
 
 def _make_alternate_provider(config, model_name: str):
     """Create a separate LiteLLMProvider for an alternate model. Returns None if 'default' or same provider."""
-    from hal.infra.providers.litellm_provider import LiteLLMProvider
+    from hal.infra.providers.litellm import LiteLLMProvider
 
     if model_name == "default":
         return None

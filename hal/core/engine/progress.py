@@ -8,22 +8,39 @@ from typing import Any
 _THINK_RE = re.compile(r"<think>.*?</think>|<think>.*$", re.DOTALL)
 
 
-def _format_progress_message(
+def _extract_progress_text(
     assistant_content: str | None,
-    tool_calls: list[Any],
 ) -> str | None:
-    """Build a progress message combining intent and tool calls."""
-    parts: list[str] = []
+    """Extract a clean assistant intent line for interim progress display."""
+    if not assistant_content:
+        return None
 
-    if assistant_content:
-        cleaned = _THINK_RE.sub("", assistant_content).strip()
-        if cleaned:
-            parts.append(cleaned)
+    cleaned = _THINK_RE.sub("", assistant_content).strip()
+    return cleaned or None
 
+
+def _format_tool_hints(tool_calls: list[Any]) -> list[str]:
+    """Format tool-call hints for interim progress display."""
+    hints: list[str] = []
     for tc in tool_calls or []:
         summary = _summarize_args(tc.arguments)
-        parts.append(f"↳ {tc.name}({summary})")
+        hints.append(f"↳ {tc.name}({summary})")
+    return hints
 
+
+def _compose_progress_message(
+    progress_text: str | None,
+    tool_hints: list[str],
+    *,
+    send_progress: bool,
+    send_tool_hints: bool,
+) -> str | None:
+    """Compose the interim progress message according to channel policy."""
+    parts: list[str] = []
+    if send_progress and progress_text:
+        parts.append(progress_text)
+    if send_tool_hints and tool_hints:
+        parts.extend(tool_hints)
     return "\n".join(parts) if parts else None
 
 

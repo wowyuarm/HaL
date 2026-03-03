@@ -55,6 +55,7 @@ def build_gateway_runtime(config: "Config") -> GatewayRuntime:
         engine_config=config.engine,
         web_search_config=config.tools.web.search,
         web_fetch_config=config.tools.web.fetch,
+        channels_config=config.channels,
     )
 
     channels = ChannelManager(

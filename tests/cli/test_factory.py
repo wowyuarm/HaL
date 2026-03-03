@@ -16,7 +16,7 @@ def test_make_provider_passes_resolved_provider_name(monkeypatch) -> None:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.LiteLLMProvider", DummyProvider)
+    monkeypatch.setattr("hal.infra.providers.litellm.LiteLLMProvider", DummyProvider)
 
     provider = factory.make_provider(config)
     assert isinstance(provider, DummyProvider)
@@ -36,7 +36,7 @@ def test_make_alternate_provider_passes_resolved_provider_name(monkeypatch) -> N
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.LiteLLMProvider", DummyProvider)
+    monkeypatch.setattr("hal.infra.providers.litellm.LiteLLMProvider", DummyProvider)
 
     provider = factory._make_alternate_provider(config, "anthropic/claude-opus-4-6")
     assert isinstance(provider, DummyProvider)
@@ -58,7 +58,7 @@ def test_make_provider_passes_request_params(monkeypatch) -> None:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    monkeypatch.setattr("hal.infra.providers.litellm_provider.LiteLLMProvider", DummyProvider)
+    monkeypatch.setattr("hal.infra.providers.litellm.LiteLLMProvider", DummyProvider)
 
     provider = factory.make_provider(config)
     assert isinstance(provider, DummyProvider)

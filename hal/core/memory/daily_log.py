@@ -14,6 +14,14 @@ from pydantic import BaseModel
 
 from hal.core.context.token_budget import estimate_content_tokens, trim_text_to_token_budget
 
+_RESET_MARKER_ROLE = "system"
+_RESET_MARKER_CONTENT = "conversation_reset"
+_ROLE_USER = "user"
+_ROLE_ASSISTANT = "assistant"
+_ROLE_TOOL = "tool"
+_ENTRY_TYPE_INJECTION = "injection"
+_ENTRY_TYPE_SUMMARY = "summary"
+
 
 class LogEntry(BaseModel):
     """A single entry in the daily log."""
@@ -67,8 +75,8 @@ class DailyLog:
         return self.append(
             channel=channel,
             chat_id=chat_id,
-            role="system",
-            content="conversation_reset",
+            role=_RESET_MARKER_ROLE,
+            content=_RESET_MARKER_CONTENT,
         )
 
     def append(
@@ -115,6 +123,154 @@ class DailyLog:
 
         return entry
 
+    def _load_entries_for_history_days(self, history_days: int) -> list[LogEntry]:
+        """Load entries from today and up to ``history_days - 1`` previous days."""
+        entries: list[LogEntry] = []
+        days = max(history_days, 1)
+        today = date.today()
+        for offset in range(days - 1, -1, -1):
+            day = today - timedelta(days=offset)
+            day_file = self._get_file_for_date(day)
+            if day_file.exists():
+                entries.extend(self._read_file(day_file))
+        return entries
+
+    @staticmethod
+    def _should_skip_entry(entry: LogEntry, include_tools: bool) -> bool:
+        """Filter out normal tool entries when include_tools=False."""
+        if include_tools:
+            return False
+        if entry.role != _ROLE_TOOL:
+            return False
+        return entry.entry_type not in (_ENTRY_TYPE_INJECTION, _ENTRY_TYPE_SUMMARY)
+
+    @staticmethod
+    def _collect_recent_entries(
+        *,
+        entries: list[LogEntry],
+        channel: str,
+        chat_id: str,
+        include_tools: bool,
+        max_messages: int,
+    ) -> list[LogEntry]:
+        """Keep newest messages until reset marker or max_messages is reached."""
+        filtered = [entry for entry in entries if entry.channel == channel and entry.chat_id == chat_id]
+
+        result: list[LogEntry] = []
+        for entry in reversed(filtered):
+            if entry.role == _RESET_MARKER_ROLE and entry.content == _RESET_MARKER_CONTENT:
+                break
+            if DailyLog._should_skip_entry(entry, include_tools):
+                continue
+            result.append(entry)
+            if len(result) >= max_messages:
+                break
+
+        result.reverse()
+        return result
+
+    @staticmethod
+    def _build_summary_lookup(entries: list[LogEntry]) -> tuple[dict[int, str], set[int]]:
+        """Map assistant row index to paired summary content and indices to skip."""
+        summary_for_assistant: dict[int, str] = {}
+        skip_indices: set[int] = set()
+        for i, entry in enumerate(entries):
+            if (
+                entry.entry_type == _ENTRY_TYPE_SUMMARY
+                and entry.role == _ROLE_USER
+                and i > 0
+                and entries[i - 1].role == _ROLE_ASSISTANT
+            ):
+                summary_for_assistant[i - 1] = entry.content
+                skip_indices.add(i)
+        return summary_for_assistant, skip_indices
+
+    @staticmethod
+    def _resolve_assistant_content(
+        *,
+        entry_index: int,
+        content: str,
+        assistant_index: int,
+        verbatim_threshold: int,
+        summary_for_assistant: dict[int, str],
+        assistant_truncate_tokens: int,
+        token_model: str | None,
+    ) -> str:
+        """Return assistant content with summary/truncation policy applied."""
+        if assistant_index > verbatim_threshold:
+            return content
+
+        summary_content = summary_for_assistant.get(entry_index)
+        if summary_content is not None:
+            return summary_content
+
+        return _truncate_assistant(
+            content,
+            assistant_truncate_tokens,
+            token_model=token_model,
+        )
+
+    @staticmethod
+    def _build_messages(
+        *,
+        entries: list[LogEntry],
+        recent_full_turns: int,
+        assistant_truncate_tokens: int,
+        token_model: str | None,
+    ) -> list[dict[str, Any]]:
+        """Convert filtered entries to role/content messages with assistant truncation."""
+        total_assistant = sum(1 for entry in entries if entry.role == _ROLE_ASSISTANT)
+        verbatim_threshold = total_assistant - recent_full_turns
+        summary_for_assistant, skip_indices = DailyLog._build_summary_lookup(entries)
+
+        messages: list[dict[str, Any]] = []
+        assistant_index = 0
+        for i, entry in enumerate(entries):
+            if i in skip_indices:
+                continue
+
+            content = entry.content
+            if entry.role == _ROLE_ASSISTANT:
+                assistant_index += 1
+                content = DailyLog._resolve_assistant_content(
+                    entry_index=i,
+                    content=content,
+                    assistant_index=assistant_index,
+                    verbatim_threshold=verbatim_threshold,
+                    summary_for_assistant=summary_for_assistant,
+                    assistant_truncate_tokens=assistant_truncate_tokens,
+                    token_model=token_model,
+                )
+
+            messages.append({"role": entry.role, "content": content})
+
+        return messages
+
+    @staticmethod
+    def _apply_max_tokens(
+        *,
+        messages: list[dict[str, Any]],
+        max_tokens: int,
+        token_model: str | None,
+    ) -> list[dict[str, Any]]:
+        """Keep the most recent suffix of messages within max_tokens."""
+        if max_tokens <= 0 or not messages:
+            return messages
+
+        total = 0
+        cutoff = 0
+        for i in range(len(messages) - 1, -1, -1):
+            total += estimate_content_tokens(messages[i].get("content", ""), model=token_model)
+            if total > max_tokens:
+                cutoff = i + 1
+                break
+
+        if cutoff >= len(messages):
+            return [messages[-1]]
+        if cutoff > 0:
+            return messages[cutoff:]
+        return messages
+
     def get_recent_conversation(
         self,
         channel: str,
@@ -152,99 +308,25 @@ class DailyLog:
         Returns:
             List of messages in LLM format (role, content)
         """
-        entries: list[LogEntry] = []
-
-        days = max(history_days, 1)
-        today = date.today()
-        for offset in range(days - 1, -1, -1):
-            day = today - timedelta(days=offset)
-            day_file = self._get_file_for_date(day)
-            if day_file.exists():
-                entries.extend(self._read_file(day_file))
-
-        # Filter by channel and chat_id
-        filtered = [
-            entry for entry in entries if entry.channel == channel and entry.chat_id == chat_id
-        ]
-
-        # Process from newest to oldest, stopping at reset markers
-        result: list[LogEntry] = []
-        for entry in reversed(filtered):
-            if entry.role == "system" and entry.content == "conversation_reset":
-                break
-
-            # Always keep injection/summary entries (subagent results, summaries)
-            # even when include_tools=False — they carry essential context.
-            if (
-                not include_tools
-                and entry.role == "tool"
-                and entry.entry_type not in ("injection", "summary")
-            ):
-                continue
-
-            result.append(entry)
-            if len(result) >= max_messages:
-                break
-
-        # Reverse back to chronological order (oldest to newest)
-        result.reverse()
-
-        # Count total assistant messages to determine the verbatim boundary.
-        total_assistant = sum(1 for e in result if e.role == "assistant")
-        verbatim_threshold = total_assistant - recent_full_turns
-
-        # Build a lookup: for each assistant entry index, find a paired summary
-        # (a summary entry that immediately follows it in the result list).
-        summary_for_assistant: dict[int, str] = {}
-        skip_indices: set[int] = set()
-        for i, entry in enumerate(result):
-            if (
-                entry.entry_type == "summary"
-                and entry.role == "user"
-                and i > 0
-                and result[i - 1].role == "assistant"
-            ):
-                summary_for_assistant[i - 1] = entry.content
-                skip_indices.add(i)
-
-        messages: list[dict[str, Any]] = []
-        assistant_idx = 0
-        for i, entry in enumerate(result):
-            if i in skip_indices:
-                continue
-
-            content = entry.content
-            if entry.role == "assistant":
-                assistant_idx += 1
-                if assistant_idx <= verbatim_threshold:
-                    # Outside recent full turns: prefer summary over raw truncation
-                    if i in summary_for_assistant:
-                        content = summary_for_assistant[i]
-                    else:
-                        content = _truncate_assistant(
-                            content,
-                            assistant_truncate_tokens,
-                            token_model=token_model,
-                        )
-                else:
-                    # Inside recent full turns: skip paired summary (already in skip_indices)
-                    pass
-            messages.append({"role": entry.role, "content": content})
-
-        if max_tokens > 0 and messages:
-            total = 0
-            cutoff = 0
-            for i in range(len(messages) - 1, -1, -1):
-                total += estimate_content_tokens(messages[i].get("content", ""), model=token_model)
-                if total > max_tokens:
-                    cutoff = i + 1
-                    break
-            if cutoff >= len(messages):
-                messages = [messages[-1]]
-            elif cutoff > 0:
-                messages = messages[cutoff:]
-
-        return messages
+        entries = self._load_entries_for_history_days(history_days)
+        recent_entries = self._collect_recent_entries(
+            entries=entries,
+            channel=channel,
+            chat_id=chat_id,
+            include_tools=include_tools,
+            max_messages=max_messages,
+        )
+        messages = self._build_messages(
+            entries=recent_entries,
+            recent_full_turns=recent_full_turns,
+            assistant_truncate_tokens=assistant_truncate_tokens,
+            token_model=token_model,
+        )
+        return self._apply_max_tokens(
+            messages=messages,
+            max_tokens=max_tokens,
+            token_model=token_model,
+        )
 
     def get_all_entries(
         self,

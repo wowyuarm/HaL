@@ -20,3 +20,4 @@ poetry.lock
 .vscode/
 .claude/
 uv.lock
+.pyscn/

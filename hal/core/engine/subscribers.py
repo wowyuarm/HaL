@@ -22,6 +22,21 @@ if TYPE_CHECKING:
     from . import AgentEngine
 
 
+def _init_engine_scope(
+    target: object,
+    *,
+    engine: "AgentEngine",
+    session_key: str | None,
+    channel: str | None,
+    chat_id: str | None,
+) -> None:
+    """Initialize common scope attributes shared by loop helpers/subscribers."""
+    target._engine = engine  # type: ignore[attr-defined]
+    target._session_key = session_key  # type: ignore[attr-defined]
+    target._channel = channel  # type: ignore[attr-defined]
+    target._chat_id = chat_id  # type: ignore[attr-defined]
+
+
 class _EngineEventSubscribers:
     """Per-loop event subscribers that host mutable policy/state."""
 
@@ -36,10 +51,13 @@ class _EngineEventSubscribers:
         reminder_interval: int,
         injected_sink: list["InboundMessage"],
     ) -> None:
-        self._engine = engine
-        self._session_key = session_key
-        self._channel = channel
-        self._chat_id = chat_id
+        _init_engine_scope(
+            self,
+            engine=engine,
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+        )
         self._reminder_text = reminder_text
         self._reminder_interval = reminder_interval
         self._injected_sink = injected_sink

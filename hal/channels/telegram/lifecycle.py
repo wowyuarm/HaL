@@ -79,6 +79,8 @@ class TelegramLifecycleMixin:
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self._running = False
+        self._append_buffers.clear()
+        self._append_message_ids.clear()
 
         for chat_id in list(self._typing_tasks):
             self._stop_typing(chat_id)
