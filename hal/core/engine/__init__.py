@@ -4,25 +4,24 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from hal.bus.events import InboundMessage, OutboundMessage, SubagentCompleteEvent
 from hal.bus.queue import MessageBus
 from hal.core.context.builder import ContextBuilder
-from hal.core.context.metrics import ContextMetrics, MetricsCollector
+from hal.core.context.metrics import MetricsCollector
 from hal.core.memory.manager import MemoryManager
-from hal.core.runtime.loop import LoopMetadata, run_tool_loop
+from hal.core.ports import LLMProviderPort
+from hal.core.runtime.loop import run_tool_loop
 from hal.core.runtime.summary import generate_summary
 from hal.core.runtime.tool_factory import create_tools
 from hal.core.subagent import SubagentManager
-from hal.infra.providers.base import LLMProvider
 
 from .background_resume import _EngineBackgroundResume
 from .hooks import _EngineLoopHooks
 from .inspect import build_context_inspection
-from .processing import process_message
+from .processing import build_direct_inbound_message, build_engine_error_response, process_message
 from .subagent_injection import (
     ParsedSubagentResult,
     _build_subagent_injection,
@@ -31,6 +30,8 @@ from .subagent_injection import (
 from .subscribers import _EngineBackgroundSubscribers
 
 if TYPE_CHECKING:
+    from hal.bus.events import SubagentCompleteEvent
+    from hal.core.context.metrics import ContextMetrics
     from hal.core.memory.search import MemorySearch
     from hal.infra.config.schema import (
         ChannelsConfig,
@@ -51,7 +52,7 @@ class AgentEngine:
     def __init__(
         self,
         bus: MessageBus,
-        provider: LLMProvider,
+        provider: LLMProviderPort,
         workspace: Path,
         model: str | None = None,
         max_iterations: int = 20,
@@ -60,9 +61,9 @@ class AgentEngine:
         restrict_to_workspace: bool = False,
         memory_manager: MemoryManager | None = None,
         summary_model: str = "default",
-        summary_provider: LLMProvider | None = None,
+        summary_provider: LLMProviderPort | None = None,
         worker_model: str = "default",
-        worker_provider: LLMProvider | None = None,
+        worker_provider: LLMProviderPort | None = None,
         memory_search: "MemorySearch | None" = None,
         auto_inject_top_k: int = 3,
         recall_min_score: float = 0.0,
@@ -157,13 +158,7 @@ class AgentEngine:
                         await self.bus.publish_outbound(response)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-                    await self.bus.publish_outbound(
-                        OutboundMessage(
-                            channel=msg.channel,
-                            chat_id=msg.chat_id,
-                            content=f"Sorry, I encountered an error: {str(e)}",
-                        )
-                    )
+                    await self.bus.publish_outbound(build_engine_error_response(msg=msg, error=e))
             except asyncio.TimeoutError:
                 continue
 
@@ -174,18 +169,18 @@ class AgentEngine:
         self._background_resume.close()
         logger.info("Agent engine stopping")
 
-    async def _dispatch(self, msg: InboundMessage) -> OutboundMessage | None:
+    async def _dispatch(self, msg: object) -> object | None:
         """Route a message to the main processing path."""
         return await self.process(msg)
 
-    async def process(self, msg: InboundMessage) -> OutboundMessage | None:
+    async def process(self, msg: object) -> object | None:
         """Process a user message end-to-end."""
         return await process_message(self, msg, PROCESSING_MODE)
 
-    def _drain_pending_for_session(self, session_key: str) -> list[InboundMessage]:
+    def _drain_pending_for_session(self, session_key: str) -> list[object]:
         """Drain inbound queue messages for the target session without blocking."""
-        matching: list[InboundMessage] = []
-        others: list[InboundMessage] = []
+        matching: list[object] = []
+        others: list[object] = []
 
         while not self.bus.inbound.empty():
             try:
@@ -204,12 +199,12 @@ class AgentEngine:
 
     async def _execute_loop(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, object]],
         max_iterations: int,
         session_key: str | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
-    ) -> tuple[str | None, LoopMetadata, list[InboundMessage]]:
+    ) -> tuple[str | None, object, list[object]]:
         """Run the LLM tool-calling loop via the shared runtime."""
         hooks = _EngineLoopHooks(
             engine=self,
@@ -237,10 +232,10 @@ class AgentEngine:
         return self.model if self._summary_model == "default" else self._summary_model
 
     def _trigger_summary(
-        self, meta: LoopMetadata, final_content: str, channel: str, chat_id: str
+        self, meta: object, final_content: str, channel: str, chat_id: str
     ) -> asyncio.Task | None:
         """Create an async summary task if the loop qualifies."""
-        if not meta.needs_summary:
+        if not bool(getattr(meta, "needs_summary", False)):
             return None
         return asyncio.create_task(
             generate_summary(
@@ -271,7 +266,7 @@ class AgentEngine:
         send_tool_hints = bool(getattr(channel_config, "send_tool_hints", True))
         return send_progress, send_tool_hints
 
-    def _record_metrics(self, metrics: ContextMetrics) -> None:
+    def _record_metrics(self, metrics: "ContextMetrics") -> None:
         """Best-effort metrics recording without affecting user flows."""
         try:
             self._metrics_collector.record(metrics)
@@ -288,7 +283,7 @@ class AgentEngine:
         session_key: str,
         channel: str,
         chat_id: str,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, object]],
         final_content: str | None,
     ) -> None:
         """Store full loop context snapshot for potential background continuation."""
@@ -300,7 +295,7 @@ class AgentEngine:
             final_content=final_content,
         )
 
-    async def queue_background_completion(self, event: SubagentCompleteEvent) -> None:
+    async def queue_background_completion(self, event: "SubagentCompleteEvent") -> None:
         """Queue detached subagent completions and continue same-session loop when idle."""
         await self._background_resume.queue_background_completion(event)
 
@@ -310,7 +305,7 @@ class AgentEngine:
         channel: str,
         chat_id: str,
         current_message: str,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Build the current context and return debug-friendly metadata."""
         return await build_context_inspection(
             provider=self.provider,
@@ -336,13 +331,23 @@ class AgentEngine:
         chat_id: str = "direct",
     ) -> str:
         """Process a message directly for CLI usage."""
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = build_direct_inbound_message(channel=channel, chat_id=chat_id, content=content)
         response = await self.process(msg)
-        return response.content if response else ""
+        return str(getattr(response, "content", "")) if response else ""
 
 
 # Backward compatibility alias
 AgentLoop = AgentEngine
+
+
+def __getattr__(name: str) -> object:
+    """Lazily expose compatibility exports without hard runtime coupling."""
+    if name == "LoopMetadata":
+        from hal.core.runtime.loop import LoopMetadata as _LoopMetadata
+
+        return _LoopMetadata
+    raise AttributeError(name)
+
 
 __all__ = [
     "AgentEngine",

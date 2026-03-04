@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Protocol
 
 from hal.core.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
 from hal.core.memory.daily_log import DailyLog, LogEntry
 
-if TYPE_CHECKING:
-    from hal.core.memory.search import MemorySearch
-    from hal.core.memory.store import SearchResult
+
+class _MemorySearchLike(Protocol):
+    async def search(self, query: str, top_k: int = 3) -> list[object]: ...
 
 
 class MemoryManager:
@@ -28,7 +28,7 @@ class MemoryManager:
         self,
         workspace: Path,
         data_dir: Path | None = None,
-        memory_search: MemorySearch | None = None,
+        memory_search: _MemorySearchLike | None = None,
     ):
         from hal.core.memory.long_term import LongTermMemory
 
@@ -116,7 +116,7 @@ class MemoryManager:
         max_tokens: int = 0,
         history_days: int = 1,
         token_model: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """
         Get recent conversation history for a specific channel/chat.
 
@@ -143,7 +143,7 @@ class MemoryManager:
             token_model=token_model,
         )
 
-    def get_conversation_stats(self) -> dict[str, Any]:
+    def get_conversation_stats(self) -> dict[str, object]:
         """Get statistics about conversation logs."""
         return self.daily_log.get_stats()
 
@@ -167,7 +167,7 @@ class MemoryManager:
             chat_id=chat_id,
         )
 
-    async def search_memories(self, query: str, top_k: int = 3) -> list[SearchResult]:
+    async def search_memories(self, query: str, top_k: int = 3) -> list[object]:
         """Semantic search over indexed past conversations.
 
         Returns empty list if memory search is not configured.

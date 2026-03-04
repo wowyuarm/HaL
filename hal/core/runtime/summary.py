@@ -5,8 +5,8 @@ from __future__ import annotations
 from loguru import logger
 
 from hal.core.memory.manager import MemoryManager
+from hal.core.ports import ChatProviderPort
 from hal.core.runtime.loop import LoopMetadata
-from hal.infra.providers.base import LLMProvider
 
 _SUMMARY_SYSTEM_PROMPT = (
     "You summarize an AI agent's tool-calling session into "
@@ -35,7 +35,7 @@ async def generate_summary(
     final_content: str,
     channel: str,
     chat_id: str,
-    provider: LLMProvider,
+    provider: ChatProviderPort,
     model: str,
     memory: MemoryManager,
 ) -> None:

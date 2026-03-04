@@ -71,6 +71,63 @@ def _fmt_ctx_recall(recall_items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _summary_at(summaries: list[Any], idx: int) -> dict[str, Any] | None:
+    """Return summary dict at index when present, else None."""
+    if idx < len(summaries) and isinstance(summaries[idx], dict):
+        return summaries[idx]
+    return None
+
+
+def _resolve_full_mode_tokens(*, content: str, summary: dict[str, Any] | None) -> int:
+    """Resolve token count for full-mode message rendering."""
+    if summary is not None:
+        s_tokens = summary.get("tokens")
+        if isinstance(s_tokens, int) and s_tokens > 0:
+            return s_tokens
+    return (max(len(content), 0) + 3) // 4
+
+
+def _compact_summary_tokens(summary: Any) -> int:
+    """Resolve compact-mode token count from summary metadata."""
+    if not isinstance(summary, dict):
+        return 0
+    tokens = summary.get("tokens")
+    if isinstance(tokens, int):
+        return tokens
+    chars = summary.get("chars", 0)
+    return ((max(int(chars), 0) + 3) // 4) if isinstance(chars, int) else 0
+
+
+def _format_full_message_lines(
+    *,
+    idx: int,
+    role: str,
+    content: str,
+    tokens: int,
+    escape: Any,
+) -> list[str]:
+    """Format one full-mode message block."""
+    lines = [f"\n[{idx}] {role}  {tokens:,}t"]
+    escaped_content = escape(content)
+    if role == "system":
+        digest = hashlib.sha256(content.encode()).hexdigest()[:16]
+        lines.append(f"(sha256={digest})")
+        lines.append(compress_head_tail(escaped_content, max_chars=CTX_SYSTEM_PREVIEW_CHARS))
+    else:
+        lines.append(compress_head_tail(escaped_content, max_chars=CTX_MESSAGE_PREVIEW_CHARS))
+    return lines
+
+
+def _format_compact_summary_line(*, idx: int, summary: Any, escape: Any) -> str:
+    """Format one compact-mode summary line."""
+    if not isinstance(summary, dict):
+        return f'  [{idx}] {"?":<9}  {0:>6,}t  ""'
+    role = summary.get("role", "?")
+    tokens = _compact_summary_tokens(summary)
+    preview = escape(summary.get("preview", ""))
+    return f'  [{idx}] {role:<9}  {tokens:>6,}t  "{preview}"'
+
+
 def _fmt_ctx_messages(data: dict[str, Any], *, full_messages: bool) -> str:
     """Message list, summaries by default and full content in full mode."""
     e = html_mod.escape
@@ -82,29 +139,20 @@ def _fmt_ctx_messages(data: dict[str, Any], *, full_messages: bool) -> str:
         for idx, msg in enumerate(messages):
             role = msg.get("role", "?")
             content = stringify_message_content(msg.get("content", ""))
-            tokens = 0
-            if idx < len(summaries) and isinstance(summaries[idx], dict):
-                s_tokens = summaries[idx].get("tokens")
-                if isinstance(s_tokens, int):
-                    tokens = s_tokens
-            if tokens <= 0:
-                tokens = (max(len(content), 0) + 3) // 4
-            lines.append(f"\n[{idx}] {role}  {tokens:,}t")
-            if role == "system":
-                digest = hashlib.sha256(content.encode()).hexdigest()[:16]
-                lines.append(f"(sha256={digest})")
-                lines.append(compress_head_tail(e(content), max_chars=CTX_SYSTEM_PREVIEW_CHARS))
-            else:
-                lines.append(compress_head_tail(e(content), max_chars=CTX_MESSAGE_PREVIEW_CHARS))
+            summary = _summary_at(summaries, idx)
+            tokens = _resolve_full_mode_tokens(content=content, summary=summary)
+            lines.extend(
+                _format_full_message_lines(
+                    idx=idx,
+                    role=role,
+                    content=content,
+                    tokens=tokens,
+                    escape=e,
+                )
+            )
     else:
         for idx, s in enumerate(summaries):
-            role = s.get("role", "?")
-            tokens = s.get("tokens")
-            if not isinstance(tokens, int):
-                chars = s.get("chars", 0)
-                tokens = ((max(int(chars), 0) + 3) // 4) if isinstance(chars, int) else 0
-            preview = e(s.get("preview", ""))
-            lines.append(f'  [{idx}] {role:<9}  {tokens:>6,}t  "{preview}"')
+            lines.append(_format_compact_summary_line(idx=idx, summary=s, escape=e))
     return "\n".join(lines)
 
 

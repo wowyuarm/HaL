@@ -159,6 +159,7 @@ def make_memory_search(config):
 
     try:
         from hal.core.memory.chunker import MarkdownChunker
+        from hal.core.memory.contracts import MemorySearchDeps
         from hal.core.memory.exporter import DailyExporter
         from hal.core.memory.search import MemorySearch
         from hal.core.memory.store import VectorStore
@@ -190,9 +191,7 @@ def make_memory_search(config):
     )
 
     return MemorySearch(
-        exporter=exporter,
-        chunker=chunker,
-        store=store,
+        deps=MemorySearchDeps(exporter=exporter, chunker=chunker, store=store),
         embedding_model=ms_cfg.embedding_model,
         daily_dir=daily_dir,
         log_dir=log_dir,

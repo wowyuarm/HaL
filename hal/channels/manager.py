@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -31,7 +31,7 @@ class ChannelManager:
         config: Config,
         bus: MessageBus,
         memory_manager: "MemoryManager | None" = None,
-        context_inspector: Callable[[str, str, str], Awaitable[dict[str, Any]]] | None = None,
+        context_inspector: Callable[[str, str, str], Awaitable[dict[str, object]]] | None = None,
         outbound_poll_timeout_s: float = 1.0,
     ):
         self.config = config
@@ -52,7 +52,7 @@ class ChannelManager:
             try:
                 from hal.channels.telegram import TelegramChannel
 
-                kwargs: dict[str, Any] = {
+                kwargs: dict[str, object] = {
                     "groq_api_key": self.config.providers.groq.api_key,
                     "memory_manager": self.memory_manager,
                 }
@@ -147,7 +147,7 @@ class ChannelManager:
         """Get a channel by name."""
         return self.channels.get(name)
 
-    def get_status(self) -> dict[str, Any]:
+    def get_status(self) -> dict[str, object]:
         """Get status of all channels."""
         return {
             name: {"enabled": True, "running": channel.is_running}

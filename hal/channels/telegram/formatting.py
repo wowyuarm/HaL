@@ -7,13 +7,33 @@ import re
 from .constants import CTX_OUTPUT_MAX_CHARS
 
 
+def _table_non_empty_lines(table_text: str) -> list[str]:
+    """Return stripped non-empty lines from a markdown table block."""
+    return [line.strip() for line in table_text.strip().splitlines() if line.strip()]
+
+
+def _table_rows(lines: list[str]) -> list[list[str]]:
+    """Return parsed rows excluding markdown separator rows."""
+    return [_split_table_row(line) for line in lines if not _is_table_separator(line)]
+
+
+def _table_separator_line(col_widths: list[int]) -> str:
+    """Build the visual separator line between header/body rows."""
+    return "  ".join("─" * width for width in col_widths)
+
+
+def _escape_html(text: str) -> str:
+    """Escape HTML-sensitive characters for Telegram HTML mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _markdown_table_to_pre(table_text: str) -> str:
     """Convert markdown table text to a fixed-width Telegram <pre> block."""
-    lines = [ln.strip() for ln in table_text.strip().splitlines() if ln.strip()]
+    lines = _table_non_empty_lines(table_text)
     if not lines:
         return ""
 
-    rows = [_split_table_row(line) for line in lines if not _is_table_separator(line)]
+    rows = _table_rows(lines)
     if not rows:
         return ""
 
@@ -21,11 +41,10 @@ def _markdown_table_to_pre(table_text: str) -> str:
     col_widths = [_column_width(rows=rows, index=i) for i in range(n_cols)]
     formatted = [_format_table_row(row=row, col_widths=col_widths) for row in rows]
     if len(rows) > 1:
-        formatted.insert(1, "  ".join("─" * width for width in col_widths))
+        formatted.insert(1, _table_separator_line(col_widths))
 
-    escaped = "\n".join(formatted)
-    escaped = escaped.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return f"<pre>{escaped}</pre>"
+    table_body = "\n".join(formatted)
+    return f"<pre>{_escape_html(table_body)}</pre>"
 
 
 def _is_table_separator(line: str) -> bool:
@@ -86,7 +105,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     def save_blockquote(m: re.Match) -> str:
         lines = m.group(0).rstrip("\n").splitlines()
         inner = "\n".join(re.sub(r"^>\s?", "", line) for line in lines)
-        inner = inner.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        inner = _escape_html(inner)
         blockquote_blocks.append(f"<blockquote>{inner}</blockquote>")
         return f"\x00BQ{len(blockquote_blocks) - 1}\x00\n"
 
@@ -94,7 +113,7 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r"^[ \t]*[-*_]{3,}[ \t]*$", "━━━━━━━━━━━━━━━━━━━━", text, flags=re.MULTILINE)
 
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = _escape_html(text)
 
     text = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
@@ -109,11 +128,11 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r"(?<![a-zA-Z0-9\*])\*([^*\n]+?)\*(?![a-zA-Z0-9\*])", r"<i>\1</i>", text)
 
     for i, code in enumerate(inline_codes):
-        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        escaped = _escape_html(code)
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
 
     for i, code in enumerate(code_blocks):
-        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        escaped = _escape_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
     for i, tbl in enumerate(table_blocks):

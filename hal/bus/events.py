@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+from hal.core.subagent_metadata import SubagentArtifactMetadata, SubagentUsageMetadata
+
 
 @dataclass
 class InboundMessage:
@@ -85,7 +87,7 @@ class MessageInjectEvent(Event):
 
 
 @dataclass
-class SubagentCompleteEvent(Event):
+class SubagentCompleteEvent(Event, SubagentArtifactMetadata[str], SubagentUsageMetadata):
     """A background/sync subagent result was injected back into the loop."""
 
     label: str
@@ -96,16 +98,6 @@ class SubagentCompleteEvent(Event):
     channel: str | None = None
     chat_id: str | None = None
     session_key: str | None = None
-    record_id: str | None = None
-    artifact_path: str | None = None
-    total_tokens: int = 0
-    tools_used: list[str] = field(default_factory=list)
-    tool_call_counts: dict[str, int] = field(default_factory=dict)
-    has_side_effects: bool = False
-    files_modified: list[str] = field(default_factory=list)
-    commands_run: list[str] = field(default_factory=list)
-    tool_errors: list[str] = field(default_factory=list)
-    missing_artifacts: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -217,13 +216,13 @@ class DailyLog:
         recent_full_turns: int,
         assistant_truncate_tokens: int,
         token_model: str | None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """Convert filtered entries to role/content messages with assistant truncation."""
         total_assistant = sum(1 for entry in entries if entry.role == _ROLE_ASSISTANT)
         verbatim_threshold = total_assistant - recent_full_turns
         summary_for_assistant, skip_indices = DailyLog._build_summary_lookup(entries)
 
-        messages: list[dict[str, Any]] = []
+        messages: list[dict[str, object]] = []
         assistant_index = 0
         for i, entry in enumerate(entries):
             if i in skip_indices:
@@ -249,10 +248,10 @@ class DailyLog:
     @staticmethod
     def _apply_max_tokens(
         *,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, object]],
         max_tokens: int,
         token_model: str | None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """Keep the most recent suffix of messages within max_tokens."""
         if max_tokens <= 0 or not messages:
             return messages
@@ -282,7 +281,7 @@ class DailyLog:
         max_tokens: int = 0,
         history_days: int = 1,
         token_model: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """
         Get recent conversation history for a specific channel/chat.
 
@@ -406,7 +405,7 @@ class DailyLog:
 
         return entries
 
-    def get_stats(self) -> dict[str, Any]:
+    def get_stats(self) -> dict[str, object]:
         """Get statistics about the daily log."""
         stats = {
             "total_entries": 0,

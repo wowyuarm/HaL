@@ -8,26 +8,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+
+from hal.core.subagent_metadata import SubagentArtifactMetadata, SubagentUsageMetadata
 
 
 @dataclass
-class SubagentExecutionResult:
+class SubagentExecutionResult(SubagentArtifactMetadata[Path], SubagentUsageMetadata):
     """Structured subagent execution result."""
 
     content: str
-    artifact_path: Path | None
-    total_tokens: int = 0
-    record_id: str = ""
     artifacts: list[Path] = field(default_factory=list)
     status: str = "completed"
-    has_side_effects: bool = False
-    tools_used: list[str] = field(default_factory=list)
-    tool_call_counts: dict[str, int] = field(default_factory=dict)
-    files_modified: list[str] = field(default_factory=list)
-    commands_run: list[str] = field(default_factory=list)
-    tool_errors: list[str] = field(default_factory=list)
-    missing_artifacts: list[Path] = field(default_factory=list)
     log_path: Path | None = None
 
 
@@ -57,3 +49,22 @@ class SubagentPort(Protocol):
     def get_running_count(self) -> int: ...
 
     def get_last_iteration(self) -> int: ...
+
+
+class ChatProviderPort(Protocol):
+    """Minimal chat-completion interface used by core runtime services."""
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> Any: ...
+
+
+class LLMProviderPort(ChatProviderPort, Protocol):
+    """Provider port used when model defaults are required."""
+
+    def get_default_model(self) -> str: ...

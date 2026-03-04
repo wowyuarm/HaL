@@ -36,6 +36,13 @@ def builder(workspace: Path) -> ContextBuilder:
     return cc
 
 
+def _sample_history() -> list[dict[str, Any]]:
+    return [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello!"},
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
@@ -174,10 +181,7 @@ class TestBuildMessages:
         assert "Hello" in msgs[-1]["content"]
 
     def test_includes_history(self, builder: ContextBuilder) -> None:
-        history: list[dict[str, Any]] = [
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello!"},
-        ]
+        history = _sample_history()
         msgs = builder.build_messages(history, "Follow-up")
         # system, history[0], history[1], current user
         assert len(msgs) == 4
@@ -255,12 +259,11 @@ class TestMessageHelpers:
         result = builder.add_tool_result(msgs, "call_1", "read_file", "file content")
         assert result is msgs
         assert len(msgs) == 1
-        assert msgs[0] == {
-            "role": "tool",
-            "tool_call_id": "call_1",
-            "name": "read_file",
-            "content": "file content",
-        }
+        tool_msg = msgs[0]
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["tool_call_id"] == "call_1"
+        assert tool_msg["name"] == "read_file"
+        assert tool_msg["content"] == "file content"
 
     def test_add_assistant_message_text_only(self, builder: ContextBuilder) -> None:
         msgs: list[dict[str, Any]] = []

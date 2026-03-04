@@ -10,12 +10,12 @@ import asyncio
 import re
 from datetime import date
 from pathlib import Path
-from typing import Any, Protocol
 
 import litellm
 from loguru import logger
 
 from hal.core.memory.chunker import compute_chunk_id
+from hal.core.memory.contracts import MemorySearchDeps
 from hal.core.memory.store import SearchResult
 
 # Score multiplier applied to summary chunks during retrieval.
@@ -34,40 +34,16 @@ _FETCH_K_CAP = 40
 _SUBAGENT_LITERAL_HIT_THRESHOLD = 2
 
 
-class _ExporterLike(Protocol):
-    def export_date(self, target_date: date) -> None: ...
-
-    def export_range(self, start: date, end: date) -> None: ...
-
-
-class _ChunkerLike(Protocol):
-    def chunk_file(self, md_path: Path, base_path: Path) -> list[Any]: ...
-
-
-class _StoreLike(Protocol):
-    async def initialize(self) -> None: ...
-
-    async def upsert(self, chunks: list[dict[str, Any]]) -> int: ...
-
-    async def search(
-        self, query_embedding: list[float], *, query_text: str = "", top_k: int = 5
-    ) -> list[SearchResult]: ...
-
-    async def delete_by_source(self, source: str) -> Any: ...
-
-    async def get_chunk_ids_by_source(self, source: str) -> set[str]: ...
-
-    async def get_indexed_sources(self) -> set[str]: ...
-
-
 class MemorySearch:
     """Orchestrates the full memory search pipeline."""
 
     def __init__(
         self,
-        exporter: _ExporterLike,
-        chunker: _ChunkerLike,
-        store: _StoreLike,
+        exporter: object | None = None,
+        chunker: object | None = None,
+        store: object | None = None,
+        *,
+        deps: MemorySearchDeps | None = None,
         embedding_model: str,
         daily_dir: Path,
         log_dir: Path | None = None,
@@ -79,9 +55,15 @@ class MemorySearch:
         embed_retry_base_delay_s: float = _EMBED_RETRY_BASE_DELAY_S,
         embed_timeout_s: float = 60.0,
     ):
-        self._exporter = exporter
-        self._chunker = chunker
-        self._store = store
+        resolved = self._resolve_deps(
+            deps=deps,
+            exporter=exporter,
+            chunker=chunker,
+            store=store,
+        )
+        self._exporter = resolved.exporter
+        self._chunker = resolved.chunker
+        self._store = resolved.store
         self._embedding_model = embedding_model
         self._daily_dir = daily_dir
         self._log_dir = log_dir
@@ -94,6 +76,23 @@ class MemorySearch:
         self._embed_retry_attempts = embed_retry_attempts
         self._embed_retry_base_delay_s = embed_retry_base_delay_s
         self._embed_timeout_s = embed_timeout_s
+
+    @staticmethod
+    def _resolve_deps(
+        *,
+        deps: MemorySearchDeps | None,
+        exporter: object | None,
+        chunker: object | None,
+        store: object | None,
+    ) -> MemorySearchDeps:
+        if deps is not None:
+            return deps
+        if exporter is None or chunker is None or store is None:
+            raise ValueError(
+                "MemorySearch requires either deps=MemorySearchDeps(...) or "
+                "legacy exporter/chunker/store arguments."
+            )
+        return MemorySearchDeps(exporter=exporter, chunker=chunker, store=store)
 
     async def initialize(self) -> None:
         """Initialize the vector store."""

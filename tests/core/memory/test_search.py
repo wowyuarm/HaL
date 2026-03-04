@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from hal.core.memory.chunker import MarkdownChunker
+from hal.core.memory.contracts import MemorySearchDeps
 from hal.core.memory.exporter import DailyExporter
 from hal.core.memory.search import (
     MemorySearch,
@@ -116,9 +117,7 @@ def memory_search(daily_log, daily_dir):
     chunker = MarkdownChunker(max_size=500, overlap_lines=1)
     store = FakeVectorStore()
     ms = MemorySearch(
-        exporter=exporter,
-        chunker=chunker,
-        store=store,
+        deps=MemorySearchDeps(exporter=exporter, chunker=chunker, store=store),
         embedding_model="fake-model",
         daily_dir=daily_dir,
         log_dir=daily_log.data_dir,
@@ -550,9 +549,11 @@ class TestBackfill:
         )
 
         ms = MemorySearch(
-            exporter=_ExporterWithoutLog(daily_dir),
-            chunker=MarkdownChunker(max_size=500, overlap_lines=1),
-            store=FakeVectorStore(),
+            deps=MemorySearchDeps(
+                exporter=_ExporterWithoutLog(daily_dir),
+                chunker=MarkdownChunker(max_size=500, overlap_lines=1),
+                store=FakeVectorStore(),
+            ),
             embedding_model="fake-model",
             daily_dir=daily_dir,
             log_dir=log_dir,

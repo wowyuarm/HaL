@@ -43,8 +43,12 @@ No fixed coverage threshold is configured; add regression tests for bug fixes.
 - Refactor in small, behavior-preserving batches (usually 1-3 related functions/files per batch).
 - After each batch, run both targeted tests and a full quality scan:
   - `PYTHONPATH=. pytest <targeted test paths> -q`
-  - `uvx pyscn@latest analyze .`
+  - Day-to-day quality gating: `uvx pyscn@latest analyze --json --no-open hal/`
+  - Milestone/regression check: `uvx pyscn@latest analyze --json --no-open .`
 - Treat full-project `pyscn` output as the source of truth; local function improvements can still reduce global health score.
+- Interpret `tests/` quality findings pragmatically:
+  - Prioritize `hal/` findings for refactor work.
+  - Use `tests/` findings mainly when they indicate real maintainability or reliability risk, not just metric noise (for example LCOM in large test classes).
 - Manage complexity-vs-duplication tradeoffs explicitly:
   - Prefer helper extraction with strong domain semantics.
   - Avoid introducing several near-identical helper shapes that clone detection flags as Type-1/Type-2 duplication.

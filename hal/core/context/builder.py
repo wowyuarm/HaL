@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from hal.capabilities.skills.loader import SkillsLoader
 from hal.core.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
+from hal.core.message_payloads import build_assistant_message_payload
 
 if TYPE_CHECKING:
     from hal.core.memory.manager import MemoryManager
@@ -118,17 +119,14 @@ class ContextBuilder:
         results) is prepended to the last user message as an XML block, keeping
         the system prompt stable for prompt cache hits.
         """
-        messages: list[dict[str, Any]] = []
-
         # Layers 0-3: stable system prompt (no per-request dynamic content)
-        system_prompt = self.build_system_prompt(
-            memory_budget_tokens=memory_budget_tokens,
-            token_model=token_model,
-        )
-        messages.append({"role": "system", "content": system_prompt})
-
-        # Layer 4: conversation history
-        messages.extend(history)
+        system_message = {
+            "role": "system",
+            "content": self.build_system_prompt(
+                memory_budget_tokens=memory_budget_tokens,
+                token_model=token_model,
+            ),
+        }
 
         # Layer 4: current message with dynamic context prefix
         dynamic_ctx = self._build_dynamic_context(
@@ -139,10 +137,14 @@ class ContextBuilder:
             recall_max_per_item_tokens=recall_max_per_item_tokens,
             token_model=token_model,
         )
-        user_content = self._build_user_content(current_message, media, dynamic_ctx)
-        messages.append({"role": "user", "content": user_content})
+        user_message = {
+            "role": "user",
+            "content": self._build_user_content(current_message, media, dynamic_ctx),
+        }
 
-        return messages
+        if history:
+            return [system_message, *history, user_message]
+        return [system_message, user_message]
 
     # ------------------------------------------------------------------
     # Layer builders
@@ -389,10 +391,11 @@ Layout:
         reasoning_content: str | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
-        msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
-        if tool_calls:
-            msg["tool_calls"] = tool_calls
-        if reasoning_content:
-            msg["reasoning_content"] = reasoning_content
-        messages.append(msg)
+        messages.append(
+            build_assistant_message_payload(
+                content=content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+            )
+        )
         return messages

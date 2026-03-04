@@ -196,6 +196,42 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
     assert "[1] user" in report
 
 
+def test_format_context_report_compact_tolerates_non_dict_summary_entries() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    report = ch._format_context_report(
+        {
+            "channel": "telegram",
+            "chat_id": "1",
+            "model": "test-model",
+            "mode": "collab",
+            "history_message_count": 0,
+            "history_chars": 0,
+            "history_tokens": 0,
+            "recall_count": 0,
+            "recall_items": [],
+            "system_prompt_chars": 10,
+            "system_prompt_tokens": 3,
+            "total_input_chars": 10,
+            "total_input_tokens": 3,
+            "token_estimate": {
+                "method": "chars_div_4",
+                "messages_only": 3,
+                "with_tools": 3,
+                "tools_only": 0,
+            },
+            "messages": [],
+            "message_summaries": [
+                "bad-entry",
+                {"role": "assistant", "chars": 8, "preview": "ok"},
+            ],
+        }
+    )
+    assert "[0] ?" in report
+    assert '0t  ""' in report
+    assert "[1] assistant" in report
+    assert '2t  "ok"' in report
+
+
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     md = (
         "# Title\n"
@@ -775,6 +811,60 @@ async def test_on_context_full_mode_parses_message() -> None:
         channel="telegram",
         chat_id="123",
         current_message="ping",
+    )
+    first_chunk = msg.reply_text.await_args_list[0].args[0]
+    assert "(full)" in first_chunk
+
+
+@pytest.mark.asyncio
+async def test_on_context_full_flag_without_message_uses_default_text() -> None:
+    inspector = AsyncMock(
+        return_value={
+            "channel": "telegram",
+            "chat_id": "123",
+            "model": "test-model",
+            "mode": "collab",
+            "history_message_count": 0,
+            "history_chars": 0,
+            "history_tokens": 0,
+            "recall_count": 0,
+            "recall_items": [],
+            "system_prompt_chars": 3,
+            "system_prompt_tokens": 1,
+            "total_input_chars": 5,
+            "total_input_tokens": 1,
+            "token_estimate": {
+                "method": "chars_div_4",
+                "messages_only": 1,
+                "with_tools": 1,
+                "tools_only": 0,
+            },
+            "history_config": {
+                "history_days": 1,
+                "max_messages": 50,
+                "max_history_tokens": 0,
+            },
+            "history_window": [{"date": "2026-02-22", "exists": True}],
+            "messages": [{"role": "system", "content": "sys"}],
+            "message_summaries": [{"role": "system", "chars": 3, "tokens": 1, "preview": "sys"}],
+        }
+    )
+    ch = TelegramChannel(
+        TelegramConfig(enabled=True, token="t"),
+        MessageBus(),
+        context_inspector=inspector,
+    )
+
+    msg = _Message(chat_id=123, text="/context --full")
+    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
+    update = _Update(message=msg, user=_User(1))
+
+    await ch._on_context(update, context=None)  # type: ignore[arg-type]
+
+    inspector.assert_awaited_once_with(
+        channel="telegram",
+        chat_id="123",
+        current_message="[context inspection]",
     )
     first_chunk = msg.reply_text.await_args_list[0].args[0]
     assert "(full)" in first_chunk

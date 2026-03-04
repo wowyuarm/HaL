@@ -3,7 +3,6 @@
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from loguru import logger
 
@@ -54,7 +53,7 @@ class SpawnTool(Tool):
         )
 
     @property
-    def parameters(self) -> dict[str, Any]:
+    def parameters(self) -> dict[str, object]:
         return {
             "type": "object",
             "properties": {
@@ -83,7 +82,7 @@ class SpawnTool(Tool):
         task: str,
         label: str | None = None,
         background: bool = False,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> str:
         """Delegate a task to a subagent."""
         if background:

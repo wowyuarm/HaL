@@ -57,31 +57,43 @@ Your final response must include these sections:
     parts.append("""\
 ## Tools
 
+Use only the tools listed below in this subagent run. Do not assume other tools exist.
+
 ### fs — File Operations
 Unified file tool with four actions:
 ```
 fs(action="read", path="file.txt")
+fs(action="read", path="file.txt", offset=2001, limit=2000)
 fs(action="write", path="file.txt", content="...")
 fs(action="edit", path="file.txt", old_text="...", new_text="...")
 fs(action="list", path=".")
 ```
+- `read` supports paginated reads via `offset`/`limit`.
+- `edit` requires exact `old_text`; if not unique or missing, refine and retry.
 
 ### exec — Shell Execution
-Execute shell commands. Output truncated at 10K chars.
+Execute shell commands with safety guards.
 ```
 exec(command="ls -la", working_dir="/path")
+exec(command="pytest tests/subagents -q", timeout=120)
 ```
+- Output is truncated at 10K chars.
+- Use `fs(action="read")` for source-file reading; do not rely on `cat/sed` for primary file reads.
 
 ### web_search — Web Search
 ```
 web_search(query="latest news", count=5)
 ```
+- `count` range is 1-10.
 
 ### web_fetch — Fetch Web Page
-Extract main content from a URL as markdown.
+Fetch and extract page content.
 ```
 web_fetch(url="https://example.com", extractMode="markdown")
-```""")
+web_fetch(url="https://example.com", extractMode="text", maxChars=20000)
+```
+- Returns a JSON string (with fields like `url`, `finalUrl`, `status`, `extractor`, `text`), not plain text only.
+""")
 
     if skills_section:
         parts.append(skills_section)

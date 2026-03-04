@@ -14,6 +14,38 @@ from hal.infra.config.schema import Config
 runner = CliRunner()
 
 
+class _FakeRunResult:
+    def __init__(self, stdout: str = "", stderr: str = ""):
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _invoke_anyrouter_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    args: list[str],
+    node_help_stdout: str,
+    https_proxy: str | None = None,
+) -> tuple[object, dict]:
+    called: dict = {}
+
+    def fake_run(cmd, env=None, check=None, capture_output=None, text=None):
+        if cmd == ["node", "--help"]:
+            return _FakeRunResult(stdout=node_help_stdout)
+        called["cmd"] = cmd
+        called["env"] = env
+        called["check"] = check
+        return _FakeRunResult()
+
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    if https_proxy:
+        monkeypatch.setenv("HTTPS_PROXY", https_proxy)
+
+    result = runner.invoke(commands.app, args)
+    return result, called
+
+
 def test_version_flag_exits_0() -> None:
     result = runner.invoke(commands.app, ["--version"])
     assert result.exit_code == 0
@@ -43,28 +75,11 @@ def test_anyrouter_bridge_invokes_node_process(
     cfg.providers.anyrouter.api_key = "sk-test"
     save_config(cfg)
 
-    called = {}
-
-    class Result:
-        def __init__(self, stdout: str = "", stderr: str = ""):
-            self.stdout = stdout
-            self.stderr = stderr
-
-    def fake_run(cmd, env=None, check=None, capture_output=None, text=None):
-        if cmd == ["node", "--help"]:
-            return Result(stdout="  --use-env-proxy")
-        called["cmd"] = cmd
-        called["env"] = env
-        called["check"] = check
-        return Result()
-
-    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/node")
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:7890")
-
-    result = runner.invoke(
-        commands.app,
-        ["anyrouter", "bridge", "--port", "4318", "--upstream", "https://anyrouter.top"],
+    result, called = _invoke_anyrouter_bridge(
+        monkeypatch,
+        args=["anyrouter", "bridge", "--port", "4318", "--upstream", "https://anyrouter.top"],
+        node_help_stdout="  --use-env-proxy",
+        https_proxy="http://127.0.0.1:7890",
     )
     assert result.exit_code == 0
     assert called["cmd"][0] == "node"
@@ -93,23 +108,11 @@ def test_anyrouter_bridge_uses_configured_header_and_effort_overrides(
     cfg.providers.anyrouter.request_params = {"output_config": {"effort": "max"}}
     save_config(cfg)
 
-    called = {}
-
-    class Result:
-        def __init__(self, stdout: str = "", stderr: str = ""):
-            self.stdout = stdout
-            self.stderr = stderr
-
-    def fake_run(cmd, env=None, check=None, capture_output=None, text=None):
-        if cmd == ["node", "--help"]:
-            return Result(stdout="")
-        called["env"] = env
-        return Result()
-
-    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/node")
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    result = runner.invoke(commands.app, ["anyrouter", "bridge", "--port", "4318"])
+    result, called = _invoke_anyrouter_bridge(
+        monkeypatch,
+        args=["anyrouter", "bridge", "--port", "4318"],
+        node_help_stdout="",
+    )
     assert result.exit_code == 0
     assert called["env"]["ANYROUTER_USER_AGENT"] == "custom-cli/9.9.9"
     assert called["env"]["ANYROUTER_X_APP"] == "custom-app"

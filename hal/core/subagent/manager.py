@@ -5,17 +5,15 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from hal.bus.events import SubagentCompleteEvent
-from hal.core.ports import SubagentExecutionResult
+from hal.core.ports import LLMProviderPort, SubagentExecutionResult
 from hal.core.runtime.loop import run_tool_loop
 from hal.core.runtime.tool_factory import create_tools
-from hal.infra.providers.base import LLMProvider
 
 from .hooks import SubagentLoopHooks
 from .prompt import build_skills_section, build_system_prompt, resolve_skill_script
@@ -31,14 +29,6 @@ if TYPE_CHECKING:
     from hal.capabilities.tools.registry import ToolRegistry
     from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
-
-@dataclass(slots=True)
-class _BackgroundExecutionContext:
-    channel: str | None = None
-    chat_id: str | None = None
-    session_key: str | None = None
-
-
 _COMPLETED_RESULTS_MAX = 256
 
 
@@ -47,7 +37,7 @@ class SubagentManager:
 
     def __init__(
         self,
-        provider: LLMProvider,
+        provider: LLMProviderPort,
         workspace: Path,
         model: str | None = None,
         web_search_api_key: str | None = None,
@@ -74,7 +64,7 @@ class SubagentManager:
         # task_id -> (task, display_label, context)
         self._running_tasks: dict[
             str,
-            tuple[asyncio.Task[SubagentExecutionResult], str, _BackgroundExecutionContext],
+            tuple[asyncio.Task[SubagentExecutionResult], str, tuple[str | None, str | None, str | None]],
         ] = {}
         self._completed_results: deque[tuple[str, SubagentExecutionResult]] = deque(
             maxlen=_COMPLETED_RESULTS_MAX
@@ -115,11 +105,7 @@ class SubagentManager:
         """Spawn a subagent in the background and report completion via bus events."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        context = _BackgroundExecutionContext(
-            channel=channel,
-            chat_id=chat_id,
-            session_key=session_key,
-        )
+        context = (channel, chat_id, session_key)
 
         bg_task = asyncio.create_task(
             self._execute_background_subagent(
@@ -154,7 +140,7 @@ class SubagentManager:
         task_id: str,
         task: str,
         label: str | None,
-        context: _BackgroundExecutionContext,
+        context: tuple[str | None, str | None, str | None],
     ) -> SubagentExecutionResult:
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         try:
@@ -182,15 +168,38 @@ class SubagentManager:
     ) -> SubagentExecutionResult:
         """Run the subagent loop and return structured output metadata."""
         tools = self._build_tools()
-        system_prompt = self._build_system_prompt()
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
+        messages = self._build_initial_messages(task)
+        final_content, meta, hooks = await self._run_subagent_loop(
+            task_id=task_id,
+            tools=tools,
+            messages=messages,
+        )
+        return self._build_execution_result(
+            task_id=task_id,
+            task=task,
+            label=label,
+            final_content=final_content,
+            meta=meta,
+            hooks=hooks,
+        )
+
+    def _build_initial_messages(self, task: str) -> list[dict[str, object]]:
+        """Build initial system+user message list for delegated execution."""
+        return [
+            {"role": "system", "content": self._build_system_prompt()},
             {"role": "user", "content": task},
         ]
 
+    async def _run_subagent_loop(
+        self,
+        *,
+        task_id: str,
+        tools: "ToolRegistry",
+        messages: list[dict[str, object]],
+    ) -> tuple[str, object, SubagentLoopHooks]:
+        """Run shared tool loop and return normalized content + metadata."""
         self._current_iteration = 0
         hooks = SubagentLoopHooks(self, task_id)
-
         final_content, meta = await run_tool_loop(
             provider=self.provider,
             model=self.model,
@@ -199,10 +208,21 @@ class SubagentManager:
             max_iterations=self.max_iterations,
             hooks=hooks,
         )
-
         if final_content is None:
             final_content = "Task completed but no summary was generated."
+        return final_content, meta, hooks
 
+    def _build_execution_result(
+        self,
+        *,
+        task_id: str,
+        task: str,
+        label: str | None,
+        final_content: str,
+        meta: object,
+        hooks: SubagentLoopHooks,
+    ) -> SubagentExecutionResult:
+        """Persist subagent run artifacts and return structured execution metadata."""
         artifacts, missing_artifacts = extract_artifact_paths(final_content)
         tool_errors = extract_tool_errors(meta.loop_messages)
         status = classify_status(
@@ -225,7 +245,6 @@ class SubagentManager:
         )
         artifact_path = artifacts[0] if artifacts else log_path
         logger.info(f"Subagent [{task_id}] {status} (log: {log_path})")
-
         return SubagentExecutionResult(
             content=final_content,
             artifact_path=artifact_path,
@@ -278,11 +297,12 @@ class SubagentManager:
         self,
         label: str,
         result: SubagentExecutionResult,
-        context: _BackgroundExecutionContext,
+        context: tuple[str | None, str | None, str | None],
     ) -> None:
         """Emit SubagentCompleteEvent for background tasks (best-effort)."""
         if not self._bus:
             return
+        channel, chat_id, session_key = context
 
         self._bus.emit_nowait(
             SubagentCompleteEvent(
@@ -291,9 +311,9 @@ class SubagentManager:
                 content=result.content,
                 background=True,
                 messages=[],
-                channel=context.channel,
-                chat_id=context.chat_id,
-                session_key=context.session_key,
+                channel=channel,
+                chat_id=chat_id,
+                session_key=session_key,
                 record_id=result.record_id or None,
                 artifact_path=str(result.artifact_path) if result.artifact_path else None,
                 total_tokens=result.total_tokens,

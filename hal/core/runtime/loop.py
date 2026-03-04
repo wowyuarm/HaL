@@ -10,7 +10,8 @@ from typing import Any, Awaitable, Protocol
 from loguru import logger
 
 from hal.capabilities.tools.registry import ToolRegistry
-from hal.infra.providers.base import LLMProvider
+from hal.core.message_payloads import build_assistant_message_payload
+from hal.core.ports import ChatProviderPort
 
 # Injected when the LLM returns an empty response (no tool calls, no text).
 # Uses "user" role so it lands after the cached prefix and triggers a retry
@@ -212,14 +213,13 @@ def _append_assistant_tool_call_message(
             reasoning_content=response.reasoning_content,
         )
 
-    assistant_msg: dict[str, Any] = {
-        "role": "assistant",
-        "content": response.content or "",
-        "tool_calls": tool_call_dicts,
-    }
-    if response.reasoning_content:
-        assistant_msg["reasoning_content"] = response.reasoning_content
-    messages.append(assistant_msg)
+    messages.append(
+        build_assistant_message_payload(
+            content=response.content,
+            tool_calls=tool_call_dicts,
+            reasoning_content=response.reasoning_content,
+        )
+    )
     return messages
 
 
@@ -395,7 +395,7 @@ async def _handle_tool_call_response(
 
 async def run_tool_loop(
     *,
-    provider: LLMProvider,
+    provider: ChatProviderPort,
     model: str,
     tools: ToolRegistry,
     messages: list[dict[str, Any]],

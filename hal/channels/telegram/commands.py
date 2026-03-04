@@ -6,6 +6,9 @@ from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
+_CONTEXT_DEFAULT_MESSAGE = "[context inspection]"
+_CONTEXT_FULL_FLAGS = {"full", "--full"}
+
 
 class TelegramCommandsMixin:
     """Telegram slash command handlers."""
@@ -76,18 +79,7 @@ class TelegramCommandsMixin:
             return
 
         chat_id = str(update.message.chat_id)
-        inspect_message = "[context inspection]"
-        full_messages = False
-
-        raw = (update.message.text or "").strip()
-        if raw:
-            parts = raw.split(maxsplit=1)
-            if len(parts) > 1:
-                tokens = parts[1].strip().split()
-                full_messages = "full" in tokens or "--full" in tokens
-                tokens = [t for t in tokens if t not in ("full", "--full")]
-                if tokens:
-                    inspect_message = " ".join(tokens)
+        inspect_message, full_messages = self._parse_context_command(update.message.text or "")
 
         try:
             payload = await self._context_inspector(
@@ -100,3 +92,21 @@ class TelegramCommandsMixin:
         except Exception as e:
             logger.warning(f"/context failed: {e}")
             await update.message.reply_text("⚠️ Failed to build context snapshot.")
+
+    @staticmethod
+    def _parse_context_command(raw_text: str) -> tuple[str, bool]:
+        """Parse /context command text into (inspect_message, full_messages)."""
+        raw = raw_text.strip()
+        if not raw:
+            return _CONTEXT_DEFAULT_MESSAGE, False
+
+        parts = raw.split(maxsplit=1)
+        if len(parts) <= 1:
+            return _CONTEXT_DEFAULT_MESSAGE, False
+
+        tokens = parts[1].strip().split()
+        full_messages = any(token in _CONTEXT_FULL_FLAGS for token in tokens)
+        inspect_tokens = [token for token in tokens if token not in _CONTEXT_FULL_FLAGS]
+        if not inspect_tokens:
+            return _CONTEXT_DEFAULT_MESSAGE, full_messages
+        return " ".join(inspect_tokens), full_messages

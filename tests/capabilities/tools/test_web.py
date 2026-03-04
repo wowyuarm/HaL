@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -48,32 +49,23 @@ async def test_web_search_requires_api_key() -> None:
 
 @pytest.mark.asyncio
 async def test_web_search_success_truncates_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummyResp:
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> dict:
-            return {
-                "results": [
-                    {
-                        "title": "t",
-                        "url": "https://example.com",
-                        "content": "x" * 500,
-                    }
-                ]
+    resp = Mock()
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = {
+        "results": [
+            {
+                "title": "t",
+                "url": "https://example.com",
+                "content": "x" * 500,
             }
+        ]
+    }
 
-    class DummyClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, *args, **kwargs):
-            return DummyResp()
-
-    monkeypatch.setattr("hal.capabilities.tools.web.httpx.AsyncClient", lambda: DummyClient())
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = False
+    client.post.return_value = resp
+    monkeypatch.setattr("hal.capabilities.tools.web.httpx.AsyncClient", lambda: client)
 
     tool = WebSearchTool(api_key="k", max_results=5)
     out = await tool.execute(query="q", count=1)

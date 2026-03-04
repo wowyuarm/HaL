@@ -1,7 +1,6 @@
 """Base channel interface for chat platforms."""
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 from loguru import logger
 
@@ -19,7 +18,7 @@ class BaseChannel(ABC):
 
     name: str = "base"
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(self, config: object, bus: MessageBus):
         """
         Initialize the channel.
 
@@ -89,7 +88,7 @@ class BaseChannel(ABC):
         chat_id: str,
         content: str,
         media: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.

@@ -23,29 +23,21 @@ def _message_sent_in_turn(tool: Any) -> bool:
     return bool(getattr(tool, "sent_in_turn", False))
 
 
-async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage | None:
-    """Process a user message end-to-end."""
-    if task := engine._pending_summaries.pop(msg.session_key, None):
-        try:
-            await asyncio.wait_for(task, timeout=engine._engine_config.summary_barrier_timeout_s)
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.warning(f"Summary barrier: {e}")
+async def _await_summary_barrier(*, engine: Any, msg: Any) -> None:
+    """Await pending summary task for this session before handling a new message."""
+    task = engine._pending_summaries.pop(msg.session_key, None)
+    if task is None:
+        return
+    try:
+        await asyncio.wait_for(task, timeout=engine._engine_config.summary_barrier_timeout_s)
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.warning(f"Summary barrier: {e}")
 
-    preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-    logger.info(f"[engine] {msg.channel}:{msg.sender_id}: {preview}")
 
-    engine.memory.record_conversation(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        role="user",
-        content=msg.content,
-    )
-
-    engine._update_tool_contexts(msg.channel, msg.chat_id)
-
+def _load_conversation_history(*, engine: Any, msg: Any, resolved_model: str) -> list[dict[str, object]]:
+    """Load bounded conversation history for prompt assembly."""
     hc = engine._history_config
-    resolved_model = engine.provider.resolve_model(engine.model)
-    history = engine.memory.get_conversation_history(
+    return engine.memory.get_conversation_history(
         channel=msg.channel,
         chat_id=msg.chat_id,
         max_messages=hc.max_messages,
@@ -57,18 +49,33 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         token_model=resolved_model,
     )
 
-    search_results = []
-    if engine._memory_search:
-        try:
-            search_results = await engine._memory_search.search(
-                msg.content,
-                top_k=engine._auto_inject_top_k,
-                min_score=engine._recall_min_score,
-            )
-        except Exception as e:
-            logger.warning(f"Memory search prefetch failed: {e}")
 
-    messages = engine.context.build_messages(
+async def _prefetch_memory_results(*, engine: Any, msg: Any) -> list[object]:
+    """Best-effort memory-search prefetch for auto-injection."""
+    if not engine._memory_search:
+        return []
+    try:
+        return await engine._memory_search.search(
+            msg.content,
+            top_k=engine._auto_inject_top_k,
+            min_score=engine._recall_min_score,
+        )
+    except Exception as e:
+        logger.warning(f"Memory search prefetch failed: {e}")
+        return []
+
+
+def _build_context_messages(
+    *,
+    engine: Any,
+    msg: Any,
+    history: list[dict[str, object]],
+    search_results: list[object],
+    resolved_model: str,
+) -> list[dict[str, object]]:
+    """Build final message list for the LLM loop."""
+    hc = engine._history_config
+    return engine.context.build_messages(
         history=history,
         current_message=msg.content,
         media=msg.media if msg.media else None,
@@ -80,21 +87,43 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
         token_model=resolved_model,
     )
-    history_chars = sum(_content_char_len(h.get("content", "")) for h in history)
-    recall_max_score = max((float(getattr(r, "score", 0.0)) for r in search_results), default=0.0)
-    recall_chars = sum(
+
+
+def _compute_recall_chars(
+    *,
+    search_results: list[object],
+    recall_max_per_item_tokens: int,
+    resolved_model: str,
+) -> int:
+    return sum(
         len(
             trim_text_to_token_budget(
-                str(getattr(r, "content", "")),
-                hc.recall_max_per_item_tokens,
+                str(getattr(result, "content", "")),
+                recall_max_per_item_tokens,
                 model=resolved_model,
             )
         )
-        for r in search_results
+        for result in search_results
     )
-    total_input_chars = sum(_content_char_len(m.get("content", "")) for m in messages)
 
-    pre_metrics = ContextMetrics(
+
+def _build_pre_metrics(
+    *,
+    msg: Any,
+    mode: str,
+    messages: list[dict[str, object]],
+    history: list[dict[str, object]],
+    search_results: list[object],
+    recall_chars: int,
+) -> ContextMetrics:
+    """Build context metrics snapshot captured before tool-loop execution."""
+    history_chars = sum(_content_char_len(item.get("content", "")) for item in history)
+    recall_max_score = max(
+        (float(getattr(result, "score", 0.0)) for result in search_results),
+        default=0.0,
+    )
+    total_input_chars = sum(_content_char_len(item.get("content", "")) for item in messages)
+    return ContextMetrics(
         timestamp=datetime.now().isoformat(),
         channel=msg.channel,
         chat_id=msg.chat_id,
@@ -110,6 +139,96 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         estimated_input_tokens=rough_tokens_from_chars(total_input_chars),
     )
 
+
+def _apply_loop_usage_metrics(*, metrics: ContextMetrics, meta: object) -> None:
+    """Map loop usage/tool metadata onto context metrics."""
+    metrics.prompt_tokens = meta.total_usage.get("prompt_tokens")
+    metrics.completion_tokens = meta.total_usage.get("completion_tokens")
+    metrics.total_tokens = meta.total_usage.get("total_tokens")
+    if (
+        metrics.total_tokens is None
+        and metrics.prompt_tokens is not None
+        and metrics.completion_tokens is not None
+    ):
+        metrics.total_tokens = metrics.prompt_tokens + metrics.completion_tokens
+    metrics.usage_available = any(
+        value is not None
+        for value in (
+            metrics.prompt_tokens,
+            metrics.completion_tokens,
+            metrics.total_tokens,
+        )
+    )
+    metrics.usage_source = USAGE_SOURCE_PROVIDER if metrics.usage_available else USAGE_SOURCE_NONE
+    metrics.loop_iterations = meta.iterations
+    metrics.tools_used = list(meta.tools_used)
+    metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)
+    metrics.has_side_effects = meta.has_side_effects
+
+
+def _normalize_final_content(final_content: str | None) -> str:
+    if final_content:
+        return final_content
+    return "(No response generated.)"
+
+
+def build_engine_error_response(*, msg: Any, error: Exception) -> OutboundMessage:
+    """Build a user-facing fallback response for engine-loop exceptions."""
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content=f"Sorry, I encountered an error: {str(error)}",
+    )
+
+
+def build_direct_inbound_message(*, channel: str, chat_id: str, content: str) -> object:
+    """Build an inbound message object for direct CLI processing."""
+    from hal.bus.events import InboundMessage
+
+    return InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+
+
+async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage | None:
+    """Process a user message end-to-end."""
+    await _await_summary_barrier(engine=engine, msg=msg)
+
+    preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+    logger.info(f"[engine] {msg.channel}:{msg.sender_id}: {preview}")
+
+    engine.memory.record_conversation(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        role="user",
+        content=msg.content,
+    )
+
+    engine._update_tool_contexts(msg.channel, msg.chat_id)
+
+    resolved_model = engine.provider.resolve_model(engine.model)
+    hc = engine._history_config
+    history = _load_conversation_history(engine=engine, msg=msg, resolved_model=resolved_model)
+    search_results = await _prefetch_memory_results(engine=engine, msg=msg)
+    messages = _build_context_messages(
+        engine=engine,
+        msg=msg,
+        history=history,
+        search_results=search_results,
+        resolved_model=resolved_model,
+    )
+    recall_chars = _compute_recall_chars(
+        search_results=search_results,
+        recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+        resolved_model=resolved_model,
+    )
+    pre_metrics = _build_pre_metrics(
+        msg=msg,
+        mode=mode,
+        messages=messages,
+        history=history,
+        search_results=search_results,
+        recall_chars=recall_chars,
+    )
+
     engine._set_session_active(msg.session_key, True)
     try:
         final_content, meta, _injected = await engine._execute_loop(
@@ -121,34 +240,10 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         )
     finally:
         engine._set_session_active(msg.session_key, False)
-    pre_metrics.prompt_tokens = meta.total_usage.get("prompt_tokens")
-    pre_metrics.completion_tokens = meta.total_usage.get("completion_tokens")
-    pre_metrics.total_tokens = meta.total_usage.get("total_tokens")
-    if (
-        pre_metrics.total_tokens is None
-        and pre_metrics.prompt_tokens is not None
-        and pre_metrics.completion_tokens is not None
-    ):
-        pre_metrics.total_tokens = pre_metrics.prompt_tokens + pre_metrics.completion_tokens
-    pre_metrics.usage_available = any(
-        v is not None
-        for v in (
-            pre_metrics.prompt_tokens,
-            pre_metrics.completion_tokens,
-            pre_metrics.total_tokens,
-        )
-    )
-    pre_metrics.usage_source = (
-        USAGE_SOURCE_PROVIDER if pre_metrics.usage_available else USAGE_SOURCE_NONE
-    )
-    pre_metrics.loop_iterations = meta.iterations
-    pre_metrics.tools_used = list(meta.tools_used)
-    pre_metrics.spawn_count = meta.tool_call_counts.get("spawn", 0)
-    pre_metrics.has_side_effects = meta.has_side_effects
+    _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
     engine._record_metrics(pre_metrics)
 
-    if not final_content:
-        final_content = "(No response generated.)"
+    final_content = _normalize_final_content(final_content)
 
     engine.memory.record_conversation(
         channel=msg.channel,

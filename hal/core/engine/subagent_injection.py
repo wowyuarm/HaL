@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from hal.core.context.token_budget import trim_text_to_token_budget
+from hal.core.subagent_metadata import SubagentArtifactMetadata, SubagentUsageMetadata
 
 _SUBAGENT_TOKEN_RE = re.compile(r"\[Subagent Total Tokens\]\s*(\d+)")
 _SUBAGENT_ARTIFACT_RE = re.compile(r"^\[Subagent Artifact\]\s*(.+)$", re.MULTILINE)
@@ -29,19 +30,9 @@ _SUBAGENT_RUNTIME_MAX_TOKENS = 0
 
 
 @dataclass
-class ParsedSubagentResult:
+class ParsedSubagentResult(SubagentArtifactMetadata[str], SubagentUsageMetadata):
     content: str
-    artifact_path: str | None
-    total_tokens: int
-    record_id: str | None
     status: str
-    tools_used: list[str]
-    tool_call_counts: dict[str, int]
-    has_side_effects: bool
-    files_modified: list[str]
-    commands_run: list[str]
-    tool_errors: list[str]
-    missing_artifacts: list[str]
 
 
 def _extract_spawn_total_tokens(messages: list[dict[str, Any]]) -> int:
