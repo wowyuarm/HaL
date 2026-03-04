@@ -143,39 +143,34 @@ class SpawnTool(Tool):
     def _format_result(details: SubagentExecutionResult) -> str:
         """Encode subagent detail metadata into the tool result payload."""
         lines = [details.content]
-        if details.record_id:
-            lines.append(f"[Subagent Record ID] {details.record_id}")
-        if details.status:
-            lines.append(f"[Subagent Status] {details.status}")
-        if details.artifact_path:
-            lines.append(f"[Subagent Artifact] {details.artifact_path}")
+        string_markers = (
+            ("[Subagent Record ID] ", details.record_id),
+            ("[Subagent Status] ", details.status),
+            ("[Subagent Artifact] ", details.artifact_path),
+        )
+        for prefix, value in string_markers:
+            if value:
+                lines.append(f"{prefix}{value}")
+
         if details.log_path and details.log_path != details.artifact_path:
             lines.append(f"[Subagent Log] {details.log_path}")
         if details.total_tokens:
             lines.append(f"[Subagent Total Tokens] {details.total_tokens}")
-        if details.tools_used:
-            lines.append(
-                f"[Subagent Tools Used] {json.dumps(details.tools_used, ensure_ascii=False)}"
-            )
-        if details.tool_call_counts:
-            lines.append(
-                f"[Subagent Tool Counts] {json.dumps(details.tool_call_counts, ensure_ascii=False)}"
-            )
+
+        json_markers: tuple[tuple[str, list[str] | dict[str, int]], ...] = (
+            ("[Subagent Tools Used] ", details.tools_used),
+            ("[Subagent Tool Counts] ", details.tool_call_counts),
+            ("[Subagent Files Modified] ", details.files_modified),
+            ("[Subagent Commands Run] ", details.commands_run),
+            ("[Subagent Tool Errors] ", details.tool_errors),
+        )
+        for prefix, value in json_markers:
+            if value:
+                lines.append(f"{prefix}{json.dumps(value, ensure_ascii=False)}")
+
         lines.append(
             f"[Subagent Has Side Effects] {'true' if details.has_side_effects else 'false'}"
         )
-        if details.files_modified:
-            lines.append(
-                f"[Subagent Files Modified] {json.dumps(details.files_modified, ensure_ascii=False)}"
-            )
-        if details.commands_run:
-            lines.append(
-                f"[Subagent Commands Run] {json.dumps(details.commands_run, ensure_ascii=False)}"
-            )
-        if details.tool_errors:
-            lines.append(
-                f"[Subagent Tool Errors] {json.dumps(details.tool_errors, ensure_ascii=False)}"
-            )
         if details.missing_artifacts:
             lines.append(
                 "[Subagent Missing Artifacts] "

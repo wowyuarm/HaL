@@ -1,6 +1,7 @@
 """Tests for MemorySearch — integration of export, chunk, embed, and search."""
 
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -69,6 +70,23 @@ class FakeVectorStore:
         pass
 
 
+class _ExporterWithoutLog:
+    """Minimal exporter without private _log state (for backfill contract tests)."""
+
+    def __init__(self, daily_dir: Path):
+        self._daily_dir = daily_dir
+
+    def export_date(self, target_date: date) -> None:
+        (self._daily_dir / f"{target_date.isoformat()}.md").write_text(
+            "# Exported\n\ncontent",
+            encoding="utf-8",
+        )
+
+    def export_range(self, start: date, end: date) -> None:
+        for day in range((end - start).days + 1):
+            self.export_date(start + timedelta(days=day))
+
+
 def _fake_embedding(texts: list[str]) -> list[list[float]]:
     """Deterministic fake embeddings based on text hash."""
     result = []
@@ -103,6 +121,7 @@ def memory_search(daily_log, daily_dir):
         store=store,
         embedding_model="fake-model",
         daily_dir=daily_dir,
+        log_dir=daily_log.data_dir,
     )
     return ms
 
@@ -516,6 +535,39 @@ class TestEmbeddingResilience:
             source_name, indexed_sources={source_name}
         )
         assert needs_reindex is True
+
+
+class TestBackfill:
+    async def test_backfill_uses_explicit_log_dir_without_exporter_private_log(self, tmp_path):
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        daily_dir = tmp_path / "daily"
+        daily_dir.mkdir()
+        target_date = date.today() - timedelta(days=2)
+        (log_dir / f"{target_date.isoformat()}.jsonl").write_text(
+            '{"timestamp":"2026-01-01T00:00:00","role":"user","content":"x"}\n',
+            encoding="utf-8",
+        )
+
+        ms = MemorySearch(
+            exporter=_ExporterWithoutLog(daily_dir),
+            chunker=MarkdownChunker(max_size=500, overlap_lines=1),
+            store=FakeVectorStore(),
+            embedding_model="fake-model",
+            daily_dir=daily_dir,
+            log_dir=log_dir,
+        )
+
+        with patch.object(
+            ms,
+            "_embed_texts",
+            new_callable=AsyncMock,
+            side_effect=lambda texts: _fake_embedding(texts),
+        ):
+            count = await ms.backfill()
+
+        assert count == 1
+        assert (daily_dir / f"{target_date.isoformat()}.md").exists()
 
 
 def test_extract_channel_from_heading() -> None:

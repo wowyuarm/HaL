@@ -83,32 +83,64 @@ class Tool(ABC):
         if t in self._TYPE_MAP and not isinstance(val, self._TYPE_MAP[t]):
             return [f"{label} should be {t}"]
 
-        errors = []
-        if "enum" in schema and val not in schema["enum"]:
-            errors.append(f"{label} must be one of {schema['enum']}")
+        errors: list[str] = []
+        errors.extend(self._validate_enum(val=val, schema=schema, label=label))
         if t in ("integer", "number"):
-            if "minimum" in schema and val < schema["minimum"]:
-                errors.append(f"{label} must be >= {schema['minimum']}")
-            if "maximum" in schema and val > schema["maximum"]:
-                errors.append(f"{label} must be <= {schema['maximum']}")
+            errors.extend(self._validate_numeric_bounds(val=val, schema=schema, label=label))
+            return errors
         if t == "string":
-            if "minLength" in schema and len(val) < schema["minLength"]:
-                errors.append(f"{label} must be at least {schema['minLength']} chars")
-            if "maxLength" in schema and len(val) > schema["maxLength"]:
-                errors.append(f"{label} must be at most {schema['maxLength']} chars")
+            errors.extend(self._validate_string_lengths(val=val, schema=schema, label=label))
+            return errors
         if t == "object":
-            props = schema.get("properties", {})
-            for k in schema.get("required", []):
-                if k not in val:
-                    errors.append(f"missing required {path + '.' + k if path else k}")
-            for k, v in val.items():
-                if k in props:
-                    errors.extend(self._validate(v, props[k], path + "." + k if path else k))
-        if t == "array" and "items" in schema:
-            for i, item in enumerate(val):
-                errors.extend(
-                    self._validate(item, schema["items"], f"{path}[{i}]" if path else f"[{i}]")
-                )
+            errors.extend(self._validate_object_fields(val=val, schema=schema, path=path))
+            return errors
+        if t == "array":
+            errors.extend(self._validate_array_items(val=val, schema=schema, path=path))
+        return errors
+
+    @staticmethod
+    def _validate_enum(*, val: Any, schema: dict[str, Any], label: str) -> list[str]:
+        if "enum" not in schema or val in schema["enum"]:
+            return []
+        return [f"{label} must be one of {schema['enum']}"]
+
+    @staticmethod
+    def _validate_numeric_bounds(*, val: Any, schema: dict[str, Any], label: str) -> list[str]:
+        errors: list[str] = []
+        if "minimum" in schema and val < schema["minimum"]:
+            errors.append(f"{label} must be >= {schema['minimum']}")
+        if "maximum" in schema and val > schema["maximum"]:
+            errors.append(f"{label} must be <= {schema['maximum']}")
+        return errors
+
+    @staticmethod
+    def _validate_string_lengths(*, val: Any, schema: dict[str, Any], label: str) -> list[str]:
+        errors: list[str] = []
+        if "minLength" in schema and len(val) < schema["minLength"]:
+            errors.append(f"{label} must be at least {schema['minLength']} chars")
+        if "maxLength" in schema and len(val) > schema["maxLength"]:
+            errors.append(f"{label} must be at most {schema['maxLength']} chars")
+        return errors
+
+    def _validate_object_fields(self, *, val: Any, schema: dict[str, Any], path: str) -> list[str]:
+        errors: list[str] = []
+        props = schema.get("properties", {})
+        for key in schema.get("required", []):
+            if key not in val:
+                errors.append(f"missing required {path + '.' + key if path else key}")
+        for key, item in val.items():
+            if key in props:
+                nested_path = f"{path}.{key}" if path else key
+                errors.extend(self._validate(item, props[key], nested_path))
+        return errors
+
+    def _validate_array_items(self, *, val: Any, schema: dict[str, Any], path: str) -> list[str]:
+        if "items" not in schema:
+            return []
+        errors: list[str] = []
+        for index, item in enumerate(val):
+            nested_path = f"{path}[{index}]" if path else f"[{index}]"
+            errors.extend(self._validate(item, schema["items"], nested_path))
         return errors
 
     def to_schema(self) -> dict[str, Any]:

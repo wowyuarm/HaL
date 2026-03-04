@@ -347,26 +347,46 @@ class DailyLog:
         Returns:
             List of log entries
         """
-        all_entries: list[LogEntry] = []
+        resolved_start, resolved_end = self._resolve_entry_date_range(
+            start_date=start_date,
+            end_date=end_date,
+        )
+        all_entries = self._load_entries_in_date_range(
+            start_date=resolved_start,
+            end_date=resolved_end,
+        )
+        return self._filter_entries(
+            entries=all_entries,
+            channel=channel,
+            chat_id=chat_id,
+        )
 
-        if start_date is None:
-            start_date = date.fromordinal(date.today().toordinal() - 30)
-        if end_date is None:
-            end_date = date.today()
+    @staticmethod
+    def _resolve_entry_date_range(*, start_date: date | None, end_date: date | None) -> tuple[date, date]:
+        resolved_start = start_date or date.fromordinal(date.today().toordinal() - 30)
+        resolved_end = end_date or date.today()
+        return resolved_start, resolved_end
 
-        current = start_date
-        while current <= end_date:
-            log_file = self._get_file_for_date(current)
+    def _load_entries_in_date_range(self, *, start_date: date, end_date: date) -> list[LogEntry]:
+        entries: list[LogEntry] = []
+        for ordinal in range(start_date.toordinal(), end_date.toordinal() + 1):
+            log_file = self._get_file_for_date(date.fromordinal(ordinal))
             if log_file.exists():
-                all_entries.extend(self._read_file(log_file))
-            current = date.fromordinal(current.toordinal() + 1)
+                entries.extend(self._read_file(log_file))
+        return entries
 
-        if channel:
-            all_entries = [entry for entry in all_entries if entry.channel == channel]
-        if chat_id:
-            all_entries = [entry for entry in all_entries if entry.chat_id == chat_id]
-
-        return all_entries
+    @staticmethod
+    def _filter_entries(
+        *, entries: list[LogEntry], channel: str | None = None, chat_id: str | None = None
+    ) -> list[LogEntry]:
+        if channel is None and chat_id is None:
+            return entries
+        return [
+            entry
+            for entry in entries
+            if (channel is None or entry.channel == channel)
+            and (chat_id is None or entry.chat_id == chat_id)
+        ]
 
     def _read_file(self, file_path: Path) -> list[LogEntry]:
         """Read all entries from a JSONL file."""

@@ -10,13 +10,13 @@ import asyncio
 import re
 from datetime import date
 from pathlib import Path
+from typing import Any, Protocol
 
 import litellm
 from loguru import logger
 
-from hal.core.memory.chunker import MarkdownChunker, compute_chunk_id
-from hal.core.memory.exporter import DailyExporter
-from hal.core.memory.store import SearchResult, VectorStore
+from hal.core.memory.chunker import compute_chunk_id
+from hal.core.memory.store import SearchResult
 
 # Score multiplier applied to summary chunks during retrieval.
 # Demotes summaries so raw conversation chunks are preferred (raw-first strategy).
@@ -28,6 +28,36 @@ _SUBAGENT_PENALTY = 0.70
 _EMBED_RETRY_ATTEMPTS = 3
 _EMBED_RETRY_BASE_DELAY_S = 0.5
 _ASCII_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,}")
+_FETCH_K_MULTIPLIER = 5
+_FETCH_K_BUFFER = 12
+_FETCH_K_CAP = 40
+_SUBAGENT_LITERAL_HIT_THRESHOLD = 2
+
+
+class _ExporterLike(Protocol):
+    def export_date(self, target_date: date) -> None: ...
+
+    def export_range(self, start: date, end: date) -> None: ...
+
+
+class _ChunkerLike(Protocol):
+    def chunk_file(self, md_path: Path, base_path: Path) -> list[Any]: ...
+
+
+class _StoreLike(Protocol):
+    async def initialize(self) -> None: ...
+
+    async def upsert(self, chunks: list[dict[str, Any]]) -> int: ...
+
+    async def search(
+        self, query_embedding: list[float], *, query_text: str = "", top_k: int = 5
+    ) -> list[SearchResult]: ...
+
+    async def delete_by_source(self, source: str) -> Any: ...
+
+    async def get_chunk_ids_by_source(self, source: str) -> set[str]: ...
+
+    async def get_indexed_sources(self) -> set[str]: ...
 
 
 class MemorySearch:
@@ -35,11 +65,12 @@ class MemorySearch:
 
     def __init__(
         self,
-        exporter: DailyExporter,
-        chunker: MarkdownChunker,
-        store: VectorStore,
+        exporter: _ExporterLike,
+        chunker: _ChunkerLike,
+        store: _StoreLike,
         embedding_model: str,
         daily_dir: Path,
+        log_dir: Path | None = None,
         exclude_channels: list[str] | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
@@ -53,6 +84,7 @@ class MemorySearch:
         self._store = store
         self._embedding_model = embedding_model
         self._daily_dir = daily_dir
+        self._log_dir = log_dir
         self._exclude_channels = {
             c.strip().lower() for c in (exclude_channels or []) if c and c.strip()
         }
@@ -111,33 +143,12 @@ class MemorySearch:
         # and fetch a wider candidate pool for reranking.
         query_terms = _build_keyword_terms(query)
         keyword_query = _build_keyword_query(query, query_terms)
-        fetch_k = min(max(top_k * 5, top_k + 12), 40)
-        results = await self._store.search(
-            query_embedding[0],
-            query_text=keyword_query,
-            top_k=fetch_k,
+        results = await self._search_candidates(
+            query_embedding=query_embedding[0], keyword_query=keyword_query, top_k=top_k
         )
-
-        if self._exclude_channels:
-            results = [
-                r
-                for r in results
-                if _extract_channel_from_heading(r.heading) not in self._exclude_channels
-            ]
-
-        # Apply source-type penalties and re-rank.
-        # For subagent chunks, keep full score when multiple query terms match
-        # literally — this avoids suppressing clearly relevant snippets.
-        for r in results:
-            hit_count = _count_literal_hits(f"{r.heading}\n{r.content}", query_terms)
-            if r.source_type == "summary":
-                r.score *= _SUMMARY_PENALTY
-            elif r.source_type == "subagent" and hit_count < 2:
-                r.score *= _SUBAGENT_PENALTY
-        results.sort(key=lambda r: r.score, reverse=True)
-        if min_score > 0:
-            results = [r for r in results if r.score >= min_score]
-        return results[:top_k]
+        results = self._filter_excluded_channels(results)
+        results = self._rank_with_source_penalties(results, query_terms=query_terms)
+        return self._slice_results(results, top_k=top_k, min_score=min_score)
 
     async def export_and_index_yesterday(self) -> int:
         """Convenience: export yesterday's log and index it."""
@@ -152,7 +163,7 @@ class MemorySearch:
         Called on startup to cover days when the server was not running at midnight.
         Compares exported markdown files against indexed chunk IDs to find gaps.
         """
-        log_dir = self._exporter._log.data_dir
+        log_dir = self._resolve_log_dir()
         if not log_dir.exists():
             return 0
 
@@ -186,6 +197,63 @@ class MemorySearch:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _resolve_log_dir(self) -> Path:
+        """Resolve JSONL log directory for backfill date discovery."""
+        if self._log_dir is not None:
+            return self._log_dir
+
+        # Backward compatibility for integrations that still pass DailyExporter only.
+        exporter_log = getattr(self._exporter, "_log", None)
+        exporter_data_dir = getattr(exporter_log, "data_dir", None)
+        if isinstance(exporter_data_dir, Path):
+            return exporter_data_dir
+
+        logger.warning(
+            "MemorySearch.log_dir not configured and exporter has no _log.data_dir; "
+            "falling back to daily_dir for backfill scan"
+        )
+        return self._daily_dir
+
+    def _candidate_fetch_k(self, top_k: int) -> int:
+        return min(max(top_k * _FETCH_K_MULTIPLIER, top_k + _FETCH_K_BUFFER), _FETCH_K_CAP)
+
+    async def _search_candidates(
+        self, *, query_embedding: list[float], keyword_query: str, top_k: int
+    ) -> list[SearchResult]:
+        return await self._store.search(
+            query_embedding,
+            query_text=keyword_query,
+            top_k=self._candidate_fetch_k(top_k),
+        )
+
+    def _filter_excluded_channels(self, results: list[SearchResult]) -> list[SearchResult]:
+        if not self._exclude_channels:
+            return results
+        return [
+            result
+            for result in results
+            if _extract_channel_from_heading(result.heading) not in self._exclude_channels
+        ]
+
+    def _rank_with_source_penalties(
+        self, results: list[SearchResult], *, query_terms: list[str]
+    ) -> list[SearchResult]:
+        # For subagent chunks, keep full score when multiple query terms match
+        # literally — this avoids suppressing clearly relevant snippets.
+        for result in results:
+            hit_count = _count_literal_hits(f"{result.heading}\n{result.content}", query_terms)
+            if result.source_type == "summary":
+                result.score *= _SUMMARY_PENALTY
+            elif result.source_type == "subagent" and hit_count < _SUBAGENT_LITERAL_HIT_THRESHOLD:
+                result.score *= _SUBAGENT_PENALTY
+        return sorted(results, key=lambda result: result.score, reverse=True)
+
+    @staticmethod
+    def _slice_results(results: list[SearchResult], *, top_k: int, min_score: float) -> list[SearchResult]:
+        if min_score > 0:
+            results = [result for result in results if result.score >= min_score]
+        return results[:top_k]
 
     def _chunk_id(self, chunk) -> str:
         """Compute model-aware chunk ID."""

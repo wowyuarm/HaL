@@ -154,29 +154,65 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
     ) -> LLMResponse:
         """Send a chat completion request via LiteLLM."""
-        model = self.resolve_model(model)
-        preserve_reasoning_content = self._should_preserve_reasoning_content(model)
-        messages = self._sanitize_messages(
+        resolved_model, prepared_messages, prepared_tools, prepared_max_tokens = self._prepare_chat_inputs(
+            model=model,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+        )
+        kwargs = self._build_chat_kwargs(
+            model=resolved_model,
+            messages=prepared_messages,
+            tools=prepared_tools,
+            max_tokens=prepared_max_tokens,
+            temperature=temperature,
+        )
+        try:
+            return await self._dispatch_completion(kwargs)
+        except Exception as error:
+            logger.exception("LLM request failed")
+            # Return error as content for graceful handling
+            return LLMResponse(
+                content=f"Error calling LLM: {self._sanitize_error_message(error)}",
+                finish_reason="error",
+            )
+
+    def _prepare_chat_inputs(
+        self,
+        *,
+        model: str | None,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]] | None, int]:
+        resolved_model = self.resolve_model(model)
+        preserve_reasoning_content = self._should_preserve_reasoning_content(resolved_model)
+        prepared_messages = self._sanitize_messages(
             messages,
             preserve_reasoning_content=preserve_reasoning_content,
         )
-        max_tokens = max(self._MIN_MAX_TOKENS, max_tokens)
-        if self._supports_cache_control(model):
-            messages, tools = self._apply_cache_control(messages, tools)
+        prepared_max_tokens = max(self._MIN_MAX_TOKENS, max_tokens)
+        prepared_tools = tools
+        if self._supports_cache_control(resolved_model):
+            prepared_messages, prepared_tools = self._apply_cache_control(prepared_messages, prepared_tools)
+        return resolved_model, prepared_messages, prepared_tools, prepared_max_tokens
 
+    def _build_chat_kwargs(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        temperature: float,
+    ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-
-        if self.request_params:
-            reserved_keys = {"model", "messages", "tools", "tool_choice"}
-            for key, value in self.request_params.items():
-                if key in reserved_keys:
-                    continue
-                kwargs[key] = value
+        self._apply_request_params(kwargs)
 
         # Apply model-specific overrides (e.g. kimi-k2.5 temperature)
         self._apply_model_overrides(model, kwargs)
@@ -197,25 +233,27 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        return kwargs
 
-        try:
-            # compat_mode proxies and AnyRouter bridge may always stream regardless
-            # of the stream flag. Force streaming and aggregate chunks so
-            # _parse_response always sees a complete response object.
-            if self._force_stream_aggregate:
-                kwargs["stream"] = True
-                response = await acompletion(**kwargs)
-                return await self._aggregate_stream(response)
+    def _apply_request_params(self, kwargs: dict[str, Any]) -> None:
+        if not self.request_params:
+            return
+        reserved_keys = {"model", "messages", "tools", "tool_choice"}
+        for key, value in self.request_params.items():
+            if key in reserved_keys:
+                continue
+            kwargs[key] = value
 
+    async def _dispatch_completion(self, kwargs: dict[str, Any]) -> LLMResponse:
+        # compat_mode proxies and AnyRouter bridge may always stream regardless
+        # of the stream flag. Force streaming and aggregate chunks so
+        # _parse_response always sees a complete response object.
+        if self._force_stream_aggregate:
+            kwargs["stream"] = True
             response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except Exception as error:
-            logger.exception("LLM request failed")
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {self._sanitize_error_message(error)}",
-                finish_reason="error",
-            )
+            return await self._aggregate_stream(response)
+        response = await acompletion(**kwargs)
+        return self._parse_response(response)
 
     @staticmethod
     def _sanitize_error_message(error: Exception) -> str:

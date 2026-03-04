@@ -161,37 +161,55 @@ class TelegramMessagingMixin:
 
         self._stop_typing(msg.chat_id)
 
-        try:
-            chat_id = int(msg.chat_id)
-        except ValueError:
-            logger.error(f"Invalid chat_id: {msg.chat_id}")
+        chat_id = self._parse_chat_id(msg.chat_id)
+        if chat_id is None:
             return
 
         if msg.media:
-            for media_path in msg.media:
-                try:
-                    media_type = self._get_media_type(media_path)
-                    with open(media_path, "rb") as f:
-                        if media_type == "photo":
-                            await self._app.bot.send_photo(chat_id=chat_id, photo=f)
-                        elif media_type == "voice":
-                            await self._app.bot.send_voice(chat_id=chat_id, voice=f)
-                        elif media_type == "audio":
-                            await self._app.bot.send_audio(chat_id=chat_id, audio=f)
-                        else:
-                            await self._app.bot.send_document(chat_id=chat_id, document=f)
-                except Exception as e:
-                    logger.error(f"Failed to send media {media_path}: {e}")
-                    await self._app.bot.send_message(
-                        chat_id=chat_id, text=f"[Failed to send file: {media_path}]"
-                    )
+            await self._send_media_batch(chat_id=chat_id, media_paths=msg.media)
+        await self._send_outbound_text(chat_id=chat_id, msg=msg)
 
-        if msg.content and msg.content != _EMPTY_MESSAGE_SENTINEL:
-            append_mode = msg.metadata.get(_APPEND_MODE_META_KEY)
-            if append_mode == PROGRESS_APPEND_MODE_CONCAT:
-                await self._send_appendable_text(chat_id, msg)
-            else:
-                await self._send_chunked_text(chat_id, msg.content)
+    def _parse_chat_id(self, chat_id: str) -> int | None:
+        """Parse outbound chat_id and log invalid values."""
+        try:
+            return int(chat_id)
+        except ValueError:
+            logger.error(f"Invalid chat_id: {chat_id}")
+            return None
+
+    async def _send_media_batch(self, *, chat_id: int, media_paths: list[str]) -> None:
+        """Send all media attachments in order."""
+        for media_path in media_paths:
+            await self._send_single_media(chat_id=chat_id, media_path=media_path)
+
+    async def _send_single_media(self, *, chat_id: int, media_path: str) -> None:
+        """Send one media file and emit a fallback message on failure."""
+        if not self._app:
+            return
+        try:
+            media_type = self._get_media_type(media_path)
+            with open(media_path, "rb") as handle:
+                if media_type == "photo":
+                    await self._app.bot.send_photo(chat_id=chat_id, photo=handle)
+                elif media_type == "voice":
+                    await self._app.bot.send_voice(chat_id=chat_id, voice=handle)
+                elif media_type == "audio":
+                    await self._app.bot.send_audio(chat_id=chat_id, audio=handle)
+                else:
+                    await self._app.bot.send_document(chat_id=chat_id, document=handle)
+        except Exception as error:
+            logger.error(f"Failed to send media {media_path}: {error}")
+            await self._app.bot.send_message(chat_id=chat_id, text=f"[Failed to send file: {media_path}]")
+
+    async def _send_outbound_text(self, *, chat_id: int, msg: OutboundMessage) -> None:
+        """Send non-empty outbound content with optional append-mode semantics."""
+        if not msg.content or msg.content == _EMPTY_MESSAGE_SENTINEL:
+            return
+        append_mode = msg.metadata.get(_APPEND_MODE_META_KEY)
+        if append_mode == PROGRESS_APPEND_MODE_CONCAT:
+            await self._send_appendable_text(chat_id, msg)
+            return
+        await self._send_chunked_text(chat_id, msg.content)
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
@@ -216,52 +234,14 @@ class TelegramMessagingMixin:
         if message.caption:
             content_parts.append(message.caption)
 
-        media_file = None
-        media_type = None
-
-        if message.photo:
-            media_file = message.photo[-1]
-            media_type = "image"
-        elif message.voice:
-            media_file = message.voice
-            media_type = "voice"
-        elif message.audio:
-            media_file = message.audio
-            media_type = "audio"
-        elif message.document:
-            media_file = message.document
-            media_type = "file"
-
-        if media_file and self._app:
-            try:
-                file = await self._app.bot.get_file(media_file.file_id)
-                ext = self._get_extension(media_type, getattr(media_file, "mime_type", None))
-
-                media_dir = Path.home() / ".hal" / "media" / "received"
-                media_dir.mkdir(parents=True, exist_ok=True)
-
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
-
-                media_paths.append(str(file_path))
-
-                if media_type == "voice" or media_type == "audio":
-                    from hal.infra.providers.transcription import GroqTranscriptionProvider
-
-                    transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
-                    transcription = await transcriber.transcribe(file_path)
-                    if transcription:
-                        logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
-                        content_parts.append(f"[transcription: {transcription}]")
-                    else:
-                        content_parts.append(f"[{media_type}: {file_path}]")
-                else:
-                    content_parts.append(f"[{media_type}: {file_path}]")
-
-                logger.debug(f"Downloaded {media_type} to {file_path}")
-            except Exception as e:
-                logger.error(f"Failed to download media: {e}")
-                content_parts.append(f"[{media_type}: download failed]")
+        media_file, media_type = self._resolve_incoming_media(message)
+        if media_file and media_type:
+            await self._download_and_describe_media(
+                media_file=media_file,
+                media_type=media_type,
+                content_parts=content_parts,
+                media_paths=media_paths,
+            )
 
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
@@ -284,6 +264,59 @@ class TelegramMessagingMixin:
                 "is_group": message.chat.type != "private",
             },
         )
+
+    @staticmethod
+    def _resolve_incoming_media(message):
+        if message.photo:
+            return message.photo[-1], "image"
+        if message.voice:
+            return message.voice, "voice"
+        if message.audio:
+            return message.audio, "audio"
+        if message.document:
+            return message.document, "file"
+        return None, None
+
+    async def _download_and_describe_media(
+        self,
+        *,
+        media_file,
+        media_type: str,
+        content_parts: list[str],
+        media_paths: list[str],
+    ) -> None:
+        if not self._app:
+            return
+
+        try:
+            file = await self._app.bot.get_file(media_file.file_id)
+            ext = self._get_extension(media_type, getattr(media_file, "mime_type", None))
+
+            media_dir = Path.home() / ".hal" / "media" / "received"
+            media_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
+            await file.download_to_drive(str(file_path))
+
+            media_paths.append(str(file_path))
+            content_parts.append(await self._build_media_content(media_type, file_path))
+            logger.debug(f"Downloaded {media_type} to {file_path}")
+        except Exception as e:
+            logger.error(f"Failed to download media: {e}")
+            content_parts.append(f"[{media_type}: download failed]")
+
+    async def _build_media_content(self, media_type: str, file_path: Path) -> str:
+        if media_type not in {"voice", "audio"}:
+            return f"[{media_type}: {file_path}]"
+
+        from hal.infra.providers.transcription import GroqTranscriptionProvider
+
+        transcriber = GroqTranscriptionProvider(api_key=self.groq_api_key)
+        transcription = await transcriber.transcribe(file_path)
+        if transcription:
+            logger.info(f"Transcribed {media_type}: {transcription[:50]}...")
+            return f"[transcription: {transcription}]"
+        return f"[{media_type}: {file_path}]"
 
     def _start_typing(self, chat_id: str) -> None:
         """Start sending typing indicator for a chat."""

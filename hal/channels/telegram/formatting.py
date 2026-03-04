@@ -13,36 +13,37 @@ def _markdown_table_to_pre(table_text: str) -> str:
     if not lines:
         return ""
 
-    rows: list[list[str]] = []
-    for line in lines:
-        stripped = line.strip("|").strip()
-        if re.match(r"^[\s|:\-]+$", stripped):
-            continue
-        cells = [c.strip() for c in stripped.split("|")]
-        rows.append(cells)
-
+    rows = [_split_table_row(line) for line in lines if not _is_table_separator(line)]
     if not rows:
         return ""
 
     n_cols = max(len(r) for r in rows)
-    col_widths = [0] * n_cols
-    for row in rows:
-        for i, cell in enumerate(row):
-            col_widths[i] = max(col_widths[i], len(cell))
-
-    formatted: list[str] = []
-    for idx, row in enumerate(rows):
-        padded = []
-        for i in range(n_cols):
-            cell = row[i] if i < len(row) else ""
-            padded.append(cell.ljust(col_widths[i]))
-        formatted.append("  ".join(padded))
-        if idx == 0 and len(rows) > 1:
-            formatted.append("  ".join("─" * w for w in col_widths))
+    col_widths = [_column_width(rows=rows, index=i) for i in range(n_cols)]
+    formatted = [_format_table_row(row=row, col_widths=col_widths) for row in rows]
+    if len(rows) > 1:
+        formatted.insert(1, "  ".join("─" * width for width in col_widths))
 
     escaped = "\n".join(formatted)
     escaped = escaped.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return f"<pre>{escaped}</pre>"
+
+
+def _is_table_separator(line: str) -> bool:
+    stripped = line.strip("|").strip()
+    return bool(re.match(r"^[\s|:\-]+$", stripped))
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip("|").strip().split("|")]
+
+
+def _column_width(*, rows: list[list[str]], index: int) -> int:
+    return max((len(row[index]) if index < len(row) else 0) for row in rows)
+
+
+def _format_table_row(*, row: list[str], col_widths: list[int]) -> str:
+    padded = [(row[i] if i < len(row) else "").ljust(col_widths[i]) for i in range(len(col_widths))]
+    return "  ".join(padded)
 
 
 def _markdown_to_telegram_html(text: str) -> str:

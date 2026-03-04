@@ -195,6 +195,7 @@ def make_memory_search(config):
         store=store,
         embedding_model=ms_cfg.embedding_model,
         daily_dir=daily_dir,
+        log_dir=log_dir,
         exclude_channels=ms_cfg.exclude_channels,
         embedding_dim=ms_cfg.embedding_dim,
         embed_retry_attempts=ms_cfg.embed_retry_attempts,
