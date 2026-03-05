@@ -154,11 +154,13 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
     ) -> LLMResponse:
         """Send a chat completion request via LiteLLM."""
-        resolved_model, prepared_messages, prepared_tools, prepared_max_tokens = self._prepare_chat_inputs(
-            model=model,
-            messages=messages,
-            tools=tools,
-            max_tokens=max_tokens,
+        resolved_model, prepared_messages, prepared_tools, prepared_max_tokens = (
+            self._prepare_chat_inputs(
+                model=model,
+                messages=messages,
+                tools=tools,
+                max_tokens=max_tokens,
+            )
         )
         kwargs = self._build_chat_kwargs(
             model=resolved_model,
@@ -171,10 +173,12 @@ class LiteLLMProvider(LLMProvider):
             return await self._dispatch_completion(kwargs)
         except Exception as error:
             logger.exception("LLM request failed")
-            # Return error as content for graceful handling
+            sanitized = self._sanitize_error_message(error)
             return LLMResponse(
-                content=f"Error calling LLM: {self._sanitize_error_message(error)}",
+                content=None,
                 finish_reason="error",
+                error_message=sanitized,
+                retryable=parse_helpers.is_retryable_error(error),
             )
 
     def _prepare_chat_inputs(
@@ -194,7 +198,9 @@ class LiteLLMProvider(LLMProvider):
         prepared_max_tokens = max(self._MIN_MAX_TOKENS, max_tokens)
         prepared_tools = tools
         if self._supports_cache_control(resolved_model):
-            prepared_messages, prepared_tools = self._apply_cache_control(prepared_messages, prepared_tools)
+            prepared_messages, prepared_tools = self._apply_cache_control(
+                prepared_messages, prepared_tools
+            )
         return resolved_model, prepared_messages, prepared_tools, prepared_max_tokens
 
     def _build_chat_kwargs(

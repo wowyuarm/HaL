@@ -18,6 +18,9 @@ from hal.core.context.token_budget import rough_tokens_from_chars, trim_text_to_
 
 from .inspect import _content_char_len
 
+_NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
+_ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
+
 
 def _message_sent_in_turn(tool: Any) -> bool:
     return bool(getattr(tool, "sent_in_turn", False))
@@ -34,7 +37,9 @@ async def _await_summary_barrier(*, engine: Any, msg: Any) -> None:
         logger.warning(f"Summary barrier: {e}")
 
 
-def _load_conversation_history(*, engine: Any, msg: Any, resolved_model: str) -> list[dict[str, object]]:
+def _load_conversation_history(
+    *, engine: Any, msg: Any, resolved_model: str
+) -> list[dict[str, object]]:
     """Load bounded conversation history for prompt assembly."""
     hc = engine._history_config
     return engine.memory.get_conversation_history(
@@ -169,7 +174,19 @@ def _apply_loop_usage_metrics(*, metrics: ContextMetrics, meta: object) -> None:
 def _normalize_final_content(final_content: str | None) -> str:
     if final_content:
         return final_content
-    return "(No response generated.)"
+    return _NO_RESPONSE_GENERATED_MESSAGE
+
+
+def _should_record_assistant_history(content: str) -> bool:
+    """Return True when assistant content should be persisted into history."""
+    normalized = content.strip()
+    if not normalized:
+        return False
+    if normalized == _NO_RESPONSE_GENERATED_MESSAGE:
+        return False
+    if normalized.startswith(_ERROR_CALLING_LLM_PREFIX):
+        return False
+    return True
 
 
 def build_engine_error_response(*, msg: Any, error: Exception) -> OutboundMessage:
@@ -244,22 +261,26 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
     engine._record_metrics(pre_metrics)
 
     final_content = _normalize_final_content(final_content)
+    record_assistant_history = _should_record_assistant_history(final_content)
 
-    engine.memory.record_conversation(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        role="assistant",
-        content=final_content,
-    )
+    if record_assistant_history:
+        engine.memory.record_conversation(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            role="assistant",
+            content=final_content,
+        )
     engine._store_session_snapshot(
         session_key=msg.session_key,
         channel=msg.channel,
         chat_id=msg.chat_id,
         messages=messages,
-        final_content=final_content,
+        final_content=final_content if record_assistant_history else None,
     )
 
-    summary_task = engine._trigger_summary(meta, final_content, msg.channel, msg.chat_id)
+    summary_task = None
+    if record_assistant_history:
+        summary_task = engine._trigger_summary(meta, final_content, msg.channel, msg.chat_id)
     if summary_task:
         engine._pending_summaries[msg.session_key] = summary_task
 

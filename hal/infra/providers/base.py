@@ -23,6 +23,8 @@ class LLMResponse:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None
+    error_message: str | None = None
+    retryable: bool = False
 
     @property
     def has_tool_calls(self) -> bool:

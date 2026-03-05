@@ -173,6 +173,9 @@ def test_defaults_match_original_hardcoded_values() -> None:
     # Engine
     assert cfg.engine.inbound_poll_timeout_s == 1.0
     assert cfg.engine.summary_barrier_timeout_s == 10.0
+    assert cfg.engine.llm_retry_attempts == 3
+    assert cfg.engine.llm_retry_base_delay_s == 0.8
+    assert cfg.engine.llm_retry_max_delay_s == 8.0
 
     # Web tools
     assert cfg.tools.web.search.max_results == 5

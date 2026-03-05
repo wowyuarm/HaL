@@ -20,6 +20,8 @@ _ROLE_ASSISTANT = "assistant"
 _ROLE_TOOL = "tool"
 _ENTRY_TYPE_INJECTION = "injection"
 _ENTRY_TYPE_SUMMARY = "summary"
+_NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
+_ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
 
 
 class LogEntry(BaseModel):
@@ -144,6 +146,16 @@ class DailyLog:
         return entry.entry_type not in (_ENTRY_TYPE_INJECTION, _ENTRY_TYPE_SUMMARY)
 
     @staticmethod
+    def _is_context_pollution_entry(entry: LogEntry) -> bool:
+        """Filter legacy assistant error placeholders from prompt history."""
+        if entry.role != _ROLE_ASSISTANT:
+            return False
+        content = entry.content.strip()
+        if content == _NO_RESPONSE_GENERATED_MESSAGE:
+            return True
+        return content.startswith(_ERROR_CALLING_LLM_PREFIX)
+
+    @staticmethod
     def _collect_recent_entries(
         *,
         entries: list[LogEntry],
@@ -153,12 +165,16 @@ class DailyLog:
         max_messages: int,
     ) -> list[LogEntry]:
         """Keep newest messages until reset marker or max_messages is reached."""
-        filtered = [entry for entry in entries if entry.channel == channel and entry.chat_id == chat_id]
+        filtered = [
+            entry for entry in entries if entry.channel == channel and entry.chat_id == chat_id
+        ]
 
         result: list[LogEntry] = []
         for entry in reversed(filtered):
             if entry.role == _RESET_MARKER_ROLE and entry.content == _RESET_MARKER_CONTENT:
                 break
+            if DailyLog._is_context_pollution_entry(entry):
+                continue
             if DailyLog._should_skip_entry(entry, include_tools):
                 continue
             result.append(entry)
@@ -361,7 +377,9 @@ class DailyLog:
         )
 
     @staticmethod
-    def _resolve_entry_date_range(*, start_date: date | None, end_date: date | None) -> tuple[date, date]:
+    def _resolve_entry_date_range(
+        *, start_date: date | None, end_date: date | None
+    ) -> tuple[date, date]:
         resolved_start = start_date or date.fromordinal(date.today().toordinal() - 30)
         resolved_end = end_date or date.today()
         return resolved_start, resolved_end

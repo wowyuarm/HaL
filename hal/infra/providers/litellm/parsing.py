@@ -9,6 +9,45 @@ from typing import Any
 
 from hal.infra.providers.base import LLMResponse, ToolCallRequest
 
+_RETRYABLE_ERROR_CLASS_HINTS = (
+    "apiconnectionerror",
+    "timeout",
+    "ratelimit",
+    "serviceunavailable",
+    "internalservererror",
+)
+_RETRYABLE_ERROR_MESSAGE_HINTS = (
+    "apiconnectionerror",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "connection timed out",
+    "timeout",
+    "timed out",
+    "temporary failure",
+    "temporarily unavailable",
+    "service unavailable",
+    "too many requests",
+    "rate limit",
+    "gateway timeout",
+    "bad gateway",
+    "502",
+    "503",
+    "504",
+    "unable to get json response",
+)
+_NON_RETRYABLE_ERROR_HINTS = (
+    "authentication",
+    "unauthorized",
+    "forbidden",
+    "invalid api key",
+    "bad request",
+    "invalid request",
+    "context_length_exceeded",
+    "not found",
+    "unsupported",
+)
+
 
 def sanitize_error_message(error: Exception) -> str:
     """Keep user-facing error concise and avoid leaking raw upstream payloads."""
@@ -18,6 +57,17 @@ def sanitize_error_message(error: Exception) -> str:
     if len(message) > 300:
         message = f"{message[:297]}..."
     return message
+
+
+def is_retryable_error(error: Exception) -> bool:
+    """Heuristically classify transient provider errors as retryable."""
+    class_name = type(error).__name__.lower()
+    message = str(error).lower()
+    if any(hint in class_name or hint in message for hint in _NON_RETRYABLE_ERROR_HINTS):
+        return False
+    if any(hint in class_name for hint in _RETRYABLE_ERROR_CLASS_HINTS):
+        return True
+    return any(hint in message for hint in _RETRYABLE_ERROR_MESSAGE_HINTS)
 
 
 def parse_tool_arguments(args: Any) -> Any:

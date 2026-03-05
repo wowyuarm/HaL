@@ -222,6 +222,9 @@ class AgentEngine:
                 hooks=hooks,
                 add_assistant_message=self.context.add_assistant_message,
                 add_tool_result=self.context.add_tool_result,
+                llm_retry_attempts=self._engine_config.llm_retry_attempts,
+                llm_retry_base_delay_s=self._engine_config.llm_retry_base_delay_s,
+                llm_retry_max_delay_s=self._engine_config.llm_retry_max_delay_s,
             )
             return final_content, meta, hooks.injected
         finally:

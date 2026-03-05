@@ -21,8 +21,7 @@ _EMPTY_RESPONSE_NUDGE = (
     "Respond to the user now — briefly confirm what you did or deliver the result."
 )
 _TOOL_EXECUTION_SKIPPED_MESSAGE = (
-    "[Tool execution skipped: user sent new messages. "
-    "Re-evaluate direction before continuing.]"
+    "[Tool execution skipped: user sent new messages. Re-evaluate direction before continuing.]"
 )
 _USAGE_STANDARD_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
 _USAGE_CACHE_KEYS = (
@@ -34,6 +33,9 @@ _USAGE_PROMPT_ALIAS_KEY = "input_tokens"
 _USAGE_COMPLETION_ALIAS_KEY = "output_tokens"
 _USAGE_PROMPT_DETAILS_KEY = "prompt_tokens_details"
 _USAGE_PROMPT_CACHED_KEY = "cached_tokens"
+_DEFAULT_LLM_RETRY_ATTEMPTS = 3
+_DEFAULT_LLM_RETRY_BASE_DELAY_S = 0.8
+_DEFAULT_LLM_RETRY_MAX_DELAY_S = 8.0
 
 
 @dataclass
@@ -180,6 +182,80 @@ def _update_usage_metadata(meta: LoopMetadata, usage: dict[str, int], iteration:
     meta.cache_creation_tokens += usage.get("cache_creation_input_tokens", 0)
     meta.cache_read_tokens += usage.get("cache_read_input_tokens", 0)
     meta.cache_miss_tokens += usage.get("prompt_cache_miss_tokens", 0)
+
+
+def _is_error_response(response: Any) -> bool:
+    """Return True when provider marks the response as an error."""
+    return getattr(response, "finish_reason", "") == "error"
+
+
+def _error_message_from_response(response: Any) -> str:
+    """Extract a user-facing error summary from provider response payload."""
+    error_message = getattr(response, "error_message", None)
+    if isinstance(error_message, str) and error_message.strip():
+        return error_message.strip()
+    content = getattr(response, "content", None)
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    return "Unknown provider error."
+
+
+def _is_retryable_error_response(response: Any) -> bool:
+    """Return True when provider marks error as retryable."""
+    return bool(getattr(response, "retryable", False))
+
+
+def _retry_delay_seconds(*, attempt: int, base_delay_s: float, max_delay_s: float) -> float:
+    """Return exponential-backoff delay bounded by max_delay_s."""
+    delay = base_delay_s * (2 ** (attempt - 1))
+    return min(delay, max_delay_s)
+
+
+async def _call_provider_with_retries(
+    *,
+    provider: ChatProviderPort,
+    messages: list[dict[str, Any]],
+    tools: ToolRegistry,
+    model: str,
+    llm_retry_attempts: int,
+    llm_retry_base_delay_s: float,
+    llm_retry_max_delay_s: float,
+) -> tuple[Any, int]:
+    """Call provider.chat with retry for retryable error responses."""
+    attempts = max(llm_retry_attempts, 1)
+    for attempt in range(1, attempts + 1):
+        response = await provider.chat(
+            messages=messages,
+            tools=tools.get_definitions(),
+            model=model,
+        )
+        if not (_is_error_response(response) and _is_retryable_error_response(response)):
+            return response, attempt
+        if attempt >= attempts:
+            return response, attempt
+
+        error_message = _error_message_from_response(response)
+        delay = _retry_delay_seconds(
+            attempt=attempt,
+            base_delay_s=llm_retry_base_delay_s,
+            max_delay_s=llm_retry_max_delay_s,
+        )
+        logger.warning(
+            f"Retryable LLM error ({attempt}/{attempts}): {error_message}; retrying in {delay:.1f}s"
+        )
+        await asyncio.sleep(delay)
+
+    raise RuntimeError("unreachable")
+
+
+def _format_error_response_content(response: Any, attempts_used: int) -> str:
+    """Format final user-visible content when the provider response is an error."""
+    error_message = _error_message_from_response(response)
+    if _is_retryable_error_response(response) and attempts_used > 1:
+        retries = attempts_used - 1
+        suffix = "" if retries == 1 else "s"
+        return f"Error calling LLM: {error_message} (retried {retries} time{suffix})"
+    return f"Error calling LLM: {error_message}"
 
 
 def _build_tool_call_dicts(tool_calls: list[Any]) -> list[dict[str, Any]]:
@@ -403,6 +479,9 @@ async def run_tool_loop(
     hooks: LoopHooks | None = None,
     add_assistant_message: Any | None = None,
     add_tool_result: Any | None = None,
+    llm_retry_attempts: int = _DEFAULT_LLM_RETRY_ATTEMPTS,
+    llm_retry_base_delay_s: float = _DEFAULT_LLM_RETRY_BASE_DELAY_S,
+    llm_retry_max_delay_s: float = _DEFAULT_LLM_RETRY_MAX_DELAY_S,
 ) -> tuple[str | None, LoopMetadata]:
     """Execute the LLM tool-calling loop.
 
@@ -420,6 +499,9 @@ async def run_tool_loop(
             If None, uses a default inline implementation.
         add_tool_result: Callback(messages, tool_id, tool_name, result) -> messages.
             If None, uses a default inline implementation.
+        llm_retry_attempts: Max provider call attempts for retryable API errors.
+        llm_retry_base_delay_s: Base delay (seconds) for exponential backoff.
+        llm_retry_max_delay_s: Max delay (seconds) cap for retry backoff.
 
     Returns:
         Tuple of (final_content, loop_metadata).
@@ -428,6 +510,7 @@ async def run_tool_loop(
     iteration = 0
     final_content: str | None = None
     nudged = False
+    empty_response_retried = False
     meta = LoopMetadata()
     start_idx = len(messages)
 
@@ -438,11 +521,21 @@ async def run_tool_loop(
         # Hook: inject pending messages, etc.
         await _maybe_await(h.before_llm_call(messages, meta))
 
-        response = await provider.chat(
-            messages=messages, tools=tools.get_definitions(), model=model
+        response, attempts_used = await _call_provider_with_retries(
+            provider=provider,
+            messages=messages,
+            tools=tools,
+            model=model,
+            llm_retry_attempts=llm_retry_attempts,
+            llm_retry_base_delay_s=llm_retry_base_delay_s,
+            llm_retry_max_delay_s=llm_retry_max_delay_s,
         )
         usage = _normalize_usage(response.usage)
         _update_usage_metadata(meta, usage, iteration)
+
+        if _is_error_response(response):
+            final_content = _format_error_response_content(response, attempts_used)
+            break
 
         if response.has_tool_calls:
             messages = await _handle_tool_call_response(
@@ -459,6 +552,12 @@ async def run_tool_loop(
         # No tool calls — check if caller wants to continue (e.g. subagent injection)
         should_continue = await h.on_no_tool_calls(messages, response, meta)
         if should_continue:
+            continue
+
+        # Guard: if content is empty before any tool calls, retry once.
+        if not response.content and meta.total_tool_calls == 0 and not empty_response_retried:
+            empty_response_retried = True
+            logger.warning("LLM returned empty response before any tool calls; retrying once")
             continue
 
         # Guard: if content is empty after tool work, nudge the LLM once.
@@ -522,9 +621,7 @@ def _normalize_usage(usage: dict[str, Any]) -> dict[str, int]:
         and "prompt_tokens" in normalized
         and "completion_tokens" in normalized
     ):
-        normalized["total_tokens"] = (
-            normalized["prompt_tokens"] + normalized["completion_tokens"]
-        )
+        normalized["total_tokens"] = normalized["prompt_tokens"] + normalized["completion_tokens"]
     return normalized
 
 

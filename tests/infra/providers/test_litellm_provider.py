@@ -429,7 +429,7 @@ async def test_chat_openrouter_non_claude_skips_cache_control(
 
 
 @pytest.mark.asyncio
-async def test_chat_exception_returns_error_content(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_chat_exception_returns_error_response(monkeypatch: pytest.MonkeyPatch) -> None:
     p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
 
     async def boom(**kwargs):
@@ -439,7 +439,9 @@ async def test_chat_exception_returns_error_content(monkeypatch: pytest.MonkeyPa
 
     r = await p.chat(messages=[{"role": "user", "content": "hi"}])
     assert r.finish_reason == "error"
-    assert r.content and r.content.startswith("Error calling LLM:")
+    assert r.content is None
+    assert r.error_message == "fail"
+    assert r.retryable is False
 
 
 @pytest.mark.asyncio
@@ -481,9 +483,24 @@ async def test_chat_exception_strips_raw_response_payload(monkeypatch: pytest.Mo
     monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", boom)
 
     r = await p.chat(messages=[{"role": "user", "content": "hi"}])
-    assert r.content is not None
-    assert "Original Response:" not in r.content
-    assert "event: message_start" not in r.content
+    assert r.error_message is not None
+    assert "Original Response:" not in r.error_message
+    assert "event: message_start" not in r.error_message
+    assert r.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_chat_retryable_error_sets_retryable_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
+
+    async def boom(**kwargs):
+        raise RuntimeError("litellm.APIConnectionError: AnthropicException - b''")
+
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", boom)
+
+    r = await p.chat(messages=[{"role": "user", "content": "hi"}])
+    assert r.finish_reason == "error"
+    assert r.retryable is True
 
 
 @pytest.mark.asyncio

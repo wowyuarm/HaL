@@ -37,6 +37,20 @@ class TestDailyLog:
         assert history[0] == {"role": "user", "content": "hi"}
         assert history[1] == {"role": "assistant", "content": "hello"}
 
+    def test_get_recent_conversation_filters_error_placeholders(self, tmp_path: Path):
+        log = DailyLog(tmp_path / "logs")
+        log.append(channel="cli", chat_id="d", role="user", content="hi")
+        log.append(
+            channel="cli", chat_id="d", role="assistant", content="Error calling LLM: timeout"
+        )
+        log.append(channel="cli", chat_id="d", role="assistant", content="(No response generated.)")
+        log.append(channel="cli", chat_id="d", role="assistant", content="all good")
+
+        history = log.get_recent_conversation(channel="cli", chat_id="d")
+        assert len(history) == 2
+        assert history[0] == {"role": "user", "content": "hi"}
+        assert history[1] == {"role": "assistant", "content": "all good"}
+
     def test_get_recent_conversation_filters_by_channel(self, tmp_path: Path):
         log = DailyLog(tmp_path / "logs")
         log.append(channel="cli", chat_id="d", role="user", content="cli msg")

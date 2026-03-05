@@ -167,6 +167,13 @@ class EngineConfig(_StrictModel):
 
     inbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Bus consume poll interval
     summary_barrier_timeout_s: float = Field(default=10.0, gt=0)  # Max wait for pending summary
+    llm_retry_attempts: int = Field(default=3, ge=1)  # Retry count for retryable LLM API errors
+    llm_retry_base_delay_s: float = Field(
+        default=0.8, gt=0
+    )  # Base delay (seconds) for LLM retry backoff
+    llm_retry_max_delay_s: float = Field(
+        default=8.0, gt=0
+    )  # Upper bound (seconds) for LLM retry delay
 
 
 class Config(BaseSettings):

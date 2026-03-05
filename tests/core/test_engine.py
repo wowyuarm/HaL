@@ -238,6 +238,19 @@ class TestDispatch:
         assert out.channel == "telegram"
         assert out.chat_id == "c1"
         assert out.content == "(No response generated.)"
+        assert engine.memory.record_conversation.call_count == 1
+
+    async def test_error_response_is_not_written_to_history(self, engine):
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("Error calling LLM: APIConnectionError", LoopMetadata(), [])
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        out = await engine.process(msg)
+
+        assert out is not None
+        assert out.content.startswith("Error calling LLM:")
+        assert engine.memory.record_conversation.call_count == 1
 
 
 class TestExecuteLoop:
@@ -323,9 +336,10 @@ class TestExecuteLoop:
         assert final is None
         assert meta.iterations == 3
 
-    async def test_no_nudge_without_prior_tool_calls(self, engine, mock_provider):
-        """Empty response on the very first turn (no tool work) exits immediately."""
+    async def test_empty_response_without_tools_retries_once(self, engine, mock_provider):
+        """Empty response before tool calls should get one lightweight retry."""
         mock_provider.chat.side_effect = [
+            LLMResponse(content=None, tool_calls=[]),
             LLMResponse(content=None, tool_calls=[]),
         ]
 
@@ -335,8 +349,94 @@ class TestExecuteLoop:
         )
 
         assert final is None
+        assert meta.iterations == 2
+        assert mock_provider.chat.await_count == 2
+
+    async def test_retryable_llm_error_retries_and_recovers(self, engine, mock_provider):
+        mock_provider.chat.side_effect = [
+            LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                error_message="litellm.APIConnectionError: network unstable",
+                retryable=True,
+            ),
+            LLMResponse(content="recovered", tool_calls=[]),
+        ]
+
+        with patch("hal.core.runtime.loop.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            final, meta, _ = await engine._execute_loop(
+                messages=[{"role": "system", "content": "x"}],
+                max_iterations=5,
+            )
+
+        assert final == "recovered"
+        assert meta.iterations == 1
+        assert mock_provider.chat.await_count == 2
+        mock_sleep.assert_awaited_once()
+
+    async def test_retryable_llm_error_returns_error_after_retry_exhaustion(
+        self, engine, mock_provider
+    ):
+        mock_provider.chat.side_effect = [
+            LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                error_message="litellm.APIConnectionError: timeout",
+                retryable=True,
+            ),
+            LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                error_message="litellm.APIConnectionError: timeout",
+                retryable=True,
+            ),
+            LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                error_message="litellm.APIConnectionError: timeout",
+                retryable=True,
+            ),
+        ]
+
+        with patch("hal.core.runtime.loop.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            final, meta, _ = await engine._execute_loop(
+                messages=[{"role": "system", "content": "x"}],
+                max_iterations=5,
+            )
+
+        assert final is not None
+        assert final.startswith("Error calling LLM:")
+        assert "retried 2 times" in final
+        assert meta.iterations == 1
+        assert mock_provider.chat.await_count == 3
+        assert mock_sleep.await_count == 2
+
+    async def test_non_retryable_llm_error_does_not_retry(self, engine, mock_provider):
+        mock_provider.chat.side_effect = [
+            LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                error_message="invalid request",
+                retryable=False,
+            ),
+            LLMResponse(content="should not be used", tool_calls=[]),
+        ]
+
+        with patch("hal.core.runtime.loop.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            final, meta, _ = await engine._execute_loop(
+                messages=[{"role": "system", "content": "x"}],
+                max_iterations=5,
+            )
+
+        assert final == "Error calling LLM: invalid request"
         assert meta.iterations == 1
         assert mock_provider.chat.await_count == 1
+        mock_sleep.assert_not_awaited()
 
 
 class TestMidLoopInjection:
@@ -729,7 +829,9 @@ class TestMidLoopInjection:
     async def test_tool_hints_reuse_append_key_when_no_progress(self, engine, mock_provider):
         """Consecutive hint-only batches should share one append stream."""
         _set_telegram_progress_policy(engine, send_progress=True, send_tool_hints=True)
-        first_calls = [ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})]
+        first_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
         second_calls = [ToolCallRequest(id="t2", name="exec", arguments={"command": "ls"})]
         outbound_messages = await _run_telegram_loop_with_outbound_capture(
             engine,
@@ -752,7 +854,9 @@ class TestMidLoopInjection:
     async def test_progress_text_resets_tool_hint_append_stream(self, engine, mock_provider):
         """When progress text is emitted, next tool-hint batch starts a fresh append stream."""
         _set_telegram_progress_policy(engine, send_progress=True, send_tool_hints=True)
-        first_calls = [ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})]
+        first_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
         second_calls = [ToolCallRequest(id="t2", name="exec", arguments={"command": "ls"})]
         third_calls = [ToolCallRequest(id="t3", name="web_search", arguments={"query": "hal"})]
         outbound_messages = await _run_telegram_loop_with_outbound_capture(

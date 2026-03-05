@@ -10,6 +10,7 @@ from loguru import logger
 
 from hal.bus.events import OutboundMessage, SubagentCompleteEvent
 
+from .processing import _should_record_assistant_history
 from .subagent_injection import _SUBAGENT_RUNTIME_MAX_TOKENS, _build_subagent_injection
 
 if TYPE_CHECKING:
@@ -122,7 +123,9 @@ class _EngineBackgroundResume:
         """Pop the current queued background completion batch for a session."""
         return self._pending_background_events.pop(session_key, [])
 
-    def _load_resume_context(self, session_key: str) -> tuple[str, str, list[dict[str, Any]]] | None:
+    def _load_resume_context(
+        self, session_key: str
+    ) -> tuple[str, str, list[dict[str, Any]]] | None:
         """Load route and snapshot needed to resume the detached loop."""
         snapshot = self._session_snapshots.get(session_key)
         route = self._session_routes.get(session_key)
@@ -207,13 +210,17 @@ class _EngineBackgroundResume:
         meta: Any,
     ) -> None:
         """Persist resumed output, queue summary, and emit outbound response."""
-        self._engine.memory.record_conversation(
-            channel=channel,
-            chat_id=chat_id,
-            role="assistant",
-            content=final_content,
-        )
-        summary_task = self._engine._trigger_summary(meta, final_content, channel, chat_id)
+        record_assistant_history = _should_record_assistant_history(final_content)
+        if record_assistant_history:
+            self._engine.memory.record_conversation(
+                channel=channel,
+                chat_id=chat_id,
+                role="assistant",
+                content=final_content,
+            )
+        summary_task = None
+        if record_assistant_history:
+            summary_task = self._engine._trigger_summary(meta, final_content, channel, chat_id)
         if summary_task:
             self._engine._pending_summaries[session_key] = summary_task
 
@@ -222,7 +229,7 @@ class _EngineBackgroundResume:
             channel=channel,
             chat_id=chat_id,
             messages=messages,
-            final_content=final_content,
+            final_content=final_content if record_assistant_history else None,
         )
 
         if bool(getattr(self._engine.tools.get("message"), "sent_in_turn", False)):
