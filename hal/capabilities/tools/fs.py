@@ -12,6 +12,8 @@ from hal.capabilities.tools.base import Tool
 _DIAG_MAX_CHARS = 800
 # Minimum similarity ratio to show a fuzzy match.
 _DIAG_MIN_RATIO = 0.6
+# Fuzzy diagnostics are best-effort; avoid scanning huge line windows.
+_DIAG_MAX_WINDOWS = 5000
 _FS_UNKNOWN_ACTION_ERROR = "Error: Unknown action '{action}'. Use one of: read, write, edit, list."
 _FS_WRITE_MISSING_CONTENT_ERROR = "Error: 'content' parameter is required for write action."
 _FS_EDIT_MISSING_PARAMS_ERROR = (
@@ -222,11 +224,14 @@ def _fuzzy_diagnostic(content: str, old_text: str) -> str:
     window = len(target_lines)
     if window == 0 or len(content_lines) == 0:
         return ""
+    candidate_windows = len(content_lines) - window + 1
+    if candidate_windows > _DIAG_MAX_WINDOWS:
+        return ""
 
     best_ratio = 0.0
     best_start = 0
 
-    for start in range(max(1, len(content_lines) - window + 1)):
+    for start in range(max(1, candidate_windows)):
         candidate_text = "".join(content_lines[start : start + window])
         ratio = difflib.SequenceMatcher(None, old_text, candidate_text).ratio()
         if ratio > best_ratio:

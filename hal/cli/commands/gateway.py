@@ -56,38 +56,7 @@ def gateway(
                     agent.disable_memory_search()
                     memory_search = None
 
-            tasks = [
-                agent.run(),
-                channels.start_all(),
-            ]
-
-            # Schedule daily export at midnight
-            if memory_search:
-
-                async def daily_export() -> None:
-                    import datetime as _dt
-
-                    while True:
-                        now = _dt.datetime.now()
-                        next_midnight = now.replace(
-                            hour=0, minute=0, second=0, microsecond=0
-                        ) + _dt.timedelta(days=1)
-                        wait_s = (next_midnight - now).total_seconds()
-                        await asyncio.sleep(wait_s)
-                        try:
-                            count = await memory_search.export_and_index_yesterday()
-                            if count:
-                                from loguru import logger
-
-                                logger.info(f"Daily export: indexed {count} chunks")
-                        except Exception as e:
-                            from loguru import logger
-
-                            logger.warning(f"Daily export failed: {e}")
-
-                tasks.append(daily_export())
-
-            await asyncio.gather(*tasks)
+            await asyncio.gather(agent.run(), channels.start_all())
         except KeyboardInterrupt:
             console.print("\nShutting down...")
             agent.stop()

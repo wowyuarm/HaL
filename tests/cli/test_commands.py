@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,6 +11,7 @@ from typer.testing import CliRunner
 import hal.cli.commands as commands
 from hal.infra.config.loader import save_config
 from hal.infra.config.schema import Config
+from hal.workspace import WorkspaceMigrationReport
 
 runner = CliRunner()
 
@@ -118,3 +120,105 @@ def test_anyrouter_bridge_uses_configured_header_and_effort_overrides(
     assert called["env"]["ANYROUTER_X_APP"] == "custom-app"
     assert called["env"]["ANYROUTER_ANTHROPIC_BETA"] == "claude-code-20250219"
     assert called["env"]["ANYROUTER_DEFAULT_THINKING_EFFORT"] == "max"
+
+
+def test_workspace_migrate_dry_run_preview_is_non_destructive(tmp_home: Path) -> None:
+    workspace = tmp_home / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    save_config(cfg)
+
+    thread_state = workspace / "threads" / "demo" / "STATE.md"
+    thread_state.parent.mkdir(parents=True, exist_ok=True)
+    thread_state.write_text("# demo\n", encoding="utf-8")
+
+    result = runner.invoke(commands.app, ["workspace-migrate"])
+
+    assert result.exit_code == 0
+    assert "workspace-migrate (dry-run)" in result.output
+    assert "Preview only" in result.output
+    assert thread_state.exists()
+    assert not (workspace / "work" / "threads" / "demo" / "STATE.md").exists()
+
+
+def test_workspace_migrate_apply_moves_legacy_roots(tmp_home: Path) -> None:
+    workspace = tmp_home / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    save_config(cfg)
+
+    skill_file = workspace / "skills" / "notes" / "SKILL.md"
+    skill_file.parent.mkdir(parents=True, exist_ok=True)
+    skill_file.write_text("# skill\n", encoding="utf-8")
+
+    result = runner.invoke(commands.app, ["workspace-migrate", "--apply"])
+
+    assert result.exit_code == 0
+    assert "workspace-migrate (apply)" in result.output
+    assert not skill_file.exists()
+    assert (workspace / "capabilities" / "skills" / "notes" / "SKILL.md").exists()
+
+
+def test_workspace_migrate_can_export_report_json(tmp_home: Path) -> None:
+    workspace = tmp_home / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    save_config(cfg)
+
+    report_path = tmp_home / "reports" / "migration.json"
+    result = runner.invoke(commands.app, ["workspace-migrate", "--report", str(report_path)])
+
+    assert result.exit_code == 0
+    assert "Report written:" in result.output
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["root"] == str(workspace)
+    assert payload["applied"] is False
+    assert "actions" in payload
+
+
+def test_workspace_migrate_can_export_rollback_script(tmp_home: Path) -> None:
+    workspace = tmp_home / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    save_config(cfg)
+
+    (workspace / "threads" / "demo" / "STATE.md").parent.mkdir(parents=True, exist_ok=True)
+    (workspace / "threads" / "demo" / "STATE.md").write_text("# demo\n", encoding="utf-8")
+
+    script_path = tmp_home / "reports" / "rollback.sh"
+    result = runner.invoke(
+        commands.app,
+        ["workspace-migrate", "--rollback-script", str(script_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "Rollback script written:" in result.output
+    script_text = script_path.read_text(encoding="utf-8")
+    assert script_text.startswith("#!/usr/bin/env bash")
+
+
+def test_workspace_migrate_apply_exits_nonzero_on_failed_migration(
+    tmp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_home / "workspace"
+    cfg = Config()
+    cfg.agents.defaults.workspace = str(workspace)
+    save_config(cfg)
+
+    def _failed_report(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return WorkspaceMigrationReport(
+            root=workspace,
+            actions=(),
+            applied=False,
+            warnings=("Migration failed: boom",),
+            rolled_back=True,
+            rollback_hints=(),
+        )
+
+    monkeypatch.setattr("hal.workspace.migrate_workspace_v3", _failed_report)
+
+    result = runner.invoke(commands.app, ["workspace-migrate", "--apply"])
+
+    assert result.exit_code == 1
+    assert "Migration failed. Applied changes were rolled back." in result.output

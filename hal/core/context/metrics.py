@@ -9,6 +9,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from hal.workspace.jsonl import append_jsonl_line, read_jsonl_lines
+
 USAGE_SOURCE_NONE = "none"
 USAGE_SOURCE_PROVIDER = "provider"
 
@@ -78,8 +80,7 @@ class MetricsCollector:
 
     def record(self, metrics: ContextMetrics) -> None:
         """Append one metrics row to JSONL."""
-        with self._log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(asdict(metrics), ensure_ascii=False) + "\n")
+        append_jsonl_line(self._log_path, json.dumps(asdict(metrics), ensure_ascii=False))
 
     def get_summary(self, last_n: int = 50) -> dict[str, Any]:
         """Return min/max/median/p90 summary for the most recent rows."""
@@ -123,19 +124,12 @@ class MetricsCollector:
         return None
 
     def _load_recent(self, last_n: int) -> list[dict[str, Any]]:
-        if not self._log_path.exists():
-            return []
-
         rows: list[dict[str, Any]] = []
-        with self._log_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        for line in read_jsonl_lines(self._log_path):
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
 
         if last_n <= 0:
             return rows

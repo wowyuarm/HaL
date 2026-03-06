@@ -50,6 +50,21 @@ class HistoryConfig(_StrictModel):
     history_days: int = 1  # 1 = today only; 2+ includes previous days
     recall_max_total_tokens: int = 500  # Max tokens injected from retrieved memory fragments
     recall_max_per_item_tokens: int = 125  # Max tokens per retrieved memory fragment
+    max_thread_registry_size: int = Field(
+        default=20, ge=1
+    )  # Max thread summaries injected into system prompt registry
+    baseline_max_active_threads: int = Field(
+        default=3, ge=1
+    )  # Max active thread STATE blocks auto-loaded into one session baseline
+    baseline_active_threads_max_total_tokens: int = Field(
+        default=4000, ge=0
+    )  # Total token budget for all auto-loaded active thread STATE blocks (0 = unlimited)
+    baseline_active_thread_max_tokens: int = Field(
+        default=1200, ge=0
+    )  # Per-thread token budget for auto-loaded active thread STATE blocks (0 = unlimited)
+    related_thread_hops: int = Field(
+        default=1, ge=1, le=3
+    )  # Max relation-hop depth for expanding recalled/mentioned thread context
 
 
 class AgentDefaults(_StrictModel):
@@ -166,6 +181,24 @@ class EngineConfig(_StrictModel):
     """Agent engine runtime configuration."""
 
     inbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Bus consume poll interval
+    session_idle_timeout_s: float = Field(
+        default=300.0, gt=0
+    )  # Idle timeout for rotating to a new session_id
+    session_compaction_enabled: bool = True  # Enable in-session history compaction when budget is exceeded
+    session_compaction_token_budget: int = Field(
+        default=150000, ge=1000
+    )  # Approx token ceiling for in-memory session history
+    session_compaction_recent_user_turns: int = Field(
+        default=2, ge=1
+    )  # Keep latest N user turns raw when compacting older history
+    session_compaction_checkpoint_tokens: int = Field(
+        default=1800, ge=100
+    )  # Max token budget per generated checkpoint block
+    session_debrief_enabled: bool = True  # Enable idle-session debrief confirmation + processing
+    session_debrief_confirm_timeout_s: float = Field(
+        default=120.0, gt=0
+    )  # Grace period for user confirmation before auto debrief
+    context_advisor_enabled: bool = True  # Enable first-tool-call context advisor hints
     summary_barrier_timeout_s: float = Field(default=10.0, gt=0)  # Max wait for pending summary
     llm_retry_attempts: int = Field(default=3, ge=1)  # Retry count for retryable LLM API errors
     llm_retry_base_delay_s: float = Field(

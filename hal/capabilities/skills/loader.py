@@ -5,6 +5,8 @@ import re
 import shutil
 from pathlib import Path
 
+from hal.workspace import SkillRepository
+
 
 class SkillsLoader:
     """
@@ -15,7 +17,8 @@ class SkillsLoader:
     """
 
     def __init__(self, workspace: Path):
-        self.skills_dir = workspace / "skills"
+        self._repository = SkillRepository(workspace)
+        self.skills_dir = self._repository.skills_dir()
 
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """List all skills. Returns list of dicts with name, path."""

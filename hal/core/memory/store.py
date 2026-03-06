@@ -28,9 +28,10 @@ class SearchResult:
     heading: str
     score: float
     source_type: str = "raw"  # "raw" | "summary" | "subagent"
+    thread: str = ""
 
 
-_OUTPUT_FIELDS = ["content", "source", "heading", "source_type"]
+_OUTPUT_FIELDS = ["content", "source", "heading", "source_type", "thread"]
 
 
 class VectorStore:
@@ -58,13 +59,13 @@ class VectorStore:
         self._client = MilvusClient(uri=str(uri_path))
 
         if self._client.has_collection(self._collection_name):
-            # Migrate: drop collection if schema is missing source_type field
+            # Migrate: drop collection when required metadata fields are missing.
             info = self._client.describe_collection(self._collection_name)
             field_names = {f["name"] for f in info.get("fields", [])}
-            if "source_type" not in field_names:
+            if "source_type" not in field_names or "thread" not in field_names:
                 logger.info(
                     f"Migrating collection '{self._collection_name}': "
-                    "adding source_type (drop + recreate)"
+                    "adding required metadata fields (drop + recreate)"
                 )
                 self._client.drop_collection(self._collection_name)
             else:
@@ -86,6 +87,12 @@ class VectorStore:
         schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field(field_name="source", datatype=DataType.VARCHAR, max_length=1024)
         schema.add_field(field_name="heading", datatype=DataType.VARCHAR, max_length=1024)
+        schema.add_field(
+            field_name="thread",
+            datatype=DataType.VARCHAR,
+            max_length=256,
+            default_value="",
+        )
         schema.add_field(field_name="heading_level", datatype=DataType.INT16)
         schema.add_field(field_name="start_line", datatype=DataType.INT32)
         schema.add_field(field_name="end_line", datatype=DataType.INT32)
@@ -172,6 +179,7 @@ class VectorStore:
                         heading=entity.get("heading", ""),
                         score=hit.get("distance", 0.0),
                         source_type=entity.get("source_type", "raw"),
+                        thread=entity.get("thread", ""),
                     )
                 )
         return results

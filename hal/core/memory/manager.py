@@ -7,6 +7,8 @@ from typing import Protocol
 
 from hal.core.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
 from hal.core.memory.daily_log import DailyLog, LogEntry
+from hal.workspace.events import EventEntry, EventLogRepository
+from hal.workspace.logs import LogRepository
 
 
 class _MemorySearchLike(Protocol):
@@ -30,15 +32,12 @@ class MemoryManager:
         data_dir: Path | None = None,
         memory_search: _MemorySearchLike | None = None,
     ):
-        from hal.core.memory.long_term import LongTermMemory
+        from hal.workspace.memory import MemoryRepository
 
-        memory_dir = workspace / "memory"
-        memory_dir.mkdir(parents=True, exist_ok=True)
-
-        self.long_term = LongTermMemory(memory_dir / "MEMORY.md")
-
-        log_dir = (data_dir or workspace) / "logs"
-        self.daily_log = DailyLog(log_dir)
+        logs_repository = LogRepository(data_dir or workspace)
+        self.long_term = MemoryRepository(workspace)
+        self.daily_log = DailyLog(logs_repository.logs_dir())
+        self.event_log = EventLogRepository(data_dir or workspace)
 
         self._search = memory_search
 
@@ -103,6 +102,24 @@ class MemoryManager:
             tool_result=tool_result,
             entry_type=entry_type,
             origin=origin,
+        )
+
+    def record_event(
+        self,
+        *,
+        session_id: str,
+        event_type: str,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> EventEntry:
+        """Append a unified session event to events.jsonl."""
+        return self.event_log.append(
+            session=session_id,
+            event_type=event_type,
+            channel=channel,
+            chat_id=chat_id,
+            payload=payload or {},
         )
 
     def get_conversation_history(

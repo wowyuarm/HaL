@@ -9,8 +9,13 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.bus.events import OutboundMessage, SubagentCompleteEvent
+from hal.core.context.history import build_persisted_session_history
+from hal.workspace import SessionRepository
 
-from .processing import _should_record_assistant_history
+from .processing import (
+    _normalize_final_content,
+    _should_record_assistant_history,
+)
 from .subagent_injection import _SUBAGENT_RUNTIME_MAX_TOKENS, _build_subagent_injection
 
 if TYPE_CHECKING:
@@ -22,6 +27,7 @@ class _EngineBackgroundResume:
 
     def __init__(self, *, engine: "AgentEngine") -> None:
         self._engine = engine
+        self._session_repository = SessionRepository(engine.workspace)
         self._active_sessions: set[str] = set()
         self._session_snapshots: dict[str, list[dict[str, Any]]] = {}
         self._session_routes: dict[str, tuple[str, str]] = {}
@@ -56,6 +62,24 @@ class _EngineBackgroundResume:
             snapshot.append({"role": "assistant", "content": final_content})
         self._session_snapshots[session_key] = snapshot
         self._session_routes[session_key] = (channel, chat_id)
+        try:
+            self._session_repository.write_snapshot(
+                session_key=session_key,
+                channel=channel,
+                chat_id=chat_id,
+                messages=snapshot,
+            )
+        except Exception as error:
+            logger.warning(f"Failed to write session snapshot: {error}")
+
+    def clear_session_snapshot(self, session_key: str) -> None:
+        """Drop cached and persisted snapshot state for one session key."""
+        self._session_snapshots.pop(session_key, None)
+        self._session_routes.pop(session_key, None)
+        try:
+            self._session_repository.delete_snapshot(session_key)
+        except Exception as error:
+            logger.warning(f"Failed to delete session snapshot: {error}")
 
     async def queue_background_completion(self, event: SubagentCompleteEvent) -> None:
         """Queue detached subagent completions and continue same-session loop when idle."""
@@ -106,8 +130,7 @@ class _EngineBackgroundResume:
                     chat_id=chat_id,
                     messages=messages,
                 )
-                if not final_content:
-                    continue
+                final_content = _normalize_final_content(final_content)
                 await self._finalize_resumed_turn(
                     session_key=session_key,
                     channel=channel,
@@ -129,10 +152,17 @@ class _EngineBackgroundResume:
         """Load route and snapshot needed to resume the detached loop."""
         snapshot = self._session_snapshots.get(session_key)
         route = self._session_routes.get(session_key)
-        if not snapshot or not route:
+        if snapshot and route:
+            channel, chat_id = route
+            return channel, chat_id, copy.deepcopy(snapshot)
+
+        persisted = self._session_repository.read_snapshot(session_key)
+        if persisted is None:
             return None
-        channel, chat_id = route
-        return channel, chat_id, snapshot
+        recovered = copy.deepcopy(persisted.messages)
+        self._session_snapshots[session_key] = recovered
+        self._session_routes[session_key] = (persisted.channel, persisted.chat_id)
+        return persisted.channel, persisted.chat_id, copy.deepcopy(recovered)
 
     def _append_runtime_injections(
         self,
@@ -211,6 +241,18 @@ class _EngineBackgroundResume:
     ) -> None:
         """Persist resumed output, queue summary, and emit outbound response."""
         record_assistant_history = _should_record_assistant_history(final_content)
+        session_history = build_persisted_session_history(
+            working_set_messages=messages,
+            final_content=final_content,
+            include_final_assistant=record_assistant_history,
+        )
+        session_history = await self._engine._maybe_compact_session_history(
+            session_key=session_key,
+            history=session_history,
+            token_model=self._engine.provider.resolve_model(self._engine.model),
+        )
+        self._engine._set_session_history(session_key, session_history)
+        self._engine._touch_session(session_key)
         if record_assistant_history:
             self._engine.memory.record_conversation(
                 channel=channel,
@@ -218,18 +260,33 @@ class _EngineBackgroundResume:
                 role="assistant",
                 content=final_content,
             )
+            session_id = self._engine._get_session_id(session_key)
+            if session_id:
+                self._engine.memory.record_event(
+                    session_id=session_id,
+                    event_type="assistant",
+                    channel=channel,
+                    chat_id=chat_id,
+                    payload={"content": final_content},
+                )
         summary_task = None
         if record_assistant_history:
             summary_task = self._engine._trigger_summary(meta, final_content, channel, chat_id)
         if summary_task:
             self._engine._pending_summaries[session_key] = summary_task
 
+        snapshot_messages = self._engine._build_session_snapshot_messages(
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+            token_model=self._engine.provider.resolve_model(self._engine.model),
+        )
         self.store_session_snapshot(
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
-            messages=messages,
-            final_content=final_content if record_assistant_history else None,
+            messages=snapshot_messages,
+            final_content=None,
         )
 
         if bool(getattr(self._engine.tools.get("message"), "sent_in_turn", False)):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import hal.cli.factory as factory
 from hal.infra.config.schema import Config
 
@@ -98,3 +100,49 @@ def test_make_memory_search_returns_none_when_milvus_lite_missing_on_local_uri(m
 
     assert result is None
     assert "milvus_lite" in calls
+
+
+def test_make_memory_search_uses_episode_indexing_defaults(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+
+    captured: dict[str, object] = {}
+
+    class DummyMemorySearch:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(factory, "_module_available", lambda _name: True)
+    monkeypatch.setattr("hal.core.memory.search.MemorySearch", DummyMemorySearch)
+
+    result = factory.make_memory_search(config)
+
+    assert isinstance(result, DummyMemorySearch)
+    assert captured["source_root"] == config.workspace_path
+    assert captured["episodes_root"] == config.workspace_path / "threads"
+    assert captured["log_dir"] == config.workspace_path / "logs"
+    deps = captured["deps"]
+    assert deps.exporter is None
+
+
+def test_make_memory_search_prefers_v3_workspace_roots(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    workspace = config.workspace_path
+    (workspace / "work" / "threads").mkdir(parents=True, exist_ok=True)
+    (workspace / "runtime" / "logs").mkdir(parents=True, exist_ok=True)
+
+    captured: dict[str, object] = {}
+
+    class DummyMemorySearch:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(factory, "_module_available", lambda _name: True)
+    monkeypatch.setattr("hal.core.memory.search.MemorySearch", DummyMemorySearch)
+
+    result = factory.make_memory_search(config)
+
+    assert isinstance(result, DummyMemorySearch)
+    assert captured["episodes_root"] == workspace / "work" / "threads"
+    assert captured["log_dir"] == workspace / "runtime" / "logs"

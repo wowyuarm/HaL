@@ -148,6 +148,8 @@ def _missing_memory_deps(milvus_uri: str) -> list[str]:
 
 def make_memory_search(config):
     """Create MemorySearch instance from config. Returns None if deps missing."""
+    from hal.workspace import LogRepository, ThreadRepository
+
     missing = _missing_memory_deps(config.memory_search.milvus_uri)
     if missing:
         deps = ", ".join(missing)
@@ -160,7 +162,6 @@ def make_memory_search(config):
     try:
         from hal.core.memory.chunker import MarkdownChunker
         from hal.core.memory.contracts import MemorySearchDeps
-        from hal.core.memory.exporter import DailyExporter
         from hal.core.memory.search import MemorySearch
         from hal.core.memory.store import VectorStore
     except ImportError as e:
@@ -169,16 +170,9 @@ def make_memory_search(config):
 
     ms_cfg = config.memory_search
 
-    from hal.core.memory.daily_log import DailyLog
-
-    # Must match MemoryManager's log_dir: (data_dir or workspace) / "logs".
-    # MemoryManager defaults data_dir=None → uses workspace, so logs live
-    # under workspace/logs, not get_data_dir()/logs.
-    log_dir = config.workspace_path / "logs"
-    daily_log = DailyLog(log_dir)
-    daily_dir = config.workspace_path / "memory" / "daily"
-
-    exporter = DailyExporter(daily_log, daily_dir, exclude_channels=ms_cfg.exclude_channels)
+    workspace = config.workspace_path
+    thread_repo = ThreadRepository(workspace)
+    log_repo = LogRepository(workspace)
     chunker = MarkdownChunker(
         max_size=ms_cfg.max_chunk_size,
         overlap_lines=ms_cfg.chunk_overlap_lines,
@@ -191,10 +185,11 @@ def make_memory_search(config):
     )
 
     return MemorySearch(
-        deps=MemorySearchDeps(exporter=exporter, chunker=chunker, store=store),
+        deps=MemorySearchDeps(exporter=None, chunker=chunker, store=store),
         embedding_model=ms_cfg.embedding_model,
-        daily_dir=daily_dir,
-        log_dir=log_dir,
+        source_root=workspace,
+        episodes_root=thread_repo.threads_dir(),
+        log_dir=log_repo.logs_dir(),
         exclude_channels=ms_cfg.exclude_channels,
         embedding_dim=ms_cfg.embedding_dim,
         embed_retry_attempts=ms_cfg.embed_retry_attempts,

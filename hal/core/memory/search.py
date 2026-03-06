@@ -1,7 +1,9 @@
-"""Memory search orchestrator — coordinates export, chunking, embedding, and retrieval.
+"""Memory search orchestrator — coordinates indexing, embedding, and retrieval.
 
-Provides a high-level interface for the memory search pipeline:
-JSONL → Markdown → Chunks → Embeddings → Milvus → Semantic Search
+Primary pipeline (context system v2):
+episodes/*.md -> chunks -> embeddings -> Milvus -> semantic search
+
+Legacy daily-export indexing is retained for backward compatibility.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from loguru import logger
 from hal.core.memory.chunker import compute_chunk_id
 from hal.core.memory.contracts import MemorySearchDeps
 from hal.core.memory.store import SearchResult
+from hal.workspace import EpisodeRepository
 
 # Score multiplier applied to summary chunks during retrieval.
 # Demotes summaries so raw conversation chunks are preferred (raw-first strategy).
@@ -45,7 +48,9 @@ class MemorySearch:
         *,
         deps: MemorySearchDeps | None = None,
         embedding_model: str,
-        daily_dir: Path,
+        source_root: Path | None = None,
+        episodes_root: Path | None = None,
+        daily_dir: Path | None = None,
         log_dir: Path | None = None,
         exclude_channels: list[str] | None = None,
         api_key: str | None = None,
@@ -65,7 +70,13 @@ class MemorySearch:
         self._chunker = resolved.chunker
         self._store = resolved.store
         self._embedding_model = embedding_model
+        self._episodes_root = episodes_root
         self._daily_dir = daily_dir
+        self._source_root = self._resolve_source_root(
+            source_root=source_root,
+            episodes_root=episodes_root,
+            daily_dir=daily_dir,
+        )
         self._log_dir = log_dir
         self._exclude_channels = {
             c.strip().lower() for c in (exclude_channels or []) if c and c.strip()
@@ -87,12 +98,27 @@ class MemorySearch:
     ) -> MemorySearchDeps:
         if deps is not None:
             return deps
-        if exporter is None or chunker is None or store is None:
+        if chunker is None or store is None:
             raise ValueError(
                 "MemorySearch requires either deps=MemorySearchDeps(...) or "
-                "legacy exporter/chunker/store arguments."
+                "legacy chunker/store arguments."
             )
         return MemorySearchDeps(exporter=exporter, chunker=chunker, store=store)
+
+    @staticmethod
+    def _resolve_source_root(
+        *,
+        source_root: Path | None,
+        episodes_root: Path | None,
+        daily_dir: Path | None,
+    ) -> Path:
+        if source_root is not None:
+            return source_root
+        if episodes_root is not None:
+            return episodes_root.parent
+        if daily_dir is not None:
+            return daily_dir
+        raise ValueError("MemorySearch requires source_root, episodes_root, or daily_dir.")
 
     async def initialize(self) -> None:
         """Initialize the vector store."""
@@ -100,7 +126,10 @@ class MemorySearch:
         logger.info("MemorySearch initialized")
 
     async def index_date(self, target_date: date) -> int:
-        """Export and index a single date. Returns number of chunks indexed."""
+        """Legacy: export and index a single date. Returns chunks indexed."""
+        if self._exporter is None or self._daily_dir is None:
+            logger.warning("index_date skipped: legacy exporter/daily_dir not configured")
+            return 0
         self._exporter.export_date(target_date)
 
         md_path = self._daily_dir / f"{target_date.isoformat()}.md"
@@ -110,7 +139,10 @@ class MemorySearch:
         return await self._index_file(md_path)
 
     async def index_range(self, start: date, end: date) -> int:
-        """Export and index a date range. Returns total chunks indexed."""
+        """Legacy: export and index a date range. Returns total chunks indexed."""
+        if self._exporter is None or self._daily_dir is None:
+            logger.warning("index_range skipped: legacy exporter/daily_dir not configured")
+            return 0
         self._exporter.export_range(start, end)
 
         total = 0
@@ -150,18 +182,55 @@ class MemorySearch:
         return self._slice_results(results, top_k=top_k, min_score=min_score)
 
     async def export_and_index_yesterday(self) -> int:
-        """Convenience: export yesterday's log and index it."""
+        """Legacy convenience: export yesterday's log and index it."""
         from datetime import timedelta
 
         yesterday = date.today() - timedelta(days=1)
         return await self.index_date(yesterday)
 
-    async def backfill(self) -> int:
-        """Export and index all un-exported JSONL log files.
+    async def index_episode(self, episode_path: Path) -> int:
+        """Index one episode markdown file."""
+        if not episode_path.exists():
+            return 0
+        return await self._index_file(episode_path)
 
-        Called on startup to cover days when the server was not running at midnight.
-        Compares exported markdown files against indexed chunk IDs to find gaps.
-        """
+    async def index_paths(self, paths: list[Path]) -> int:
+        """Index a list of markdown paths (best-effort)."""
+        total = 0
+        for path in paths:
+            if not path.exists():
+                continue
+            total += await self._index_file(path)
+        return total
+
+    async def backfill(self) -> int:
+        """Backfill missing indexes from primary source (episodes by default)."""
+        if self._episodes_root is not None:
+            return await self._backfill_episodes()
+        return await self._backfill_daily()
+
+    async def _backfill_episodes(self) -> int:
+        """Index all episode markdown files that are missing or out-of-date."""
+        if not self._episodes_root.exists():
+            return 0
+
+        indexed_sources = await self._store.get_indexed_sources()
+        total = 0
+        episode_repository = EpisodeRepository(self._source_root)
+        for md_path in episode_repository.collect_episode_paths():
+            source_name = self._source_for_path(md_path)
+            if not await self._needs_reindex(source_name, indexed_sources=indexed_sources):
+                continue
+            total += await self._index_file(md_path)
+
+        if total:
+            logger.info(f"Episode backfill completed: indexed {total} chunks")
+        return total
+
+    async def _backfill_daily(self) -> int:
+        """Legacy: export and index un-exported daily JSONL log files."""
+        if self._exporter is None or self._daily_dir is None:
+            return 0
         log_dir = self._resolve_log_dir()
         if not log_dir.exists():
             return 0
@@ -210,9 +279,16 @@ class MemorySearch:
 
         logger.warning(
             "MemorySearch.log_dir not configured and exporter has no _log.data_dir; "
-            "falling back to daily_dir for backfill scan"
+            "falling back to source_root for backfill scan"
         )
-        return self._daily_dir
+        return self._source_root
+
+    def _source_for_path(self, md_path: Path) -> str:
+        """Build deterministic source id from markdown path."""
+        try:
+            return str(md_path.relative_to(self._source_root))
+        except ValueError:
+            return md_path.name
 
     def _candidate_fetch_k(self, top_k: int) -> int:
         return min(max(top_k * _FETCH_K_MULTIPLIER, top_k + _FETCH_K_BUFFER), _FETCH_K_CAP)
@@ -334,15 +410,16 @@ class MemorySearch:
                 "start_line": chunk.start_line,
                 "end_line": chunk.end_line,
                 "source_type": chunk.source_type,
+                "thread": _extract_thread_from_source(chunk.source),
             }
             for chunk, embedding in pairs
         ]
 
     async def _index_file(self, md_path: Path) -> int:
         """Index a single markdown file with incremental upsert."""
-        chunks = self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+        chunks = self._chunker.chunk_file(md_path, base_path=self._source_root)
         chunks = self._filter_indexable_chunks(chunks)
-        source = str(md_path.relative_to(self._daily_dir))
+        source = self._source_for_path(md_path)
         if not chunks:
             # Source now fully excluded (or empty): clear any previously indexed chunks
             # so backfill/index checks do not keep flagging this file for reindex.
@@ -390,7 +467,7 @@ class MemorySearch:
 
     async def _needs_reindex(self, source_name: str, *, indexed_sources: set[str]) -> bool:
         """Whether a source needs (re)indexing based on current chunk IDs."""
-        md_path = self._daily_dir / source_name
+        md_path = self._source_root / source_name
         if source_name not in indexed_sources:
             return True
         if not md_path.exists():
@@ -398,7 +475,7 @@ class MemorySearch:
 
         expected = {
             self._chunk_id(c)
-            for c in self._chunker.chunk_file(md_path, base_path=self._daily_dir)
+            for c in self._chunker.chunk_file(md_path, base_path=self._source_root)
             if _extract_channel_from_heading(c.heading) not in self._exclude_channels
         }
         existing = await self._store.get_chunk_ids_by_source(source_name)
@@ -509,3 +586,20 @@ def _count_literal_hits(text: str, terms: list[str]) -> int:
         if t in raw or t in normalized:
             hits += 1
     return hits
+
+
+def _extract_thread_from_source(source: str) -> str:
+    """Infer thread slug from source path when source is an episode markdown."""
+    parts = [part for part in source.split("/") if part]
+    if not parts:
+        return ""
+
+    if "threads" in parts:
+        idx = parts.index("threads")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+
+    if len(parts) >= 3 and parts[1] == "episodes":
+        return parts[0]
+
+    return ""

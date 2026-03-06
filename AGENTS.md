@@ -5,6 +5,19 @@
 `tests/` mirrors package layout (`tests/core/`, `tests/capabilities/tools/`, etc.).  
 Keep source and tests in matching paths.
 
+## Architecture North Star
+- Treat HaL as a stateful collaboration kernel, not a chatbot with more history.
+- Filesystem state is the durable source of truth; append-only events are evidence; context is a compiled working set.
+- Keep semantic layers separate from mechanisms:
+  `Thread`, `Episode`, `Memory`, `Skill`, and `Artifact` are domain objects; event bus / loop / hooks are runtime mechanisms; providers / channels / Milvus are infra.
+- Prefer stable working-set layers over repeated dynamic reinjection:
+  stable prefix -> session baseline -> frozen checkpoints -> live tail.
+- `Thread` and `Skill` may share loading infrastructure, but they are not the same semantic type.
+- Prefer explicit workspace/repository abstractions over ad hoc `Path` reads and writes inside engine logic when refactoring persistent state flows.
+- When changing context or workspace architecture, align with docs/design/architecture-v3.md.
+- For long-running architecture batches, also align with docs/design/architecture-v3-execution.md as the execution anchor.
+- After each architecture commit batch, re-read both design docs above before continuing implementation.
+
 ## Build, Test, and Development Commands
 - `pip install -e ".[dev]"`: editable install with test/lint dependencies.
 - `pytest tests/`: run the full test suite.

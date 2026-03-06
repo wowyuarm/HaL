@@ -10,7 +10,12 @@ from typing import Any, Awaitable, Protocol
 from loguru import logger
 
 from hal.capabilities.tools.registry import ToolRegistry
-from hal.core.message_payloads import build_assistant_message_payload
+from hal.core.context.messages import (
+    add_assistant_message as append_assistant_message,
+)
+from hal.core.context.messages import (
+    add_tool_result as append_tool_result,
+)
 from hal.core.ports import ChatProviderPort
 
 # Injected when the LLM returns an empty response (no tool calls, no text).
@@ -289,14 +294,12 @@ def _append_assistant_tool_call_message(
             reasoning_content=response.reasoning_content,
         )
 
-    messages.append(
-        build_assistant_message_payload(
-            content=response.content,
-            tool_calls=tool_call_dicts,
-            reasoning_content=response.reasoning_content,
-        )
+    return append_assistant_message(
+        messages,
+        response.content,
+        tool_call_dicts,
+        reasoning_content=response.reasoning_content,
     )
-    return messages
 
 
 def _append_tool_result_message(
@@ -311,15 +314,7 @@ def _append_tool_result_message(
     if add_tool_result:
         return add_tool_result(messages, tool_id, tool_name, result)
 
-    messages.append(
-        {
-            "role": "tool",
-            "tool_call_id": tool_id,
-            "name": tool_name,
-            "content": result,
-        }
-    )
-    return messages
+    return append_tool_result(messages, tool_id, tool_name, result)
 
 
 def _append_non_empty(items: list[str], values: list[str], *, unique: bool = False) -> None:

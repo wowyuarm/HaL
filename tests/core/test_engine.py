@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from hal.bus.events import InboundMessage, OutboundMessage, SubagentCompleteEvent
 from hal.bus.queue import MessageBus
+from hal.core.context.messages import add_assistant_message, add_tool_result
 from hal.core.engine import (
     AgentEngine,
     LoopMetadata,
@@ -60,8 +62,14 @@ def engine(bus, mock_provider, workspace):
         builder_instance.build_messages.return_value = [
             {"role": "system", "content": "You are a test agent."},
         ]
-        builder_instance.add_assistant_message.side_effect = lambda msgs, content, tc, **kw: msgs
-        builder_instance.add_tool_result.side_effect = lambda msgs, tid, name, result: msgs
+        builder_instance.build_system_prompt.return_value = "You are a test agent."
+        builder_instance.build_dynamic_context_block.return_value = "<context>ctx</context>"
+        builder_instance.build_session_baseline_message.side_effect = (
+            lambda baseline: {"role": "user", "content": f"[Session Baseline Context]\n{baseline}"}
+        )
+        builder_instance.registry = MagicMock()
+        builder_instance.registry.thread_snapshot.return_value = []
+        builder_instance.registry.skill_snapshot.return_value = []
 
         # MemoryManager stub
         mem_instance = mock_mem.return_value
@@ -252,6 +260,383 @@ class TestDispatch:
         assert out.content.startswith("Error calling LLM:")
         assert engine.memory.record_conversation.call_count == 1
 
+    def test_session_rotates_after_idle_timeout(self, engine):
+        engine._engine_config.session_idle_timeout_s = 1.0
+        key = "telegram:c1"
+        first = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
+        first_id = first.session_id
+        first.last_activity_at -= timedelta(seconds=2)
+
+        second = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
+        assert second.session_id != first_id
+        assert engine.memory.record_event.call_count >= 3
+
+    async def test_process_uses_in_memory_session_history(self, engine):
+        engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
+            lambda *, history, current_message, **kwargs: [
+                {"role": "system", "content": "sys"},
+                *history,
+                {"role": "user", "content": current_message},
+            ]
+        )
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                ("reply-1", LoopMetadata(), []),
+                ("reply-2", LoopMetadata(), []),
+            ]
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        await engine.process(msg)
+        await engine.process(msg)
+
+        second_turn_messages = engine._execute_loop.await_args_list[1].args[0]
+        assert any(
+            m.get("role") == "assistant" and m.get("content") == "reply-1"
+            for m in second_turn_messages
+        )
+        engine.memory.get_conversation_history.assert_not_called()
+
+    async def test_session_baseline_compiled_once_and_reused(self, engine):
+        engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
+            lambda *, history, current_message, session_baseline=None, **kwargs: [
+                {"role": "system", "content": "sys"},
+                *(
+                    [{"role": "user", "content": f"[Session Baseline Context]\n{session_baseline}"}]
+                    if session_baseline
+                    else []
+                ),
+                *history,
+                {"role": "user", "content": current_message},
+            ]
+        )
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                ("reply-1", LoopMetadata(), []),
+                ("reply-2", LoopMetadata(), []),
+            ]
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        await engine.process(msg)
+        await engine.process(msg)
+
+        assert engine.context.build_dynamic_context_block.call_count == 1
+        second_turn_messages = engine._execute_loop.await_args_list[1].args[0]
+        baseline_messages = [
+            m
+            for m in second_turn_messages
+            if str(m.get("content", "")).startswith("[Session Baseline Context]")
+        ]
+        assert len(baseline_messages) == 1
+
+    async def test_debrief_confirm_message_short_circuits_loop(self, engine):
+        state = engine._ensure_session_state(
+            session_key="telegram:c1",
+            channel="telegram",
+            chat_id="c1",
+        )
+        state.awaiting_debrief_confirmation = True
+        engine._start_session_debrief = AsyncMock()  # type: ignore[method-assign]
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="confirm")
+        out = await engine.process(msg)
+
+        assert out is not None
+        assert out.metadata.get("kind") == "session_debrief_start"
+        engine._start_session_debrief.assert_awaited_once_with("telegram:c1", reason="user_confirm")
+        engine.memory.record_conversation.assert_not_called()
+
+    async def test_session_debrief_indexes_written_episodes(self, engine):
+        session_key = "telegram:c1"
+        state = engine._ensure_session_state(
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+        )
+        state.touched_threads = {"github-actions"}
+        engine.memory.event_log.read_session.return_value = []
+        engine.provider.chat = AsyncMock(  # type: ignore[method-assign]
+            return_value=LLMResponse(
+                content=(
+                    "# 2026-03-06: Workflow update\n\n"
+                    "Threads: [github-actions]\n"
+                    "Primary: github-actions\n"
+                    "Session: s_test\n\n"
+                    "## What Happened\n- Updated workflow draft.\n\n"
+                    "## Decisions\n- none\n\n"
+                    "## Artifacts\n- none\n\n"
+                    "## Open\n- [ ] Verify in CI.\n\n"
+                    "## Source Events\n- s_test\n"
+                ),
+                tool_calls=[],
+            )
+        )
+        engine._memory_search = MagicMock()  # type: ignore[assignment]
+        engine._memory_search.index_paths = AsyncMock(return_value=2)
+
+        thread_dir = engine.workspace / "threads" / "github-actions"
+        thread_dir.mkdir(parents=True, exist_ok=True)
+        (thread_dir / "STATE.md").write_text(
+            "# GitHub Actions\n\nStatus: active\n\n## Current State\n- draft\n",
+            encoding="utf-8",
+        )
+
+        await engine._run_session_debrief(session_key)
+
+        engine._memory_search.index_paths.assert_awaited_once()
+        payload = engine.memory.record_event.call_args.kwargs["payload"]
+        assert payload["episode_count"] == 1
+        assert payload["indexed_chunks"] == 2
+        updated_state = (thread_dir / "STATE.md").read_text(encoding="utf-8")
+        assert "### 2026-03-06: Workflow update" in updated_state
+        assert "- Updated workflow draft." in updated_state
+        assert "## Open Items" in updated_state
+        assert "- [ ] Verify in CI." in updated_state
+
+    async def test_session_debrief_expands_related_threads_with_priority_order(self, engine):
+        session_key = "telegram:c1"
+        state = engine._ensure_session_state(
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+        )
+        state.touched_threads = {"github-actions"}
+        engine.memory.event_log.read_session.return_value = []
+        engine.context_registry.expand_related_thread_slugs.return_value = {  # type: ignore[method-assign]
+            "github-actions",
+            "hal-architecture",
+        }
+        engine.context_registry.thread_snapshot.return_value = [  # type: ignore[method-assign]
+            {"slug": "github-actions", "priority": 200},
+            {"slug": "hal-architecture", "priority": 320},
+        ]
+        engine._memory_search = None  # type: ignore[assignment]
+
+        for slug in ("github-actions", "hal-architecture"):
+            thread_dir = engine.workspace / "threads" / slug
+            thread_dir.mkdir(parents=True, exist_ok=True)
+            (thread_dir / "STATE.md").write_text(
+                f"# {slug}\n\nStatus: active\n\n## Current State\n- draft\n",
+                encoding="utf-8",
+            )
+
+        async def _fake_episode_markdown(*_args, **kwargs):
+            slug = kwargs["thread_slug"]
+            return (
+                f"# 2026-03-06: Update {slug}\n\n"
+                f"Threads: [{slug}]\n"
+                f"Primary: {slug}\n"
+                "Session: s_test\n\n"
+                "## What Happened\n- Updated draft.\n\n"
+                "## Decisions\n- none\n\n"
+                "## Status\n- unchanged\n\n"
+                "## Artifacts\n- none\n\n"
+                "## Open\n- [ ] Verify in CI.\n\n"
+                "## Source Events\n- s_test\n"
+            )
+
+        with patch(
+            "hal.core.runtime.debrief_flow.generate_episode_markdown",
+            new=AsyncMock(side_effect=_fake_episode_markdown),
+        ) as mock_generate:
+            await engine._run_session_debrief(session_key)
+
+        assert [call.kwargs["thread_slug"] for call in mock_generate.await_args_list] == [
+            "hal-architecture",
+            "github-actions",
+        ]
+        payload = engine.memory.record_event.call_args.kwargs["payload"]
+        assert payload["threads"] == ["hal-architecture", "github-actions"]
+
+
+class TestSessionCompaction:
+    async def test_compacts_history_when_token_budget_exceeded(self, engine):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        engine._engine_config.session_compaction_enabled = True
+        engine._engine_config.session_compaction_token_budget = 80
+        engine._engine_config.session_compaction_recent_user_turns = 1
+        engine._engine_config.session_compaction_checkpoint_tokens = 200
+
+        history = [
+            {"role": "user", "content": "old request " * 20},
+            {"role": "assistant", "content": "old answer " * 20},
+            {"role": "user", "content": "older request " * 20},
+            {"role": "assistant", "content": "older answer " * 20},
+            {"role": "user", "content": "latest request"},
+            {"role": "assistant", "content": "latest answer"},
+        ]
+
+        before_calls = engine.memory.record_event.call_count
+        compacted = await engine._maybe_compact_session_history(
+            session_key=session_key,
+            history=history,
+            token_model="test-model",
+        )
+
+        assert len(compacted) < len(history)
+        assert compacted[0]["role"] == "assistant"
+        assert "[Session Checkpoint]" in str(compacted[0]["content"])
+        assert any(m.get("content") == "latest request" for m in compacted)
+        new_calls = engine.memory.record_event.call_args_list[before_calls:]
+        assert any(c.kwargs.get("event_type") == "session_compacted" for c in new_calls)
+
+    async def test_skips_compaction_when_under_budget(self, engine):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        engine._engine_config.session_compaction_enabled = True
+        engine._engine_config.session_compaction_token_budget = 10000
+
+        history = [
+            {"role": "user", "content": "short"},
+            {"role": "assistant", "content": "ok"},
+        ]
+
+        before_calls = engine.memory.record_event.call_count
+        compacted = await engine._maybe_compact_session_history(
+            session_key=session_key,
+            history=history,
+            token_model="test-model",
+        )
+
+        assert compacted == history
+        new_calls = engine.memory.record_event.call_args_list[before_calls:]
+        assert not any(c.kwargs.get("event_type") == "session_compacted" for c in new_calls)
+
+    async def test_compaction_counts_tool_call_payloads_in_budget(self, engine):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        engine._engine_config.session_compaction_enabled = True
+        engine._engine_config.session_compaction_token_budget = 120
+        engine._engine_config.session_compaction_recent_user_turns = 1
+        engine._engine_config.session_compaction_checkpoint_tokens = 200
+
+        history = [
+            {"role": "user", "content": "look it up"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc_1",
+                        "type": "function",
+                        "function": {"name": "fs", "arguments": '{"path":"' + ("x" * 800) + '"}'},
+                    }
+                ],
+                "reasoning_content": "Need to inspect context before proceeding.",
+            },
+            {"role": "tool", "name": "fs", "content": "ok"},
+            {"role": "user", "content": "latest request"},
+            {"role": "assistant", "content": "latest answer"},
+        ]
+
+        compacted = await engine._maybe_compact_session_history(
+            session_key=session_key,
+            history=history,
+            token_model="test-model",
+        )
+
+        assert compacted[0]["role"] == "assistant"
+        assert "[Session Checkpoint]" in str(compacted[0]["content"])
+
+
+class TestThreadTouching:
+    def test_detect_thread_mentions_matches_slug_and_title(self, engine):
+        engine.context_registry.thread_snapshot.return_value = [  # type: ignore[method-assign]
+            {
+                "slug": "github-actions",
+                "name": "GitHub Actions",
+                "status": "active",
+                "description": "workflow work",
+                "state_path": "threads/github-actions/STATE.md",
+            }
+        ]
+
+        assert engine._detect_thread_mentions("Actions that one, continue it") == {"github-actions"}
+
+    async def test_active_baseline_threads_marked_touched_after_substantive_work(self, engine):
+        engine.context_registry.thread_snapshot.return_value = [  # type: ignore[method-assign]
+            {
+                "slug": "github-actions",
+                "name": "GitHub Actions",
+                "status": "active",
+                "description": "workflow work",
+                "state_path": "threads/github-actions/STATE.md",
+            }
+        ]
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("done", LoopMetadata(tools_used=["fs"]), [])
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="please continue")
+        await engine.process(msg)
+
+        state = engine._session_states[msg.session_key]
+        assert "github-actions" in state.touched_threads
+
+
+class TestBackgroundResume:
+    async def test_finalize_resumed_turn_updates_session_history_and_event(self, engine):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "[Session Baseline Context]\n<context>ctx</context>"},
+            {"role": "user", "content": "work on it"},
+            {"role": "assistant", "content": "done"},
+        ]
+
+        await engine._background_resume._finalize_resumed_turn(
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+            messages=messages,
+            final_content="background reply",
+            meta=LoopMetadata(),
+        )
+
+        history = engine._get_session_history(session_key)
+        assert all("[Session Baseline Context]" not in str(item.get("content", "")) for item in history)
+        assert history[-1]["content"] == "background reply"
+        event_types = [call.kwargs.get("event_type") for call in engine.memory.record_event.call_args_list]
+        assert "assistant" in event_types
+
+    def test_load_resume_context_falls_back_to_session_repository(self, engine):
+        session_key = "telegram:c1"
+        engine._background_resume.store_session_snapshot(
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+            messages=[{"role": "system", "content": "sys"}],
+            final_content="assistant reply",
+        )
+        engine._background_resume._session_snapshots.clear()
+        engine._background_resume._session_routes.clear()
+
+        loaded = engine._background_resume._load_resume_context(session_key)
+
+        assert loaded is not None
+        channel, chat_id, snapshot = loaded
+        assert channel == "telegram"
+        assert chat_id == "c1"
+        assert snapshot[-1]["content"] == "assistant reply"
+
+    def test_clear_session_snapshot_removes_cache_and_repository_copy(self, engine):
+        session_key = "telegram:c2"
+        engine._background_resume.store_session_snapshot(
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c2",
+            messages=[{"role": "user", "content": "hello"}],
+            final_content=None,
+        )
+
+        assert engine._background_resume._load_resume_context(session_key) is not None
+        engine._background_resume.clear_session_snapshot(session_key)
+        assert engine._background_resume._load_resume_context(session_key) is None
+
 
 class TestExecuteLoop:
     async def test_tool_calls_are_executed_and_tools_used_is_deduped(self, engine, mock_provider):
@@ -268,18 +653,24 @@ class TestExecuteLoop:
             LLMResponse(content="final", tool_calls=[]),
         ]
 
-        final, meta, injected = await engine._execute_loop(
-            messages=[{"role": "system", "content": "x"}],
-            max_iterations=3,
-        )
+        with (
+            patch("hal.core.engine.add_assistant_message", wraps=add_assistant_message)
+            as add_assistant,
+            patch("hal.core.engine.add_tool_result", wraps=add_tool_result) as add_tool,
+        ):
+            final, meta, injected = await engine._execute_loop(
+                messages=[{"role": "system", "content": "x"}],
+                max_iterations=3,
+            )
+
+            assert add_assistant.call_count == 1
+            assert add_tool.call_count == 3
 
         assert final == "final"
         assert meta.tools_used == ["web_search", "fs"]
         assert meta.iterations == 2
         assert injected == []
         assert engine.tools.execute.await_count == 3
-        engine.context.add_assistant_message.assert_called_once()
-        assert engine.context.add_tool_result.call_count == 3
 
     async def test_nudge_on_empty_response_after_tool_calls(self, engine, mock_provider):
         """When LLM returns empty content after tool work, the loop injects a nudge and retries."""
@@ -351,6 +742,109 @@ class TestExecuteLoop:
         assert final is None
         assert meta.iterations == 2
         assert mock_provider.chat.await_count == 2
+
+    async def test_context_advisor_injects_hint_on_next_round(self, engine, mock_provider):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        engine.context_registry.skill_snapshot.return_value = [
+            {"kind": "skill", "key": "git-ops", "name": "git-ops", "description": "git ops", "available": True}
+        ]
+        engine.context_registry.thread_snapshot.return_value = [
+            {
+                "slug": "github-actions",
+                "name": "GitHub Actions",
+                "status": "active",
+                "description": "workflow",
+                "state_path": "threads/github-actions/STATE.md",
+            }
+        ]
+
+        worker_provider = MagicMock()
+        worker_provider.chat = AsyncMock(
+            return_value=LLMResponse(
+                content='{"skills":["git-ops"],"threads":["github-actions"],"reason":"match"}',
+                tool_calls=[],
+                finish_reason="stop",
+            )
+        )
+        engine.subagents.provider = worker_provider
+        engine.subagents.model = "worker-model"
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        mock_provider.chat.side_effect = [
+            LLMResponse(
+                content="calling tools",
+                tool_calls=[ToolCallRequest(id="t1", name="fs", arguments={"action": "read"})],
+            ),
+            LLMResponse(content="final answer", tool_calls=[]),
+        ]
+
+        final, meta, _ = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}, {"role": "user", "content": "do task"}],
+            max_iterations=5,
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+        )
+
+        assert final == "final answer"
+        assert meta.iterations == 2
+        second_call_messages = mock_provider.chat.await_args_list[1].kwargs["messages"]
+        assert any(
+            m.get("role") == "user" and "[Context Hint]" in m.get("content", "")
+            for m in second_call_messages
+        )
+        assert worker_provider.chat.await_count == 1
+
+    async def test_context_advisor_runs_once_per_session(self, engine, mock_provider):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        engine.context_registry.skill_snapshot.return_value = [
+            {"kind": "skill", "key": "git-ops", "name": "git-ops", "description": "git ops", "available": True}
+        ]
+        engine.context_registry.thread_snapshot.return_value = []
+
+        worker_provider = MagicMock()
+        worker_provider.chat = AsyncMock(
+            return_value=LLMResponse(
+                content='{"skills":["git-ops"],"threads":[],"reason":"match"}',
+                tool_calls=[],
+                finish_reason="stop",
+            )
+        )
+        engine.subagents.provider = worker_provider
+        engine.subagents.model = "worker-model"
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        mock_provider.chat.side_effect = [
+            LLMResponse(
+                content="call",
+                tool_calls=[ToolCallRequest(id="a1", name="fs", arguments={"action": "read"})],
+            ),
+            LLMResponse(content="done", tool_calls=[]),
+            LLMResponse(
+                content="call2",
+                tool_calls=[ToolCallRequest(id="a2", name="fs", arguments={"action": "read"})],
+            ),
+            LLMResponse(content="done2", tool_calls=[]),
+        ]
+
+        await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}, {"role": "user", "content": "first"}],
+            max_iterations=5,
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+        )
+        await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}, {"role": "user", "content": "second"}],
+            max_iterations=5,
+            session_key=session_key,
+            channel="telegram",
+            chat_id="c1",
+        )
+
+        assert worker_provider.chat.await_count == 1
 
     async def test_retryable_llm_error_retries_and_recovers(self, engine, mock_provider):
         mock_provider.chat.side_effect = [

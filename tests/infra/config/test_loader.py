@@ -172,6 +172,14 @@ def test_defaults_match_original_hardcoded_values() -> None:
 
     # Engine
     assert cfg.engine.inbound_poll_timeout_s == 1.0
+    assert cfg.engine.session_idle_timeout_s == 300.0
+    assert cfg.engine.session_compaction_enabled is True
+    assert cfg.engine.session_compaction_token_budget == 150000
+    assert cfg.engine.session_compaction_recent_user_turns == 2
+    assert cfg.engine.session_compaction_checkpoint_tokens == 1800
+    assert cfg.engine.session_debrief_enabled is True
+    assert cfg.engine.session_debrief_confirm_timeout_s == 120.0
+    assert cfg.engine.context_advisor_enabled is True
     assert cfg.engine.summary_barrier_timeout_s == 10.0
     assert cfg.engine.llm_retry_attempts == 3
     assert cfg.engine.llm_retry_base_delay_s == 0.8
@@ -198,3 +206,10 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.channels.outbound_poll_timeout_s == 1.0
     assert cfg.channels.telegram.send_progress is True
     assert cfg.channels.telegram.send_tool_hints is True
+
+    # History / context
+    assert cfg.agents.defaults.history.max_thread_registry_size == 20
+    assert cfg.agents.defaults.history.baseline_max_active_threads == 3
+    assert cfg.agents.defaults.history.baseline_active_threads_max_total_tokens == 4000
+    assert cfg.agents.defaults.history.baseline_active_thread_max_tokens == 1200
+    assert cfg.agents.defaults.history.related_thread_hops == 1

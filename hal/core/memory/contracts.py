@@ -40,11 +40,10 @@ class MemoryStorePort(Protocol):
 class MemorySearchDeps:
     """Dependency bundle for memory-search orchestration."""
 
-    exporter: MemoryExporterPort
+    exporter: MemoryExporterPort | None
     chunker: MemoryChunkerPort
     store: MemoryStorePort
 
 
 class MemorySearchPort(Protocol):
     async def search(self, query: str, top_k: int = 3) -> list[SearchResult]: ...
-

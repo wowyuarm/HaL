@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from hal.core.context.token_budget import estimate_content_tokens, trim_text_to_token_budget
+from hal.workspace.jsonl import append_jsonl_line, read_jsonl_lines
 
 _RESET_MARKER_ROLE = "system"
 _RESET_MARKER_CONTENT = "conversation_reset"
@@ -119,8 +120,7 @@ class DailyLog:
         )
 
         log_file = self._get_today_file()
-        with log_file.open("a", encoding="utf-8") as f:
-            f.write(entry.model_dump_json() + "\n")
+        append_jsonl_line(log_file, entry.model_dump_json())
 
         return entry
 
@@ -409,15 +409,12 @@ class DailyLog:
         """Read all entries from a JSONL file."""
         entries = []
         try:
-            with file_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            entry = LogEntry.model_validate_json(line)
-                            entries.append(entry)
-                        except Exception as e:
-                            logger.warning(f"Failed to parse log entry: {e}")
+            for line in read_jsonl_lines(file_path):
+                try:
+                    entry = LogEntry.model_validate_json(line)
+                    entries.append(entry)
+                except Exception as e:
+                    logger.warning(f"Failed to parse log entry: {e}")
         except Exception as e:
             logger.warning(f"Failed to read log file {file_path}: {e}")
 

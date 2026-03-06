@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from hal.core.context.builder import ContextBuilder
+from hal.core.context.messages import add_assistant_message, add_tool_result
+from hal.core.context.session_messages import is_session_baseline_content
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -72,7 +74,8 @@ class TestInit:
 class TestBootstrapFiles:
     def test_loads_existing_bootstrap_files(self, workspace: Path) -> None:
         (workspace / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
-        (workspace / "USER.md").write_text("User profile.", encoding="utf-8")
+        (workspace / "INSTRUCTIONS.md").write_text("Follow the house rules.", encoding="utf-8")
+        (workspace / "USER.md").write_text("legacy user profile", encoding="utf-8")
         (workspace / "IDENTITY.md").write_text("IDENTITY-OVERRIDE-MARKER", encoding="utf-8")
 
         with patch("hal.core.context.builder.SkillsLoader") as cls:
@@ -84,13 +87,32 @@ class TestBootstrapFiles:
 
         prompt = cc.build_system_prompt()
         assert "Be helpful." in prompt
-        assert "User profile." in prompt
+        assert "Follow the house rules." in prompt
+        assert "legacy user profile" not in prompt
         assert "IDENTITY-OVERRIDE-MARKER" not in prompt
 
     def test_ignores_missing_bootstrap_files(self, builder: ContextBuilder) -> None:
         # No bootstrap files on disk — should not raise
         prompt = builder.build_system_prompt()
         assert "HaL" in prompt
+
+    def test_loads_legacy_bootstrap_when_instructions_missing(self, workspace: Path) -> None:
+        (workspace / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
+        (workspace / "USER.md").write_text("Legacy user profile.", encoding="utf-8")
+        (workspace / "AGENTS.md").write_text("Legacy procedures.", encoding="utf-8")
+        (workspace / "TOOLS.md").write_text("Legacy tool guide.", encoding="utf-8")
+
+        with patch("hal.core.context.builder.SkillsLoader") as cls:
+            cls.return_value = MagicMock(
+                get_always_skills=MagicMock(return_value=[]),
+                build_skills_summary=MagicMock(return_value=""),
+            )
+            cc = ContextBuilder(workspace)
+
+        prompt = cc.build_system_prompt()
+        assert "Legacy user profile." in prompt
+        assert "Legacy procedures." in prompt
+        assert "Legacy tool guide." in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +184,26 @@ class TestBuildSystemPrompt:
         prompt = cc.build_system_prompt()
         # Identity, bootstrap, and memory layers should be separated by ---
         assert "\n\n---\n\n" in prompt
+
+    def test_includes_thread_registry_summary(self, workspace: Path) -> None:
+        threads = workspace / "threads" / "github-actions"
+        threads.mkdir(parents=True)
+        (threads / "STATE.md").write_text(
+            "# GitHub Actions\nStatus: active\n\n## Goal\nShip AI workflow.",
+            encoding="utf-8",
+        )
+
+        with patch("hal.core.context.builder.SkillsLoader") as cls:
+            cls.return_value = MagicMock(
+                get_always_skills=MagicMock(return_value=[]),
+                build_skills_summary=MagicMock(return_value=""),
+            )
+            cc = ContextBuilder(workspace)
+
+        prompt = cc.build_system_prompt()
+        assert "# Threads" in prompt
+        assert "GitHub Actions [active]" in prompt
+        assert "threads/github-actions/STATE.md" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +289,18 @@ class TestBuildMessages:
         msgs = builder.build_messages([], "Hello", media=[str(txt)])
         assert "Hello" in msgs[-1]["content"]
 
+    def test_session_baseline_inserted_once_before_history(self, builder: ContextBuilder) -> None:
+        msgs = builder.build_messages(
+            [{"role": "assistant", "content": "older"}],
+            "current",
+            session_baseline="<context><channel>telegram</channel></context>",
+            prepend_dynamic_context_to_current=False,
+        )
+        assert msgs[1]["role"] == "user"
+        assert is_session_baseline_content(msgs[1]["content"])
+        assert msgs[2]["content"] == "older"
+        assert msgs[-1]["content"] == "current"
+
 
 # ---------------------------------------------------------------------------
 # Message helpers
@@ -256,7 +310,7 @@ class TestBuildMessages:
 class TestMessageHelpers:
     def test_add_tool_result(self, builder: ContextBuilder) -> None:
         msgs: list[dict[str, Any]] = []
-        result = builder.add_tool_result(msgs, "call_1", "read_file", "file content")
+        result = add_tool_result(msgs, "call_1", "read_file", "file content")
         assert result is msgs
         assert len(msgs) == 1
         tool_msg = msgs[0]
@@ -267,7 +321,7 @@ class TestMessageHelpers:
 
     def test_add_assistant_message_text_only(self, builder: ContextBuilder) -> None:
         msgs: list[dict[str, Any]] = []
-        result = builder.add_assistant_message(msgs, "Sure, here you go.")
+        result = add_assistant_message(msgs, "Sure, here you go.")
         assert result is msgs
         assert msgs[0]["role"] == "assistant"
         assert msgs[0]["content"] == "Sure, here you go."
@@ -276,13 +330,13 @@ class TestMessageHelpers:
     def test_add_assistant_message_with_tool_calls(self, builder: ContextBuilder) -> None:
         msgs: list[dict[str, Any]] = []
         tool_calls = [{"id": "tc_1", "type": "function", "function": {"name": "ls"}}]
-        builder.add_assistant_message(msgs, None, tool_calls=tool_calls)
+        add_assistant_message(msgs, None, tool_calls=tool_calls)
         assert msgs[0]["content"] == ""
         assert msgs[0]["tool_calls"] == tool_calls
 
     def test_add_assistant_message_none_content(self, builder: ContextBuilder) -> None:
         msgs: list[dict[str, Any]] = []
-        builder.add_assistant_message(msgs, None)
+        add_assistant_message(msgs, None)
         assert msgs[0]["content"] == ""
 
 
@@ -371,3 +425,69 @@ class TestDynamicContext:
         assert len(text_parts) == 1
         assert "<context>" in text_parts[0]["text"]
         assert "<channel>telegram</channel>" in text_parts[0]["text"]
+
+    def test_active_thread_state_injected_into_dynamic_context(self, workspace: Path) -> None:
+        threads = workspace / "threads" / "hal-architecture"
+        threads.mkdir(parents=True)
+        (threads / "STATE.md").write_text(
+            "# HaL Architecture\nStatus: active\n\n## Current State\nRefactoring context model.",
+            encoding="utf-8",
+        )
+
+        with patch("hal.core.context.builder.SkillsLoader") as cls:
+            cls.return_value = MagicMock(
+                get_always_skills=MagicMock(return_value=[]),
+                build_skills_summary=MagicMock(return_value=""),
+            )
+            cc = ContextBuilder(workspace)
+
+        msgs = cc.build_messages([], "continue")
+        user_content = msgs[-1]["content"]
+        assert "<active_threads>" in user_content
+        assert "Refactoring context model." in user_content
+        assert 'state_path="threads/hal-architecture/STATE.md"' in user_content
+
+    def test_inactive_thread_state_not_auto_injected(self, workspace: Path) -> None:
+        threads = workspace / "threads" / "paused-thread"
+        threads.mkdir(parents=True)
+        (threads / "STATE.md").write_text(
+            "# Paused Work\nStatus: inactive\n\n## Current State\nDo not auto-load.",
+            encoding="utf-8",
+        )
+
+        with patch("hal.core.context.builder.SkillsLoader") as cls:
+            cls.return_value = MagicMock(
+                get_always_skills=MagicMock(return_value=[]),
+                build_skills_summary=MagicMock(return_value=""),
+            )
+            cc = ContextBuilder(workspace)
+
+        msgs = cc.build_messages([], "continue")
+        user_content = msgs[-1]["content"]
+        assert "<active_threads>" not in user_content
+
+    def test_thread_registry_respects_max_size(self, workspace: Path) -> None:
+        active = workspace / "threads" / "active-thread"
+        active.mkdir(parents=True)
+        (active / "STATE.md").write_text(
+            "# Active\nStatus: active\n\n## Goal\nPriority first.",
+            encoding="utf-8",
+        )
+
+        inactive = workspace / "threads" / "inactive-thread"
+        inactive.mkdir(parents=True)
+        (inactive / "STATE.md").write_text(
+            "# Inactive\nStatus: inactive\n\n## Goal\nSecondary.",
+            encoding="utf-8",
+        )
+
+        with patch("hal.core.context.builder.SkillsLoader") as cls:
+            cls.return_value = MagicMock(
+                get_always_skills=MagicMock(return_value=[]),
+                build_skills_summary=MagicMock(return_value=""),
+            )
+            cc = ContextBuilder(workspace, max_thread_registry_size=1)
+
+        prompt = cc.build_system_prompt()
+        assert "Active [active]" in prompt
+        assert "Inactive [inactive]" not in prompt

@@ -9,14 +9,17 @@ from typing import Any
 from loguru import logger
 
 from hal.bus.events import OutboundMessage
+from hal.core.context.compiler import SessionTurnRequest
+from hal.core.context.history import build_persisted_session_history
 from hal.core.context.metrics import (
     USAGE_SOURCE_NONE,
     USAGE_SOURCE_PROVIDER,
     ContextMetrics,
 )
 from hal.core.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
+from hal.core.message_payloads import estimate_content_chars
 
-from .inspect import _content_char_len
+from .debrief import is_debrief_confirm_message
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
 _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
@@ -35,63 +38,6 @@ async def _await_summary_barrier(*, engine: Any, msg: Any) -> None:
         await asyncio.wait_for(task, timeout=engine._engine_config.summary_barrier_timeout_s)
     except (asyncio.TimeoutError, Exception) as e:
         logger.warning(f"Summary barrier: {e}")
-
-
-def _load_conversation_history(
-    *, engine: Any, msg: Any, resolved_model: str
-) -> list[dict[str, object]]:
-    """Load bounded conversation history for prompt assembly."""
-    hc = engine._history_config
-    return engine.memory.get_conversation_history(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        max_messages=hc.max_messages,
-        include_tools=False,
-        recent_full_turns=hc.recent_full_turns,
-        assistant_truncate_tokens=hc.assistant_truncate_tokens,
-        max_tokens=hc.max_history_tokens,
-        history_days=hc.history_days,
-        token_model=resolved_model,
-    )
-
-
-async def _prefetch_memory_results(*, engine: Any, msg: Any) -> list[object]:
-    """Best-effort memory-search prefetch for auto-injection."""
-    if not engine._memory_search:
-        return []
-    try:
-        return await engine._memory_search.search(
-            msg.content,
-            top_k=engine._auto_inject_top_k,
-            min_score=engine._recall_min_score,
-        )
-    except Exception as e:
-        logger.warning(f"Memory search prefetch failed: {e}")
-        return []
-
-
-def _build_context_messages(
-    *,
-    engine: Any,
-    msg: Any,
-    history: list[dict[str, object]],
-    search_results: list[object],
-    resolved_model: str,
-) -> list[dict[str, object]]:
-    """Build final message list for the LLM loop."""
-    hc = engine._history_config
-    return engine.context.build_messages(
-        history=history,
-        current_message=msg.content,
-        media=msg.media if msg.media else None,
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        memory_search_results=search_results or None,
-        memory_budget_tokens=(hc.memory_budget_tokens or None),
-        recall_max_total_tokens=hc.recall_max_total_tokens,
-        recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-        token_model=resolved_model,
-    )
 
 
 def _compute_recall_chars(
@@ -122,18 +68,18 @@ def _build_pre_metrics(
     recall_chars: int,
 ) -> ContextMetrics:
     """Build context metrics snapshot captured before tool-loop execution."""
-    history_chars = sum(_content_char_len(item.get("content", "")) for item in history)
+    history_chars = sum(estimate_content_chars(item.get("content", "")) for item in history)
     recall_max_score = max(
         (float(getattr(result, "score", 0.0)) for result in search_results),
         default=0.0,
     )
-    total_input_chars = sum(_content_char_len(item.get("content", "")) for item in messages)
+    total_input_chars = sum(estimate_content_chars(item.get("content", "")) for item in messages)
     return ContextMetrics(
         timestamp=datetime.now().isoformat(),
         channel=msg.channel,
         chat_id=msg.chat_id,
         mode=mode,
-        system_prompt_chars=_content_char_len(messages[0].get("content", "")) if messages else 0,
+        system_prompt_chars=estimate_content_chars(messages[0].get("content", "")) if messages else 0,
         history_message_count=len(history),
         history_chars=history_chars,
         recall_count=len(search_results),
@@ -205,33 +151,161 @@ def build_direct_inbound_message(*, channel: str, chat_id: str, content: str) ->
     return InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
 
 
-async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage | None:
-    """Process a user message end-to-end."""
-    await _await_summary_barrier(engine=engine, msg=msg)
+async def _maybe_handle_debrief_confirmation(*, engine: Any, msg: Any, session_state: Any) -> OutboundMessage | None:
+    """Handle pending debrief confirmation before treating the inbound as normal work."""
+    if not session_state.awaiting_debrief_confirmation:
+        return None
+    if is_debrief_confirm_message(msg.content):
+        await engine._start_session_debrief(msg.session_key, reason="user_confirm")
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="Confirmed. Starting session debrief now.",
+            metadata={"system_meta": True, "kind": "session_debrief_start"},
+        )
+    engine._cancel_debrief_confirmation(msg.session_key, reason="user_continued")
+    return None
 
+
+def _record_user_turn(*, engine: Any, msg: Any, session_id: str) -> None:
+    """Persist the inbound user turn and refresh tool context bindings."""
     preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
     logger.info(f"[engine] {msg.channel}:{msg.sender_id}: {preview}")
-
+    engine.memory.record_event(
+        session_id=session_id,
+        event_type="user_message",
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        payload={"content": msg.content, "media": list(msg.media or [])},
+    )
     engine.memory.record_conversation(
         channel=msg.channel,
         chat_id=msg.chat_id,
         role="user",
         content=msg.content,
     )
-
+    engine._mark_threads_touched(msg.session_key, engine._detect_thread_mentions(msg.content))
     engine._update_tool_contexts(msg.channel, msg.chat_id)
+
+
+def _apply_compiled_turn_context(*, engine: Any, msg: Any, compiled: Any) -> None:
+    """Apply recalled/baseline thread state discovered during session-turn compilation."""
+    if compiled.recalled_thread_slugs:
+        engine._mark_threads_touched(msg.session_key, compiled.recalled_thread_slugs)
+    if compiled.baseline_created:
+        engine._set_session_baseline(
+            msg.session_key,
+            baseline_context=compiled.session_baseline,
+            thread_slugs=compiled.baseline_thread_slugs,
+        )
+
+
+async def _persist_completed_turn(
+    *,
+    engine: Any,
+    msg: Any,
+    session_state: Any,
+    messages: list[dict[str, object]],
+    final_content: str,
+    meta: Any,
+    resolved_model: str,
+) -> bool:
+    """Persist session history, assistant output, snapshot, and follow-up summary task."""
+    record_assistant_history = _should_record_assistant_history(final_content)
+    if meta.tools_used:
+        engine._mark_threads_touched(
+            msg.session_key,
+            engine._get_session_baseline_threads(msg.session_key),
+        )
+
+    session_history = build_persisted_session_history(
+        working_set_messages=messages,
+        final_content=final_content,
+        include_final_assistant=record_assistant_history,
+    )
+    session_history = await engine._maybe_compact_session_history(
+        session_key=msg.session_key,
+        history=session_history,
+        token_model=resolved_model,
+    )
+    engine._set_session_history(msg.session_key, session_history)
+    engine._touch_session(msg.session_key)
+
+    if record_assistant_history:
+        engine.memory.record_conversation(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            role="assistant",
+            content=final_content,
+        )
+        engine.memory.record_event(
+            session_id=session_state.session_id,
+            event_type="assistant",
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            payload={"content": final_content},
+        )
+
+    snapshot_messages = engine._build_session_snapshot_messages(
+        session_key=msg.session_key,
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        token_model=resolved_model,
+    )
+    engine._store_session_snapshot(
+        session_key=msg.session_key,
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        messages=snapshot_messages,
+        final_content=None,
+    )
+
+    summary_task = None
+    if record_assistant_history:
+        summary_task = engine._trigger_summary(meta, final_content, msg.channel, msg.chat_id)
+    if summary_task:
+        engine._pending_summaries[msg.session_key] = summary_task
+    return record_assistant_history
+
+
+async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage | None:
+    """Process a user message end-to-end."""
+    await _await_summary_barrier(engine=engine, msg=msg)
+    session_state = engine._ensure_session_state(
+        session_key=msg.session_key,
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+    )
+    debrief_response = await _maybe_handle_debrief_confirmation(
+        engine=engine,
+        msg=msg,
+        session_state=session_state,
+    )
+    if debrief_response is not None:
+        return debrief_response
+
+    _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
 
     resolved_model = engine.provider.resolve_model(engine.model)
     hc = engine._history_config
-    history = _load_conversation_history(engine=engine, msg=msg, resolved_model=resolved_model)
-    search_results = await _prefetch_memory_results(engine=engine, msg=msg)
-    messages = _build_context_messages(
-        engine=engine,
-        msg=msg,
-        history=history,
-        search_results=search_results,
-        resolved_model=resolved_model,
+    history = engine._get_session_history(msg.session_key)
+    compiled = await engine.context_compiler.compile_session_turn(
+        SessionTurnRequest(
+            history=history,
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            token_model=resolved_model,
+            memory_budget_tokens=(hc.memory_budget_tokens or None),
+            recall_max_total_tokens=hc.recall_max_total_tokens,
+            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+            existing_baseline=engine._get_session_baseline(msg.session_key),
+        )
     )
+    _apply_compiled_turn_context(engine=engine, msg=msg, compiled=compiled)
+    messages = compiled.messages
+    search_results = compiled.search_results
     recall_chars = _compute_recall_chars(
         search_results=search_results,
         recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
@@ -261,28 +335,15 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
     engine._record_metrics(pre_metrics)
 
     final_content = _normalize_final_content(final_content)
-    record_assistant_history = _should_record_assistant_history(final_content)
-
-    if record_assistant_history:
-        engine.memory.record_conversation(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            role="assistant",
-            content=final_content,
-        )
-    engine._store_session_snapshot(
-        session_key=msg.session_key,
-        channel=msg.channel,
-        chat_id=msg.chat_id,
+    await _persist_completed_turn(
+        engine=engine,
+        msg=msg,
+        session_state=session_state,
         messages=messages,
-        final_content=final_content if record_assistant_history else None,
+        final_content=final_content,
+        meta=meta,
+        resolved_model=resolved_model,
     )
-
-    summary_task = None
-    if record_assistant_history:
-        summary_task = engine._trigger_summary(meta, final_content, msg.channel, msg.chat_id)
-    if summary_task:
-        engine._pending_summaries[msg.session_key] = summary_task
 
     preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
     logger.info(f"[engine] response: {preview}")

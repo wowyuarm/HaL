@@ -1,11 +1,14 @@
 """Memory subsystem."""
 
 from hal.core.memory.daily_log import DailyLog, LogEntry
+from hal.core.memory.event_log import EventEntry, EventLog
 from hal.core.memory.long_term import LongTermMemory
 from hal.core.memory.manager import MemoryManager
 
 __all__ = [
     "DailyLog",
+    "EventEntry",
+    "EventLog",
     "LogEntry",
     "LongTermMemory",
     "MemoryManager",
