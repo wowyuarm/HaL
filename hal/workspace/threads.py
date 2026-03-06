@@ -223,7 +223,9 @@ class ThreadRepository:
         """Build a workspace-relative path for one file inside a thread directory."""
         return f"{THREADS_DIRNAME}/{thread_slug}/{file_name}"
 
-    def _relative_metadata_path(self, thread_slug: str, *, has_machine_metadata: bool) -> str | None:
+    def _relative_metadata_path(
+        self, thread_slug: str, *, has_machine_metadata: bool
+    ) -> str | None:
         """Build metadata path only when machine-readable metadata exists."""
         if not has_machine_metadata:
             return None

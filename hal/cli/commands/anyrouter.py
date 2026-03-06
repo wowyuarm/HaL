@@ -189,7 +189,9 @@ def anyrouter_bridge(
         ANYROUTER_DEFAULT_USER_AGENT,
     )
     resolved_x_app = _resolve_header_value(cfg.extra_headers, "x-app", ANYROUTER_DEFAULT_X_APP)
-    resolved_beta = _resolve_header_value(cfg.extra_headers, "anthropic-beta", ANYROUTER_DEFAULT_BETA)
+    resolved_beta = _resolve_header_value(
+        cfg.extra_headers, "anthropic-beta", ANYROUTER_DEFAULT_BETA
+    )
     resolved_thinking_effort = _resolve_default_thinking_effort(cfg.request_params)
 
     env = _build_bridge_env(

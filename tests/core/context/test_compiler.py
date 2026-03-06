@@ -187,8 +187,8 @@ async def test_compile_session_turn_selects_related_active_threads_for_baseline(
             "related_threads": (),
         },
     ]
-    context_registry.related_unit_keys.side_effect = (
-        lambda key: ("hal-architecture",) if key == "github-actions" else ()
+    context_registry.related_unit_keys.side_effect = lambda key: (
+        ("hal-architecture",) if key == "github-actions" else ()
     )
     memory_search = AsyncMock()
     memory_search.search.return_value = [

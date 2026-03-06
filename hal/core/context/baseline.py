@@ -142,9 +142,7 @@ def select_active_thread_entries(
 
     preferred_set = {slug for slug in preferred_slugs if slug}
     selected = [
-        entry
-        for entry in ranked_entries
-        if str(entry.get("slug", "")).strip() in preferred_set
+        entry for entry in ranked_entries if str(entry.get("slug", "")).strip() in preferred_set
     ]
     if selected:
         return _apply_entry_limit(selected, max_entries=max_entries)

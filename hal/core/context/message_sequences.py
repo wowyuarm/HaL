@@ -33,7 +33,5 @@ def copy_history_without_session_baseline(
 ) -> list[dict[str, object]]:
     """Copy history messages while dropping the synthetic session-baseline block."""
     return [
-        dict(item)
-        for item in messages[1:]
-        if not is_session_baseline_content(item.get("content"))
+        dict(item) for item in messages[1:] if not is_session_baseline_content(item.get("content"))
     ]

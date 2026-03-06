@@ -13,7 +13,7 @@ from hal.workspace.threads import (
 
 
 def test_collect_thread_registry_entries_reads_metadata(tmp_path: Path) -> None:
-    thread_dir = tmp_path / "threads" / "github-actions"
+    thread_dir = tmp_path / "work" / "threads" / "github-actions"
     thread_dir.mkdir(parents=True)
     (thread_dir / "STATE.md").write_text(
         "# GitHub Actions\n"
@@ -35,21 +35,21 @@ def test_collect_thread_registry_entries_reads_metadata(tmp_path: Path) -> None:
 
 
 def test_collect_thread_registry_entries_prioritizes_active_then_recent(tmp_path: Path) -> None:
-    active_dir = tmp_path / "threads" / "active"
+    active_dir = tmp_path / "work" / "threads" / "active"
     active_dir.mkdir(parents=True)
     (active_dir / "STATE.md").write_text(
         "# Active\nStatus: active\n\n## Goal\nCurrent work.\n",
         encoding="utf-8",
     )
 
-    old_inactive = tmp_path / "threads" / "old"
+    old_inactive = tmp_path / "work" / "threads" / "old"
     old_inactive.mkdir(parents=True)
     (old_inactive / "STATE.md").write_text(
         "# Old\nStatus: inactive\n\n## Goal\nOlder work.\n",
         encoding="utf-8",
     )
 
-    new_inactive = tmp_path / "threads" / "new"
+    new_inactive = tmp_path / "work" / "threads" / "new"
     new_inactive.mkdir(parents=True)
     (new_inactive / "STATE.md").write_text(
         "# New\nStatus: inactive\n\n## Goal\nNewer work.\n",
@@ -62,7 +62,7 @@ def test_collect_thread_registry_entries_prioritizes_active_then_recent(tmp_path
 
 
 def test_thread_yaml_overrides_machine_metadata(tmp_path: Path) -> None:
-    thread_dir = tmp_path / "threads" / "hal-architecture"
+    thread_dir = tmp_path / "work" / "threads" / "hal-architecture"
     thread_dir.mkdir(parents=True)
     (thread_dir / "STATE.md").write_text(
         "# HaL Architecture\nStatus: inactive\nPinned: false\n\n## Goal\nLegacy goal.\n",
@@ -93,12 +93,12 @@ def test_thread_yaml_overrides_machine_metadata(tmp_path: Path) -> None:
 
 def test_episode_path_for_thread(tmp_path: Path) -> None:
     path = episode_path_for_thread(tmp_path, "hal-architecture", "episode.md")
-    assert path == tmp_path / "threads" / "hal-architecture" / "episodes" / "episode.md"
+    assert path == tmp_path / "work" / "threads" / "hal-architecture" / "episodes" / "episode.md"
 
 
 def test_thread_metadata_path(tmp_path: Path) -> None:
     path = thread_metadata_path(tmp_path, "hal-architecture")
-    assert path == tmp_path / "threads" / "hal-architecture" / "THREAD.yaml"
+    assert path == tmp_path / "work" / "threads" / "hal-architecture" / "THREAD.yaml"
 
 
 def test_thread_repository_reads_and_writes_state_and_episode(tmp_path: Path) -> None:
@@ -107,8 +107,11 @@ def test_thread_repository_reads_and_writes_state_and_episode(tmp_path: Path) ->
     state_path = repo.write_state("hal-architecture", "# HaL Architecture\nStatus: active\n")
     episode_path = repo.write_episode("hal-architecture", "episode.md", "# Episode\n")
 
-    assert state_path == tmp_path / "threads" / "hal-architecture" / "STATE.md"
-    assert episode_path == tmp_path / "threads" / "hal-architecture" / "episodes" / "episode.md"
+    assert state_path == tmp_path / "work" / "threads" / "hal-architecture" / "STATE.md"
+    assert (
+        episode_path
+        == tmp_path / "work" / "threads" / "hal-architecture" / "episodes" / "episode.md"
+    )
     assert repo.read_state("hal-architecture") == "# HaL Architecture\nStatus: active\n"
 
 
@@ -142,7 +145,12 @@ def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: 
     assert result.episode_rel_path == "episodes/2026-03-06-github-actions-s_1.md"
     assert result.episode_title == "2026-03-06: Workflow update"
     assert result.episode_path == (
-        tmp_path / "threads" / "github-actions" / "episodes" / "2026-03-06-github-actions-s_1.md"
+        tmp_path
+        / "work"
+        / "threads"
+        / "github-actions"
+        / "episodes"
+        / "2026-03-06-github-actions-s_1.md"
     )
     assert "### 2026-03-06: Workflow update" in result.state_content
     assert "- Use label-based routing." in result.state_content
@@ -185,7 +193,7 @@ def test_thread_repository_records_debrief_episode_updates_state_status(tmp_path
 
 
 def test_collect_thread_episode_paths_wrapper_uses_repository(tmp_path: Path) -> None:
-    episode_dir = tmp_path / "threads" / "github-actions" / "episodes"
+    episode_dir = tmp_path / "work" / "threads" / "github-actions" / "episodes"
     episode_dir.mkdir(parents=True)
     (episode_dir / "2026-03-06-actions.md").write_text("# Episode\n", encoding="utf-8")
 

@@ -115,9 +115,7 @@ def build_dynamic_recall_block(
         return ""
     return (
         "<relevant_memories>\n"
-        f"{_RECALL_PREAMBLE}\n"
-        + "\n".join(recall_lines)
-        + "\n</relevant_memories>"
+        f"{_RECALL_PREAMBLE}\n" + "\n".join(recall_lines) + "\n</relevant_memories>"
     )
 
 
@@ -139,7 +137,10 @@ def collect_recall_lines(
             token_model=token_model,
         )
         entry_tokens = estimate_text_tokens(entry, model=token_model)
-        if recall_max_total_tokens > 0 and total_recall_tokens + entry_tokens > recall_max_total_tokens:
+        if (
+            recall_max_total_tokens > 0
+            and total_recall_tokens + entry_tokens > recall_max_total_tokens
+        ):
             break
         recall_lines.append(entry)
         total_recall_tokens += entry_tokens

@@ -79,7 +79,9 @@ def _build_pre_metrics(
         channel=msg.channel,
         chat_id=msg.chat_id,
         mode=mode,
-        system_prompt_chars=estimate_content_chars(messages[0].get("content", "")) if messages else 0,
+        system_prompt_chars=estimate_content_chars(messages[0].get("content", ""))
+        if messages
+        else 0,
         history_message_count=len(history),
         history_chars=history_chars,
         recall_count=len(search_results),
@@ -151,7 +153,9 @@ def build_direct_inbound_message(*, channel: str, chat_id: str, content: str) ->
     return InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
 
 
-async def _maybe_handle_debrief_confirmation(*, engine: Any, msg: Any, session_state: Any) -> OutboundMessage | None:
+async def _maybe_handle_debrief_confirmation(
+    *, engine: Any, msg: Any, session_state: Any
+) -> OutboundMessage | None:
     """Handle pending debrief confirmation before treating the inbound as normal work."""
     if not session_state.awaiting_debrief_confirmation:
         return None

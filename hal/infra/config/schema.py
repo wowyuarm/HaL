@@ -184,7 +184,9 @@ class EngineConfig(_StrictModel):
     session_idle_timeout_s: float = Field(
         default=300.0, gt=0
     )  # Idle timeout for rotating to a new session_id
-    session_compaction_enabled: bool = True  # Enable in-session history compaction when budget is exceeded
+    session_compaction_enabled: bool = (
+        True  # Enable in-session history compaction when budget is exceeded
+    )
     session_compaction_token_budget: int = Field(
         default=150000, ge=1000
     )  # Approx token ceiling for in-memory session history

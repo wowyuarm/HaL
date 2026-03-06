@@ -325,7 +325,9 @@ class MemorySearch:
         return sorted(results, key=lambda result: result.score, reverse=True)
 
     @staticmethod
-    def _slice_results(results: list[SearchResult], *, top_k: int, min_score: float) -> list[SearchResult]:
+    def _slice_results(
+        results: list[SearchResult], *, top_k: int, min_score: float
+    ) -> list[SearchResult]:
         if min_score > 0:
             results = [result for result in results if result.score >= min_score]
         return results[:top_k]

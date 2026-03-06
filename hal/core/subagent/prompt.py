@@ -130,7 +130,10 @@ def build_skills_section(workspace: Path) -> str | None:
 
 def resolve_skill_script(workspace: Path, skill_name: str, relative_path: str) -> Path | None:
     """Resolve absolute path to a skill script from workspace skills."""
-    workspace_path = workspace / "skills" / skill_name / relative_path
+    from hal.workspace import WorkspaceLayout
+
+    layout = WorkspaceLayout(workspace)
+    workspace_path = layout.skills_dir() / skill_name / relative_path
     if workspace_path.exists():
         return workspace_path
     return None

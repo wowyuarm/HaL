@@ -335,7 +335,9 @@ class _EngineLoopHooks:
             return None
 
         if filtered.threads and self._session_key:
-            touched = self._engine.context_registry.expand_related_thread_slugs(set(filtered.threads))
+            touched = self._engine.context_registry.expand_related_thread_slugs(
+                set(filtered.threads)
+            )
             self._engine._mark_threads_touched(self._session_key, touched)
 
         return build_context_hint_text(
@@ -372,7 +374,9 @@ class _EngineLoopHooks:
     @staticmethod
     def _visible_tool_calls(tool_calls: list[Any]) -> list[Any]:
         """Filter out non-visible message tool calls from progress hints."""
-        return [tool_call for tool_call in tool_calls if getattr(tool_call, "name", "") != "message"]
+        return [
+            tool_call for tool_call in tool_calls if getattr(tool_call, "name", "") != "message"
+        ]
 
     def _resolve_progress_emission(
         self,

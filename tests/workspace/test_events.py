@@ -28,7 +28,7 @@ def test_event_log_repository_appends_and_reads_session_events(tmp_path: Path) -
         payload={"content": "hi"},
     )
 
-    assert repo.file_path == tmp_path / "logs" / "events.jsonl"
+    assert repo.file_path == tmp_path / "runtime" / "logs" / "events.jsonl"
     assert first.session == "s_1"
     assert second.type == "assistant"
 

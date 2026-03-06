@@ -119,8 +119,8 @@ def test_make_memory_search_uses_episode_indexing_defaults(monkeypatch, tmp_path
 
     assert isinstance(result, DummyMemorySearch)
     assert captured["source_root"] == config.workspace_path
-    assert captured["episodes_root"] == config.workspace_path / "threads"
-    assert captured["log_dir"] == config.workspace_path / "logs"
+    assert captured["episodes_root"] == config.workspace_path / "work" / "threads"
+    assert captured["log_dir"] == config.workspace_path / "runtime" / "logs"
     deps = captured["deps"]
     assert deps.exporter is None
 

@@ -29,7 +29,7 @@ def test_append_subagent_execution_writes_jsonl(tmp_path: Path) -> None:
 
     log_path = repo.append_subagent_execution(record)
 
-    assert log_path == tmp_path / "artifacts" / "subagent" / "subagent-log.jsonl"
+    assert log_path == tmp_path / "data" / "artifacts" / "subagent" / "subagent-log.jsonl"
     payload = json.loads(log_path.read_text(encoding="utf-8").strip())
     assert payload["id"] == "task-1"
     assert payload["status"] == "completed"

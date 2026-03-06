@@ -64,9 +64,10 @@ def engine(bus, mock_provider, workspace):
         ]
         builder_instance.build_system_prompt.return_value = "You are a test agent."
         builder_instance.build_dynamic_context_block.return_value = "<context>ctx</context>"
-        builder_instance.build_session_baseline_message.side_effect = (
-            lambda baseline: {"role": "user", "content": f"[Session Baseline Context]\n{baseline}"}
-        )
+        builder_instance.build_session_baseline_message.side_effect = lambda baseline: {
+            "role": "user",
+            "content": f"[Session Baseline Context]\n{baseline}",
+        }
         builder_instance.registry = MagicMock()
         builder_instance.registry.thread_snapshot.return_value = []
         builder_instance.registry.skill_snapshot.return_value = []
@@ -375,7 +376,7 @@ class TestDispatch:
         engine._memory_search = MagicMock()  # type: ignore[assignment]
         engine._memory_search.index_paths = AsyncMock(return_value=2)
 
-        thread_dir = engine.workspace / "threads" / "github-actions"
+        thread_dir = engine.workspace / "work" / "threads" / "github-actions"
         thread_dir.mkdir(parents=True, exist_ok=True)
         (thread_dir / "STATE.md").write_text(
             "# GitHub Actions\n\nStatus: active\n\n## Current State\n- draft\n",
@@ -414,7 +415,7 @@ class TestDispatch:
         engine._memory_search = None  # type: ignore[assignment]
 
         for slug in ("github-actions", "hal-architecture"):
-            thread_dir = engine.workspace / "threads" / slug
+            thread_dir = engine.workspace / "work" / "threads" / slug
             thread_dir.mkdir(parents=True, exist_ok=True)
             (thread_dir / "STATE.md").write_text(
                 f"# {slug}\n\nStatus: active\n\n## Current State\n- draft\n",
@@ -437,7 +438,7 @@ class TestDispatch:
             )
 
         with patch(
-            "hal.core.runtime.debrief_flow.generate_episode_markdown",
+            "hal.core.runtime.debrief.generate_episode_markdown",
             new=AsyncMock(side_effect=_fake_episode_markdown),
         ) as mock_generate:
             await engine._run_session_debrief(session_key)
@@ -569,7 +570,9 @@ class TestThreadTouching:
             return_value=("done", LoopMetadata(tools_used=["fs"]), [])
         )
 
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="please continue")
+        msg = InboundMessage(
+            channel="telegram", sender_id="u1", chat_id="c1", content="please continue"
+        )
         await engine.process(msg)
 
         state = engine._session_states[msg.session_key]
@@ -598,9 +601,13 @@ class TestBackgroundResume:
         )
 
         history = engine._get_session_history(session_key)
-        assert all("[Session Baseline Context]" not in str(item.get("content", "")) for item in history)
+        assert all(
+            "[Session Baseline Context]" not in str(item.get("content", "")) for item in history
+        )
         assert history[-1]["content"] == "background reply"
-        event_types = [call.kwargs.get("event_type") for call in engine.memory.record_event.call_args_list]
+        event_types = [
+            call.kwargs.get("event_type") for call in engine.memory.record_event.call_args_list
+        ]
         assert "assistant" in event_types
 
     def test_load_resume_context_falls_back_to_session_repository(self, engine):
@@ -654,8 +661,9 @@ class TestExecuteLoop:
         ]
 
         with (
-            patch("hal.core.engine.add_assistant_message", wraps=add_assistant_message)
-            as add_assistant,
+            patch(
+                "hal.core.engine.add_assistant_message", wraps=add_assistant_message
+            ) as add_assistant,
             patch("hal.core.engine.add_tool_result", wraps=add_tool_result) as add_tool,
         ):
             final, meta, injected = await engine._execute_loop(
@@ -747,7 +755,13 @@ class TestExecuteLoop:
         session_key = "telegram:c1"
         engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
         engine.context_registry.skill_snapshot.return_value = [
-            {"kind": "skill", "key": "git-ops", "name": "git-ops", "description": "git ops", "available": True}
+            {
+                "kind": "skill",
+                "key": "git-ops",
+                "name": "git-ops",
+                "description": "git ops",
+                "available": True,
+            }
         ]
         engine.context_registry.thread_snapshot.return_value = [
             {
@@ -800,7 +814,13 @@ class TestExecuteLoop:
         session_key = "telegram:c1"
         engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
         engine.context_registry.skill_snapshot.return_value = [
-            {"kind": "skill", "key": "git-ops", "name": "git-ops", "description": "git ops", "available": True}
+            {
+                "kind": "skill",
+                "key": "git-ops",
+                "name": "git-ops",
+                "description": "git ops",
+                "available": True,
+            }
         ]
         engine.context_registry.thread_snapshot.return_value = []
 

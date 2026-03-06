@@ -28,4 +28,3 @@ class SubagentArtifactMetadata(Generic[ArtifactPathT]):
     record_id: str | None = None
     artifact_path: ArtifactPathT | None = None
     missing_artifacts: list[ArtifactPathT] = field(default_factory=list)
-

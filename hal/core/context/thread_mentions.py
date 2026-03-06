@@ -65,7 +65,9 @@ def _build_thread_match_entries(registry: Sequence[Mapping[str, object]]) -> lis
         if not slug:
             continue
         phrases = tuple(_iter_normalized_thread_candidates(item, slug=slug))
-        tokens = frozenset(token for phrase in phrases for token in _extract_thread_match_tokens(phrase))
+        tokens = frozenset(
+            token for phrase in phrases for token in _extract_thread_match_tokens(phrase)
+        )
         entries.append(ThreadMatchEntry(slug=slug, phrases=phrases, tokens=tokens))
     return entries
 

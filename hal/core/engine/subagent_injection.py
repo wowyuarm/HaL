@@ -175,7 +175,9 @@ def _append_optional_line(lines: list[str], prefix: str, value: str | None) -> N
         lines.append(f"{prefix}{value}")
 
 
-def _append_optional_json_line(lines: list[str], prefix: str, value: list[str] | dict[str, int]) -> None:
+def _append_optional_json_line(
+    lines: list[str], prefix: str, value: list[str] | dict[str, int]
+) -> None:
     """Append JSON-encoded line when list/dict has content."""
     if value:
         lines.append(f"{prefix}{json.dumps(value, ensure_ascii=False)}")

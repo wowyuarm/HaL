@@ -111,11 +111,7 @@ def supports_cache_control(
 def _find_last_system_index(messages: list[dict[str, Any]]) -> int | None:
     """Return index of the last system message."""
     return next(
-        (
-            idx
-            for idx in range(len(messages) - 1, -1, -1)
-            if messages[idx].get("role") == "system"
-        ),
+        (idx for idx in range(len(messages) - 1, -1, -1) if messages[idx].get("role") == "system"),
         None,
     )
 

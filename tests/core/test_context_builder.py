@@ -73,10 +73,12 @@ class TestInit:
 
 class TestBootstrapFiles:
     def test_loads_existing_bootstrap_files(self, workspace: Path) -> None:
-        (workspace / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
-        (workspace / "INSTRUCTIONS.md").write_text("Follow the house rules.", encoding="utf-8")
-        (workspace / "USER.md").write_text("legacy user profile", encoding="utf-8")
-        (workspace / "IDENTITY.md").write_text("IDENTITY-OVERRIDE-MARKER", encoding="utf-8")
+        system_dir = workspace / "system"
+        system_dir.mkdir(parents=True, exist_ok=True)
+        (system_dir / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
+        (system_dir / "INSTRUCTIONS.md").write_text("Follow the house rules.", encoding="utf-8")
+        (system_dir / "USER.md").write_text("legacy user profile", encoding="utf-8")
+        (system_dir / "IDENTITY.md").write_text("IDENTITY-OVERRIDE-MARKER", encoding="utf-8")
 
         with patch("hal.core.context.builder.SkillsLoader") as cls:
             cls.return_value = MagicMock(
@@ -96,11 +98,14 @@ class TestBootstrapFiles:
         prompt = builder.build_system_prompt()
         assert "HaL" in prompt
 
-    def test_loads_legacy_bootstrap_when_instructions_missing(self, workspace: Path) -> None:
-        (workspace / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
-        (workspace / "USER.md").write_text("Legacy user profile.", encoding="utf-8")
-        (workspace / "AGENTS.md").write_text("Legacy procedures.", encoding="utf-8")
-        (workspace / "TOOLS.md").write_text("Legacy tool guide.", encoding="utf-8")
+    def test_only_loads_configured_bootstrap_files(self, workspace: Path) -> None:
+        """v3 layout: only BOOTSTRAP_FILES are loaded, no legacy fallback."""
+        system_dir = workspace / "system"
+        system_dir.mkdir(parents=True, exist_ok=True)
+        (system_dir / "SOUL.md").write_text("Be helpful.", encoding="utf-8")
+        # Legacy files in system/ should be ignored
+        (system_dir / "USER.md").write_text("Legacy user profile.", encoding="utf-8")
+        (system_dir / "AGENTS.md").write_text("Legacy procedures.", encoding="utf-8")
 
         with patch("hal.core.context.builder.SkillsLoader") as cls:
             cls.return_value = MagicMock(
@@ -110,9 +115,9 @@ class TestBootstrapFiles:
             cc = ContextBuilder(workspace)
 
         prompt = cc.build_system_prompt()
-        assert "Legacy user profile." in prompt
-        assert "Legacy procedures." in prompt
-        assert "Legacy tool guide." in prompt
+        assert "Be helpful." in prompt
+        assert "Legacy user profile." not in prompt
+        assert "Legacy procedures." not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +175,9 @@ class TestBuildSystemPrompt:
         assert "# Memory" not in prompt
 
     def test_layers_separated_by_divider(self, workspace: Path) -> None:
-        (workspace / "SOUL.md").write_text("soul content", encoding="utf-8")
+        system_dir = workspace / "system"
+        system_dir.mkdir(parents=True, exist_ok=True)
+        (system_dir / "SOUL.md").write_text("soul content", encoding="utf-8")
         mm = MagicMock()
         mm.get_context.return_value = "some memory"
 
@@ -186,7 +193,7 @@ class TestBuildSystemPrompt:
         assert "\n\n---\n\n" in prompt
 
     def test_includes_thread_registry_summary(self, workspace: Path) -> None:
-        threads = workspace / "threads" / "github-actions"
+        threads = workspace / "work" / "threads" / "github-actions"
         threads.mkdir(parents=True)
         (threads / "STATE.md").write_text(
             "# GitHub Actions\nStatus: active\n\n## Goal\nShip AI workflow.",
@@ -427,7 +434,7 @@ class TestDynamicContext:
         assert "<channel>telegram</channel>" in text_parts[0]["text"]
 
     def test_active_thread_state_injected_into_dynamic_context(self, workspace: Path) -> None:
-        threads = workspace / "threads" / "hal-architecture"
+        threads = workspace / "work" / "threads" / "hal-architecture"
         threads.mkdir(parents=True)
         (threads / "STATE.md").write_text(
             "# HaL Architecture\nStatus: active\n\n## Current State\nRefactoring context model.",
@@ -448,7 +455,7 @@ class TestDynamicContext:
         assert 'state_path="threads/hal-architecture/STATE.md"' in user_content
 
     def test_inactive_thread_state_not_auto_injected(self, workspace: Path) -> None:
-        threads = workspace / "threads" / "paused-thread"
+        threads = workspace / "work" / "threads" / "paused-thread"
         threads.mkdir(parents=True)
         (threads / "STATE.md").write_text(
             "# Paused Work\nStatus: inactive\n\n## Current State\nDo not auto-load.",
@@ -467,14 +474,14 @@ class TestDynamicContext:
         assert "<active_threads>" not in user_content
 
     def test_thread_registry_respects_max_size(self, workspace: Path) -> None:
-        active = workspace / "threads" / "active-thread"
+        active = workspace / "work" / "threads" / "active-thread"
         active.mkdir(parents=True)
         (active / "STATE.md").write_text(
             "# Active\nStatus: active\n\n## Goal\nPriority first.",
             encoding="utf-8",
         )
 
-        inactive = workspace / "threads" / "inactive-thread"
+        inactive = workspace / "work" / "threads" / "inactive-thread"
         inactive.mkdir(parents=True)
         (inactive / "STATE.md").write_text(
             "# Inactive\nStatus: inactive\n\n## Goal\nSecondary.",

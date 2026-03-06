@@ -75,9 +75,7 @@ class MessageBus:
                 if inspect.isawaitable(result):
                     await result
             except Exception as e:
-                logger.warning(
-                    f"MessageBus event handler failed for {type(event).__name__}: {e}"
-                )
+                logger.warning(f"MessageBus event handler failed for {type(event).__name__}: {e}")
 
     def emit_nowait(self, event: Event) -> None:
         """Schedule event emission without blocking the current call stack."""

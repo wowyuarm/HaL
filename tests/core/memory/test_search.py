@@ -128,7 +128,7 @@ def memory_search(daily_log, daily_dir):
 
 @pytest.fixture
 def episode_search(tmp_path):
-    threads_dir = tmp_path / "threads"
+    threads_dir = tmp_path / "work" / "threads"
     threads_dir.mkdir(parents=True, exist_ok=True)
     chunker = MarkdownChunker(max_size=500, overlap_lines=1)
     store = FakeVectorStore()
@@ -588,7 +588,9 @@ class TestBackfill:
 
 class TestEpisodeIndexing:
     async def test_index_episode_populates_thread_metadata(self, episode_search, tmp_path):
-        episode_path = tmp_path / "threads" / "github-actions" / "episodes" / "2026-03-06-test.md"
+        episode_path = (
+            tmp_path / "work" / "threads" / "github-actions" / "episodes" / "2026-03-06-test.md"
+        )
         episode_path.parent.mkdir(parents=True, exist_ok=True)
         episode_path.write_text(
             "# 2026-03-06: Workflow draft\n\n## What Happened\n- Drafted workflow yaml\n",
@@ -607,10 +609,12 @@ class TestEpisodeIndexing:
         assert episode_search._store._data
         sample = next(iter(episode_search._store._data.values()))
         assert sample["thread"] == "github-actions"
-        assert sample["source"].startswith("threads/github-actions/episodes/")
+        assert sample["source"].startswith("work/threads/github-actions/episodes/")
 
     async def test_backfill_indexes_episode_sources(self, episode_search, tmp_path):
-        episode_path = tmp_path / "threads" / "hal-architecture" / "episodes" / "2026-03-07-arch.md"
+        episode_path = (
+            tmp_path / "work" / "threads" / "hal-architecture" / "episodes" / "2026-03-07-arch.md"
+        )
         episode_path.parent.mkdir(parents=True, exist_ok=True)
         episode_path.write_text(
             "# 2026-03-07: Architecture iteration\n\n## Decisions\n- Keep thread registry capped\n",
@@ -627,7 +631,7 @@ class TestEpisodeIndexing:
 
         assert count > 0
         indexed_sources = await episode_search._store.get_indexed_sources()
-        assert "threads/hal-architecture/episodes/2026-03-07-arch.md" in indexed_sources
+        assert "work/threads/hal-architecture/episodes/2026-03-07-arch.md" in indexed_sources
 
 
 def test_extract_channel_from_heading() -> None:

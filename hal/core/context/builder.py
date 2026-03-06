@@ -49,9 +49,8 @@ class ContextBuilder:
 
     # Bootstrap files loaded into Layer 1 (personality/instructions).
     # INSTRUCTIONS.md is the primary instructions source.
-    BOOTSTRAP_PRIMARY_FILES = ["SOUL.md", "INSTRUCTIONS.md"]
+    BOOTSTRAP_FILES = ["SOUL.md", "INSTRUCTIONS.md"]
     # One-release compatibility fallback while workspaces migrate.
-    BOOTSTRAP_LEGACY_FILES = ["USER.md", "AGENTS.md", "TOOLS.md"]
 
     def __init__(
         self,
@@ -243,8 +242,7 @@ class ContextBuilder:
         """Layer 1 — Personality and user profile from workspace markdown files."""
         return render_bootstrap_prompt(
             self.system.load_bootstrap_documents(
-                primary_files=self.BOOTSTRAP_PRIMARY_FILES,
-                legacy_files=self.BOOTSTRAP_LEGACY_FILES,
+                files=self.BOOTSTRAP_FILES,
             )
         )
 

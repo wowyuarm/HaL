@@ -19,8 +19,8 @@ def _write_skill(skills_dir: Path, name: str, frontmatter: str, body: str = "# B
 @pytest.fixture()
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ContextRegistry:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
-    thread_dir = workspace / "threads" / "hal-architecture"
+    skills_dir = workspace / "capabilities" / "skills"
+    thread_dir = workspace / "work" / "threads" / "hal-architecture"
     skills_dir.mkdir(parents=True)
     thread_dir.mkdir(parents=True)
 
@@ -78,9 +78,9 @@ def test_registry_active_thread_entry_snapshot_filters_non_active(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
-    active_dir = workspace / "threads" / "active-thread"
-    paused_dir = workspace / "threads" / "paused-thread"
+    skills_dir = workspace / "capabilities" / "skills"
+    active_dir = workspace / "work" / "threads" / "active-thread"
+    paused_dir = workspace / "work" / "threads" / "paused-thread"
     skills_dir.mkdir(parents=True)
     active_dir.mkdir(parents=True)
     paused_dir.mkdir(parents=True)
@@ -117,9 +117,9 @@ def test_registry_context_units_are_priority_ranked_and_related_keys_exposed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
-    active_dir = workspace / "threads" / "active-thread"
-    paused_dir = workspace / "threads" / "paused-thread"
+    skills_dir = workspace / "capabilities" / "skills"
+    active_dir = workspace / "work" / "threads" / "active-thread"
+    paused_dir = workspace / "work" / "threads" / "paused-thread"
     skills_dir.mkdir(parents=True)
     active_dir.mkdir(parents=True)
     paused_dir.mkdir(parents=True)
@@ -162,10 +162,10 @@ def test_registry_expand_related_thread_slugs_respects_hop_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
-    thread_a = workspace / "threads" / "thread-a"
-    thread_b = workspace / "threads" / "thread-b"
-    thread_c = workspace / "threads" / "thread-c"
+    skills_dir = workspace / "capabilities" / "skills"
+    thread_a = workspace / "work" / "threads" / "thread-a"
+    thread_b = workspace / "work" / "threads" / "thread-b"
+    thread_c = workspace / "work" / "threads" / "thread-c"
     skills_dir.mkdir(parents=True)
     thread_a.mkdir(parents=True)
     thread_b.mkdir(parents=True)

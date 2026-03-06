@@ -10,7 +10,7 @@ def test_memory_repository_reads_writes_and_updates_sections(tmp_path: Path) -> 
 
     repo.update("# Memory\n\n## Preferences\nLikes concise replies.\n")
 
-    assert repo.path == tmp_path / "memory" / "MEMORY.md"
+    assert repo.path == tmp_path / "system" / "MEMORY.md"
     assert repo.read().startswith("# Memory")
     assert repo.get_section("Preferences") == "Likes concise replies."
 

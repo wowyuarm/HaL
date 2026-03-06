@@ -1,34 +1,39 @@
-"""Runtime summary-trigger orchestration facade."""
+"""Summary-trigger orchestration helpers."""
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-from .summary_flow_impl import resolve_summary_model_id as _resolve_summary_model_id
-from .summary_flow_impl import trigger_summary_task as _trigger_summary_task
+from hal.core.runtime.summary import generate_summary
 
 
 def resolve_summary_model_id(engine: Any) -> str:
-    """Resolve summary model id for the current runtime configuration."""
-    return _resolve_summary_model_id(engine)
+    """Resolve the model to use for summary generation."""
+    return engine.model if engine._summary_model == "default" else engine._summary_model
 
 
 def trigger_summary_task(
     engine: Any,
     *,
-    meta: Any,
+    meta: object,
     final_content: str,
     channel: str,
     chat_id: str,
 ) -> asyncio.Task | None:
-    """Trigger summary task when summary conditions are met."""
-    return _trigger_summary_task(
-        engine,
-        meta=meta,
-        final_content=final_content,
-        channel=channel,
-        chat_id=chat_id,
+    """Create an async summary task when loop metadata qualifies."""
+    if not bool(getattr(meta, "needs_summary", False)):
+        return None
+    return asyncio.create_task(
+        generate_summary(
+            meta=meta,
+            final_content=final_content,
+            channel=channel,
+            chat_id=chat_id,
+            provider=engine._summary_provider or engine.provider,
+            model=resolve_summary_model_id(engine),
+            memory=engine.memory,
+        )
     )
 
 

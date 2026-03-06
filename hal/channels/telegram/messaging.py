@@ -67,7 +67,9 @@ class TelegramMessagingMixin:
             return None
         try:
             html_chunk = _markdown_to_telegram_html(chunk)
-            sent = await self._app.bot.send_message(chat_id=chat_id, text=html_chunk, parse_mode="HTML")
+            sent = await self._app.bot.send_message(
+                chat_id=chat_id, text=html_chunk, parse_mode="HTML"
+            )
         except Exception as e:
             logger.warning(f"HTML parse failed for one chunk, falling back to plain text: {e}")
             try:
@@ -199,7 +201,9 @@ class TelegramMessagingMixin:
                     await self._app.bot.send_document(chat_id=chat_id, document=handle)
         except Exception as error:
             logger.error(f"Failed to send media {media_path}: {error}")
-            await self._app.bot.send_message(chat_id=chat_id, text=f"[Failed to send file: {media_path}]")
+            await self._app.bot.send_message(
+                chat_id=chat_id, text=f"[Failed to send file: {media_path}]"
+            )
 
     async def _send_outbound_text(self, *, chat_id: int, msg: OutboundMessage) -> None:
         """Send non-empty outbound content with optional append-mode semantics."""

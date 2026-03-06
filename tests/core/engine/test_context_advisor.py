@@ -90,7 +90,9 @@ def test_build_context_advisor_input_and_messages() -> None:
 
 async def test_request_context_advisor_suggestion() -> None:
     chat = AsyncMock(
-        return_value=type("Resp", (), {"content": '{"skills":["git"],"threads":["t1"],"reason":"r"}'})()
+        return_value=type(
+            "Resp", (), {"content": '{"skills":["git"],"threads":["t1"],"reason":"r"}'}
+        )()
     )
 
     advisor_input = build_context_advisor_input(

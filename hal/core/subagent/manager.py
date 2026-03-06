@@ -64,7 +64,11 @@ class SubagentManager:
         # task_id -> (task, display_label, context)
         self._running_tasks: dict[
             str,
-            tuple[asyncio.Task[SubagentExecutionResult], str, tuple[str | None, str | None, str | None]],
+            tuple[
+                asyncio.Task[SubagentExecutionResult],
+                str,
+                tuple[str | None, str | None, str | None],
+            ],
         ] = {}
         self._completed_results: deque[tuple[str, SubagentExecutionResult]] = deque(
             maxlen=_COMPLETED_RESULTS_MAX

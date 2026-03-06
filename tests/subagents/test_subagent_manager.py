@@ -320,7 +320,9 @@ async def test_await_pending_empty_returns_empty_list(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_completed_results_buffer_is_bounded(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_completed_results_buffer_is_bounded(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test-model"
     provider.chat = AsyncMock(
@@ -460,7 +462,7 @@ def test_build_skills_section_uses_workspace_skill_script_path(tmp_path) -> None
     provider.get_default_model.return_value = "test"
     mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
-    skill_dir = tmp_path / "skills" / "deepwiki"
+    skill_dir = tmp_path / "capabilities" / "skills" / "deepwiki"
     script_path = skill_dir / "scripts" / "deepwiki.sh"
     script_path.parent.mkdir(parents=True)
     script_path.write_text("#!/bin/sh\n", encoding="utf-8")

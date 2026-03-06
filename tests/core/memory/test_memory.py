@@ -286,7 +286,7 @@ class TestMemoryManager:
         mgr.record_conversation(channel="cli", chat_id="d", role="user", content="stored elsewhere")
 
         # Log files should be in data_dir, not workspace
-        log_files = list((data_dir / "logs").glob("*.jsonl"))
+        log_files = list((data_dir / "runtime" / "logs").glob("*.jsonl"))
         assert len(log_files) == 1
 
     def test_get_conversation_stats(self, tmp_path: Path):
@@ -310,7 +310,7 @@ class TestMemoryManager:
         assert entry.type == "user_message"
         assert entry.payload["content"] == "hello"
 
-        events_file = tmp_path / "logs" / "events.jsonl"
+        events_file = tmp_path / "runtime" / "logs" / "events.jsonl"
         assert events_file.exists()
         lines = [line for line in events_file.read_text(encoding="utf-8").splitlines() if line]
         assert len(lines) == 1

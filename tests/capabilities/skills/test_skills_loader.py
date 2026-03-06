@@ -18,7 +18,7 @@ def _write_skill(skills_dir: Path, name: str, frontmatter: str, body: str = "# B
 
 def _make_loader(tmp_path: Path) -> tuple[SkillsLoader, Path]:
     ws = tmp_path / "ws"
-    skills = ws / "skills"
+    skills = ws / "capabilities" / "skills"
     skills.mkdir(parents=True)
     return SkillsLoader(workspace=ws), skills
 

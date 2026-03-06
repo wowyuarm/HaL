@@ -28,7 +28,7 @@ def test_build_skill_unit_manifests_captures_availability(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
+    skills_dir = workspace / "capabilities" / "skills"
     skills_dir.mkdir(parents=True)
     _write_skill(
         skills_dir,
@@ -49,7 +49,9 @@ description: Plain note helper
     )
     loader = SkillsLoader(workspace)
 
-    monkeypatch.setattr("shutil.which", lambda binary: "/usr/bin/curl" if binary == "curl" else None)
+    monkeypatch.setattr(
+        "shutil.which", lambda binary: "/usr/bin/curl" if binary == "curl" else None
+    )
     manifests = build_skill_unit_manifests(loader)
 
     assert [manifest.key for manifest in manifests] == ["needcurl", "notes"]
@@ -62,7 +64,7 @@ def test_build_skill_units_returns_context_unit_objects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
+    skills_dir = workspace / "capabilities" / "skills"
     skills_dir.mkdir(parents=True)
     _write_skill(
         skills_dir,
@@ -87,7 +89,7 @@ description: Plain note helper
 
 
 def test_build_thread_unit_manifests_reflects_workspace_state(tmp_path: Path) -> None:
-    thread_dir = tmp_path / "threads" / "hal-architecture"
+    thread_dir = tmp_path / "work" / "threads" / "hal-architecture"
     thread_dir.mkdir(parents=True)
     (thread_dir / "STATE.md").write_text(
         "# HaL Architecture\nStatus: active\n\n## Goal\nRefine the context system.\n",
@@ -105,7 +107,7 @@ def test_build_thread_unit_manifests_reflects_workspace_state(tmp_path: Path) ->
 
 
 def test_build_thread_units_returns_context_unit_objects(tmp_path: Path) -> None:
-    thread_dir = tmp_path / "threads" / "github-actions"
+    thread_dir = tmp_path / "work" / "threads" / "github-actions"
     thread_dir.mkdir(parents=True)
     (thread_dir / "STATE.md").write_text(
         "# GitHub Actions\nStatus: active\n\n## Goal\nShip automation.\n",
@@ -129,7 +131,7 @@ def test_render_skill_unit_registry_xml_escapes_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "ws"
-    skills_dir = workspace / "skills"
+    skills_dir = workspace / "capabilities" / "skills"
     skills_dir.mkdir(parents=True)
     _write_skill(
         skills_dir,
@@ -150,7 +152,7 @@ description: Use <x> & y
 
 
 def test_render_thread_unit_registry_markdown_includes_status(tmp_path: Path) -> None:
-    thread_dir = tmp_path / "threads" / "github-actions"
+    thread_dir = tmp_path / "work" / "threads" / "github-actions"
     thread_dir.mkdir(parents=True)
     (thread_dir / "STATE.md").write_text(
         "# GitHub Actions\nStatus: active\n\n## Goal\nShip automation.\n",

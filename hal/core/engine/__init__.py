@@ -9,18 +9,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from hal.bus.queue import MessageBus
-from hal.context import (
-    ContextBuilder,
-    ContextCompiler,
-    MetricsCollector,
-    add_assistant_message,
-    add_tool_result,
-    detect_thread_mentions,
-)
+from hal.core.context.builder import ContextBuilder
+from hal.core.context.compiler import ContextCompiler
+from hal.core.context.messages import add_assistant_message, add_tool_result
+from hal.core.context.metrics import MetricsCollector
+from hal.core.context.thread_mentions import detect_thread_mentions
 from hal.core.memory.manager import MemoryManager
 from hal.core.ports import LLMProviderPort
-from hal.core.subagent import SubagentManager
-from hal.runtime import (
+from hal.core.runtime import (
     build_session_id,
     build_session_snapshot_messages,
     create_tools,
@@ -35,6 +31,7 @@ from hal.runtime import (
     touch_session,
     trigger_summary_task,
 )
+from hal.core.subagent import SubagentManager
 from hal.workspace import MetricsRepository, ThreadRepository
 
 from .background_resume import _EngineBackgroundResume

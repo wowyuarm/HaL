@@ -1,4 +1,12 @@
-"""Workspace layout helpers for stable path conventions."""
+"""Workspace layout helpers for stable path conventions.
+
+All paths follow the v3 workspace contract:
+  system/       — identity, instructions, memory, config
+  work/         — threads, inbox
+  runtime/      — logs, sessions, metrics, cache
+  capabilities/ — skills
+  data/         — vectors, artifacts, media
+"""
 
 from __future__ import annotations
 
@@ -9,40 +17,33 @@ from pathlib import Path
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceLayout:
-    """Canonical path layout for one HaL workspace root."""
+    """Canonical path layout for one HaL workspace root (v3)."""
 
     root: Path
 
     def system_document_path(self, name: str) -> Path:
-        v3_path = self.root / "system" / name
-        return v3_path if v3_path.exists() else self.root / name
+        return self.root / "system" / name
 
     def memory_dir(self) -> Path:
         return self.root / "memory"
 
     def memory_file_path(self) -> Path:
-        v3_path = self.root / "system" / "MEMORY.md"
-        return v3_path if v3_path.exists() else self.memory_dir() / "MEMORY.md"
+        return self.root / "system" / "MEMORY.md"
 
     def threads_dir(self) -> Path:
-        v3_path = self.root / "work" / "threads"
-        return v3_path if v3_path.exists() else self.root / "threads"
+        return self.root / "work" / "threads"
 
     def skills_dir(self) -> Path:
-        v3_path = self.root / "capabilities" / "skills"
-        return v3_path if v3_path.exists() else self.root / "skills"
+        return self.root / "capabilities" / "skills"
 
     def logs_dir(self) -> Path:
-        v3_path = self.root / "runtime" / "logs"
-        return v3_path if v3_path.exists() else self.root / "logs"
+        return self.root / "runtime" / "logs"
 
     def sessions_dir(self) -> Path:
-        v3_path = self.root / "runtime" / "sessions"
-        return v3_path if v3_path.exists() else self.logs_dir() / "sessions"
+        return self.root / "runtime" / "sessions"
 
     def metrics_dir(self) -> Path:
-        v3_path = self.root / "runtime" / "metrics"
-        return v3_path if v3_path.exists() else self.logs_dir()
+        return self.root / "runtime" / "metrics"
 
     def daily_log_path(self, log_date: date) -> Path:
         return self.logs_dir() / f"{log_date.isoformat()}.jsonl"
@@ -54,8 +55,7 @@ class WorkspaceLayout:
         return self.metrics_dir() / "context_metrics.jsonl"
 
     def artifacts_dir(self) -> Path:
-        v3_path = self.root / "data" / "artifacts"
-        return v3_path if v3_path.exists() else self.root / "artifacts"
+        return self.root / "data" / "artifacts"
 
     def subagent_artifacts_dir(self) -> Path:
         return self.artifacts_dir() / "subagent"

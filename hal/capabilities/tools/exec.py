@@ -106,7 +106,9 @@ class ExecTool(Tool):
         )
 
     async def _collect_output(self, *, process: asyncio.subprocess.Process, timeout: Any) -> str:
-        stdout, stderr, timed_out = await self._read_process_output(process=process, timeout=timeout)
+        stdout, stderr, timed_out = await self._read_process_output(
+            process=process, timeout=timeout
+        )
         if timed_out:
             return _ERR_TIMEOUT.format(seconds=timeout)
         return self._format_output(stdout=stdout, stderr=stderr, return_code=process.returncode)

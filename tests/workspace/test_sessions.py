@@ -20,7 +20,7 @@ def test_session_repository_writes_and_reads_snapshot(tmp_path: Path) -> None:
     )
     snapshot = repository.read_snapshot("telegram:c1")
 
-    assert path.parent == tmp_path / "logs" / "sessions"
+    assert path.parent == tmp_path / "runtime" / "sessions"
     assert snapshot is not None
     assert snapshot.session_key == "telegram:c1"
     assert snapshot.channel == "telegram"
@@ -28,8 +28,7 @@ def test_session_repository_writes_and_reads_snapshot(tmp_path: Path) -> None:
     assert snapshot.messages == messages
 
 
-def test_session_repository_prefers_v3_sessions_dir(tmp_path: Path) -> None:
-    (tmp_path / "runtime" / "sessions").mkdir(parents=True)
+def test_session_repository_resolves_v3_sessions_dir(tmp_path: Path) -> None:
     repository = SessionRepository(tmp_path)
     repository.write_snapshot(
         session_key="telegram:c2",

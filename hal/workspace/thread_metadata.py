@@ -43,7 +43,9 @@ def load_thread_metadata(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def resolve_thread_metadata(*, slug: str, state_content: str, metadata: dict) -> ResolvedThreadMetadata:
+def resolve_thread_metadata(
+    *, slug: str, state_content: str, metadata: dict
+) -> ResolvedThreadMetadata:
     """Resolve registry-facing thread metadata from state content and THREAD.yaml."""
     status, pinned, title, description = _parse_thread_state_metadata(
         slug=slug,

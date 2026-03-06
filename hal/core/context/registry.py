@@ -146,8 +146,4 @@ class ContextRegistry:
 
     def _thread_units_by_priority(self) -> list[ThreadContextUnit]:
         """Return thread units in unified registry priority order."""
-        return [
-            unit
-            for unit in self.context_units()
-            if isinstance(unit, ThreadContextUnit)
-        ]
+        return [unit for unit in self.context_units() if isinstance(unit, ThreadContextUnit)]

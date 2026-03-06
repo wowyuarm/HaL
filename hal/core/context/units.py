@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hal.capabilities.skills.loader import SkillsLoader
-from hal.domain import (
+from hal.domain.context_units import (
     ContextUnit,
     ContextUnitKind,
     ContextUnitManifest,
@@ -82,7 +82,9 @@ def build_thread_unit_manifests(
     max_entries: int,
 ) -> list[ContextUnitManifest]:
     """Build discoverable thread manifests from workspace state files."""
-    return [unit.manifest() for unit in build_thread_units(thread_repository, max_entries=max_entries)]
+    return [
+        unit.manifest() for unit in build_thread_units(thread_repository, max_entries=max_entries)
+    ]
 
 
 def render_skill_unit_registry_xml(manifests: list[ContextUnitManifest]) -> str:

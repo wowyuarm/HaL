@@ -25,22 +25,13 @@ class SystemRepository:
     def load_bootstrap_documents(
         self,
         *,
-        primary_files: list[str],
-        legacy_files: list[str],
+        files: list[str],
     ) -> list[WorkspaceDocument]:
-        """Load primary bootstrap docs, falling back to legacy docs when needed."""
-        documents = self._read_existing_documents(primary_files)
-        instructions_path = self.layout.system_document_path("INSTRUCTIONS.md")
-        if instructions_path.exists():
-            return documents
-        return documents + self._read_existing_documents(legacy_files)
-
-    def _read_existing_documents(self, file_names: list[str]) -> list[WorkspaceDocument]:
-        """Load existing UTF-8 markdown/text docs in listed order."""
+        """Load bootstrap documents from system/ directory."""
         return [
-            WorkspaceDocument(name=file_name, content=content)
-            for file_name in file_names
-            if (content := self._read_document_content(file_name)) is not None
+            WorkspaceDocument(name=name, content=content)
+            for name in files
+            if (content := self._read_document_content(name)) is not None
         ]
 
     def _read_document_content(self, file_name: str) -> str | None:
