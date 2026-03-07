@@ -656,11 +656,8 @@ async def test_stop_cancels_typing_tasks_and_shuts_down_app() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_reset_clears_history_without_session_key() -> None:
-    memory = MagicMock()
-    ch = TelegramChannel(
-        TelegramConfig(enabled=True, token="t"), MessageBus(), memory_manager=memory
-    )
+async def test_on_reset_replies_acknowledgment() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
 
     msg = _Message(chat_id=123, text="/reset")
     msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
@@ -668,7 +665,6 @@ async def test_on_reset_clears_history_without_session_key() -> None:
 
     await ch._on_reset(update, context=None)  # type: ignore[arg-type]
 
-    memory.clear_conversation_history.assert_called_once_with(channel="telegram", chat_id="123")
     msg.reply_text.assert_awaited_once()
 
 

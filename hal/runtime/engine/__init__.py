@@ -31,7 +31,6 @@ from hal.runtime.session import (
 )
 from hal.runtime.snapshot import build_session_snapshot_messages
 from hal.runtime.subagent import SubagentManager
-from hal.runtime.summary_flow import resolve_summary_model_id, trigger_summary_task
 from hal.runtime.tool_factory import create_tools
 from hal.workspace import MetricsRepository, ThreadRepository
 
@@ -77,8 +76,6 @@ class AgentEngine:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         memory_manager: MemoryManager | None = None,
-        summary_model: str = "default",
-        summary_provider: LLMProviderPort | None = None,
         worker_model: str = "default",
         worker_provider: LLMProviderPort | None = None,
         memory_search: "MemorySearch | None" = None,
@@ -101,8 +98,6 @@ class AgentEngine:
         self.web_search_api_key = web_search_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
-        self._summary_model = summary_model
-        self._summary_provider = summary_provider
         self._memory_search = memory_search
         self._auto_inject_top_k = auto_inject_top_k
         self._recall_min_score = recall_min_score
@@ -111,7 +106,6 @@ class AgentEngine:
         self._web_search_config = web_search_config
         self._web_fetch_config = web_fetch_config
         self._channels_config = channels_config
-        self._pending_summaries: dict[str, asyncio.Task] = {}
         self._metrics_repository = MetricsRepository(workspace)
         self._metrics_collector = MetricsCollector(self._metrics_repository.context_metrics_path())
         self._background_resume = _EngineBackgroundResume(engine=self)
@@ -460,22 +454,6 @@ class AgentEngine:
             add_assistant_message_fn=add_assistant_message,
             add_tool_result_fn=add_tool_result,
             session_key=session_key,
-            channel=channel,
-            chat_id=chat_id,
-        )
-
-    def _summary_model_id(self) -> str:
-        """Resolve the model to use for summary generation."""
-        return resolve_summary_model_id(self)
-
-    def _trigger_summary(
-        self, meta: object, final_content: str, channel: str, chat_id: str
-    ) -> asyncio.Task | None:
-        """Create an async summary task if the loop qualifies."""
-        return trigger_summary_task(
-            self,
-            meta=meta,
-            final_content=final_content,
             channel=channel,
             chat_id=chat_id,
         )

@@ -123,7 +123,6 @@ class _EngineBackgroundResume:
                 channel, chat_id, snapshot = context
 
                 messages = self._append_runtime_injections(snapshot=snapshot, events=pending)
-                await self._await_summary_barrier(session_key)
                 final_content, meta = await self._run_resumed_loop(
                     session_key=session_key,
                     channel=channel,
@@ -193,19 +192,6 @@ class _EngineBackgroundResume:
             messages.append({"role": "user", "content": runtime_inject})
         return messages
 
-    async def _await_summary_barrier(self, session_key: str) -> None:
-        """Wait briefly for prior summary persistence to finish before resuming."""
-        task = self._engine._pending_summaries.pop(session_key, None)
-        if not task:
-            return
-        try:
-            await asyncio.wait_for(
-                task,
-                timeout=self._engine._engine_config.summary_barrier_timeout_s,
-            )
-        except (asyncio.TimeoutError, Exception) as error:
-            logger.warning(f"Summary barrier: {error}")
-
     async def _run_resumed_loop(
         self,
         *,
@@ -239,7 +225,7 @@ class _EngineBackgroundResume:
         final_content: str,
         meta: Any,
     ) -> None:
-        """Persist resumed output, queue summary, and emit outbound response."""
+        """Persist resumed output and emit outbound response."""
         record_assistant_history = _should_record_assistant_history(final_content)
         session_history = build_persisted_session_history(
             working_set_messages=messages,
@@ -254,12 +240,6 @@ class _EngineBackgroundResume:
         self._engine._set_session_history(session_key, session_history)
         self._engine._touch_session(session_key)
         if record_assistant_history:
-            self._engine.memory.record_conversation(
-                channel=channel,
-                chat_id=chat_id,
-                role="assistant",
-                content=final_content,
-            )
             session_id = self._engine._get_session_id(session_key)
             if session_id:
                 self._engine.memory.record_event(
@@ -269,11 +249,6 @@ class _EngineBackgroundResume:
                     chat_id=chat_id,
                     payload={"content": final_content},
                 )
-        summary_task = None
-        if record_assistant_history:
-            summary_task = self._engine._trigger_summary(meta, final_content, channel, chat_id)
-        if summary_task:
-            self._engine._pending_summaries[session_key] = summary_task
 
         snapshot_messages = self._engine._build_session_snapshot_messages(
             session_key=session_key,

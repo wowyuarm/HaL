@@ -10,7 +10,6 @@ from hal.channels.manager import ChannelManager
 from hal.cli.factory import (
     make_memory_search,
     make_provider,
-    make_summary_provider,
     make_worker_provider,
 )
 from hal.runtime.engine import AgentEngine
@@ -44,8 +43,6 @@ def build_gateway_runtime(config: "Config") -> GatewayRuntime:
         web_search_api_key=config.tools.web.search.api_key or None,
         exec_config=config.tools.exec,
         restrict_to_workspace=config.tools.restrict_to_workspace,
-        summary_model=config.agents.defaults.summary_model,
-        summary_provider=make_summary_provider(config),
         worker_model=config.agents.defaults.worker_model,
         worker_provider=worker_provider,
         memory_search=memory_search,

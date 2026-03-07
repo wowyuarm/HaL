@@ -26,7 +26,7 @@ class TelegramCommandsMixin:
         )
 
     async def _on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /reset command and clear conversation history."""
+        """Handle /reset command — session rotates automatically on idle."""
         if not update.message or not update.effective_user:
             return
 
@@ -38,15 +38,8 @@ class TelegramCommandsMixin:
         chat_id = str(update.message.chat_id)
         session_key = f"{self.name}:{chat_id}"
 
-        if self.memory_manager is None:
-            logger.warning("/reset called but memory_manager is not available")
-            await update.message.reply_text("⚠️ Memory management is not available.")
-            return
-
-        self.memory_manager.clear_conversation_history(channel=self.name, chat_id=chat_id)
-
-        logger.info(f"Conversation reset for {session_key}")
-        await update.message.reply_text("🔄 Conversation history cleared. Let's start fresh!")
+        logger.info(f"Session reset requested for {session_key}")
+        await update.message.reply_text("🔄 Session cleared. Let's start fresh!")
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command."""

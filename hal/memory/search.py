@@ -2,15 +2,12 @@
 
 Primary pipeline:
 episodes/*.md -> chunks -> embeddings -> Milvus -> semantic search
-
-Legacy daily-export indexing is retained for backward compatibility.
 """
 
 from __future__ import annotations
 
 import asyncio
 import re
-from datetime import date
 from pathlib import Path
 
 import litellm
@@ -25,8 +22,6 @@ from hal.workspace import EpisodeRepository
 # Demotes summaries so raw conversation chunks are preferred (raw-first strategy).
 _SUMMARY_PENALTY = 0.75
 # Score multiplier for subagent injection chunks (derived data, not raw dialog).
-# Lower than summary — subagent output is further from user intent and typically
-# denser, so it needs stronger demotion to avoid crowding out raw conversation.
 _SUBAGENT_PENALTY = 0.70
 _EMBED_RETRY_ATTEMPTS = 3
 _EMBED_RETRY_BASE_DELAY_S = 0.5
@@ -42,16 +37,11 @@ class MemorySearch:
 
     def __init__(
         self,
-        exporter: object | None = None,
-        chunker: object | None = None,
-        store: object | None = None,
         *,
-        deps: MemorySearchDeps | None = None,
+        deps: MemorySearchDeps,
         embedding_model: str,
-        source_root: Path | None = None,
+        source_root: Path,
         episodes_root: Path | None = None,
-        daily_dir: Path | None = None,
-        log_dir: Path | None = None,
         exclude_channels: list[str] | None = None,
         api_key: str | None = None,
         api_base: str | None = None,
@@ -60,24 +50,11 @@ class MemorySearch:
         embed_retry_base_delay_s: float = _EMBED_RETRY_BASE_DELAY_S,
         embed_timeout_s: float = 60.0,
     ):
-        resolved = self._resolve_deps(
-            deps=deps,
-            exporter=exporter,
-            chunker=chunker,
-            store=store,
-        )
-        self._exporter = resolved.exporter
-        self._chunker = resolved.chunker
-        self._store = resolved.store
+        self._chunker = deps.chunker
+        self._store = deps.store
         self._embedding_model = embedding_model
+        self._source_root = source_root
         self._episodes_root = episodes_root
-        self._daily_dir = daily_dir
-        self._source_root = self._resolve_source_root(
-            source_root=source_root,
-            episodes_root=episodes_root,
-            daily_dir=daily_dir,
-        )
-        self._log_dir = log_dir
         self._exclude_channels = {
             c.strip().lower() for c in (exclude_channels or []) if c and c.strip()
         }
@@ -88,75 +65,10 @@ class MemorySearch:
         self._embed_retry_base_delay_s = embed_retry_base_delay_s
         self._embed_timeout_s = embed_timeout_s
 
-    @staticmethod
-    def _resolve_deps(
-        *,
-        deps: MemorySearchDeps | None,
-        exporter: object | None,
-        chunker: object | None,
-        store: object | None,
-    ) -> MemorySearchDeps:
-        if deps is not None:
-            return deps
-        if chunker is None or store is None:
-            raise ValueError(
-                "MemorySearch requires either deps=MemorySearchDeps(...) or "
-                "legacy chunker/store arguments."
-            )
-        return MemorySearchDeps(exporter=exporter, chunker=chunker, store=store)
-
-    @staticmethod
-    def _resolve_source_root(
-        *,
-        source_root: Path | None,
-        episodes_root: Path | None,
-        daily_dir: Path | None,
-    ) -> Path:
-        if source_root is not None:
-            return source_root
-        if episodes_root is not None:
-            return episodes_root.parent
-        if daily_dir is not None:
-            return daily_dir
-        raise ValueError("MemorySearch requires source_root, episodes_root, or daily_dir.")
-
     async def initialize(self) -> None:
         """Initialize the vector store."""
         await self._store.initialize()
         logger.info("MemorySearch initialized")
-
-    async def index_date(self, target_date: date) -> int:
-        """Legacy: export and index a single date. Returns chunks indexed."""
-        if self._exporter is None or self._daily_dir is None:
-            logger.warning("index_date skipped: legacy exporter/daily_dir not configured")
-            return 0
-        self._exporter.export_date(target_date)
-
-        md_path = self._daily_dir / f"{target_date.isoformat()}.md"
-        if not md_path.exists():
-            return 0
-
-        return await self._index_file(md_path)
-
-    async def index_range(self, start: date, end: date) -> int:
-        """Legacy: export and index a date range. Returns total chunks indexed."""
-        if self._exporter is None or self._daily_dir is None:
-            logger.warning("index_range skipped: legacy exporter/daily_dir not configured")
-            return 0
-        self._exporter.export_range(start, end)
-
-        total = 0
-        for md_path in sorted(self._daily_dir.glob("*.md")):
-            # Filter to requested range
-            try:
-                file_date = date.fromisoformat(md_path.stem)
-            except ValueError:
-                continue
-            if file_date < start or file_date > end:
-                continue
-            total += await self._index_file(md_path)
-
-        return total
 
     async def search(
         self, query: str, top_k: int = 5, min_score: float = 0.0
@@ -170,8 +82,6 @@ class MemorySearch:
         if not query_embedding:
             return []
 
-        # Expand keyword query text for BM25 (e.g. dev_workflow/dev-workflow variants)
-        # and fetch a wider candidate pool for reranking.
         query_terms = _build_keyword_terms(query)
         keyword_query = _build_keyword_query(query, query_terms)
         results = await self._search_candidates(
@@ -180,13 +90,6 @@ class MemorySearch:
         results = self._filter_excluded_channels(results)
         results = self._rank_with_source_penalties(results, query_terms=query_terms)
         return self._slice_results(results, top_k=top_k, min_score=min_score)
-
-    async def export_and_index_yesterday(self) -> int:
-        """Legacy convenience: export yesterday's log and index it."""
-        from datetime import timedelta
-
-        yesterday = date.today() - timedelta(days=1)
-        return await self.index_date(yesterday)
 
     async def index_episode(self, episode_path: Path) -> int:
         """Index one episode markdown file."""
@@ -204,14 +107,8 @@ class MemorySearch:
         return total
 
     async def backfill(self) -> int:
-        """Backfill missing indexes from primary source (episodes by default)."""
-        if self._episodes_root is not None:
-            return await self._backfill_episodes()
-        return await self._backfill_daily()
-
-    async def _backfill_episodes(self) -> int:
-        """Index all episode markdown files that are missing or out-of-date."""
-        if not self._episodes_root.exists():
+        """Backfill missing indexes from episode markdown files."""
+        if not self._episodes_root or not self._episodes_root.exists():
             return 0
 
         indexed_sources = await self._store.get_indexed_sources()
@@ -227,61 +124,9 @@ class MemorySearch:
             logger.info(f"Episode backfill completed: indexed {total} chunks")
         return total
 
-    async def _backfill_daily(self) -> int:
-        """Legacy: export and index un-exported daily JSONL log files."""
-        if self._exporter is None or self._daily_dir is None:
-            return 0
-        log_dir = self._resolve_log_dir()
-        if not log_dir.exists():
-            return 0
-
-        # Collect dates that have JSONL but are not yet fully indexed.
-        # A date needs indexing when:
-        # 1) its source markdown isn't present in the vector store, OR
-        # 2) its indexed chunk IDs differ from the chunk IDs computed from markdown.
-        indexed_sources = await self._store.get_indexed_sources()
-
-        total = 0
-        for jsonl_path in sorted(log_dir.glob("*.jsonl")):
-            try:
-                log_date = date.fromisoformat(jsonl_path.stem)
-            except ValueError:
-                continue
-            # Skip today (still accumulating entries)
-            if log_date >= date.today():
-                continue
-
-            source_name = f"{log_date.isoformat()}.md"
-            if not await self._needs_reindex(source_name, indexed_sources=indexed_sources):
-                continue
-
-            count = await self.index_date(log_date)
-            total += count
-
-        if total:
-            logger.info(f"Backfill completed: indexed {total} chunks")
-        return total
-
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
-
-    def _resolve_log_dir(self) -> Path:
-        """Resolve JSONL log directory for backfill date discovery."""
-        if self._log_dir is not None:
-            return self._log_dir
-
-        # Backward compatibility for integrations that still pass DailyExporter only.
-        exporter_log = getattr(self._exporter, "_log", None)
-        exporter_data_dir = getattr(exporter_log, "data_dir", None)
-        if isinstance(exporter_data_dir, Path):
-            return exporter_data_dir
-
-        logger.warning(
-            "MemorySearch.log_dir not configured and exporter has no _log.data_dir; "
-            "falling back to source_root for backfill scan"
-        )
-        return self._source_root
 
     def _source_for_path(self, md_path: Path) -> str:
         """Build deterministic source id from markdown path."""
@@ -314,8 +159,6 @@ class MemorySearch:
     def _rank_with_source_penalties(
         self, results: list[SearchResult], *, query_terms: list[str]
     ) -> list[SearchResult]:
-        # For subagent chunks, keep full score when multiple query terms match
-        # literally — this avoids suppressing clearly relevant snippets.
         for result in results:
             hit_count = _count_literal_hits(f"{result.heading}\n{result.content}", query_terms)
             if result.source_type == "summary":
@@ -423,8 +266,6 @@ class MemorySearch:
         chunks = self._filter_indexable_chunks(chunks)
         source = self._source_for_path(md_path)
         if not chunks:
-            # Source now fully excluded (or empty): clear any previously indexed chunks
-            # so backfill/index checks do not keep flagging this file for reindex.
             await self._clear_source_if_present(source)
             return 0
 
@@ -484,18 +325,12 @@ class MemorySearch:
         return expected != existing
 
     async def _embed_texts_direct(self, texts: list[str]) -> list[list[float]]:
-        """Call OpenAI-compatible embedding endpoint directly.
-
-        Bypasses LiteLLM's parameter validation which incorrectly blocks
-        the 'dimensions' param for custom OpenAI-compatible providers.
-        """
+        """Call OpenAI-compatible embedding endpoint directly."""
         import httpx
 
-        # Strip litellm routing prefix (e.g. "openai/") to get raw model name
         model = self._embedding_model
         if "/" in model:
             parts = model.split("/", 1)
-            # Only strip known litellm prefixes, not model namespace slashes
             if parts[0] in ("openai", "azure", "bedrock"):
                 model = parts[1]
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -11,7 +10,6 @@ from hal.bus.events import MessageInjectEvent, ReminderEvent, SubagentCompleteEv
 
 from .debrief import extract_touched_threads
 from .subagent_injection import (
-    _SUBAGENT_HISTORY_MAX_TOKENS,
     _SUBAGENT_RUNTIME_MAX_TOKENS,
     _build_subagent_injection,
     _split_subagent_tool_result,
@@ -170,14 +168,6 @@ class _MessageInjectSubscriber:
         self._injected_sink.append(event.message)
         logger.info(f"[inject] mid-loop message from {event.message.sender_id}")
 
-        if self._scope.channel and self._scope.chat_id:
-            self._scope.engine.memory.record_conversation(
-                channel=self._scope.channel,
-                chat_id=self._scope.chat_id,
-                role="user",
-                content=event.prefixed_content,
-            )
-
 
 class _ToolCallSubscriber:
     """Handle tool-call side effects for one loop scope."""
@@ -204,7 +194,6 @@ class _ToolCallSubscriber:
 
         self._mark_touched_threads(event)
         self._record_tool_call_event(event)
-        self._record_tool_conversation(event)
         await self._maybe_emit_reminder(event)
         await self._maybe_emit_inline_subagent_completion(event)
 
@@ -231,22 +220,6 @@ class _ToolCallSubscriber:
                 "args": event.arguments,
                 "result_size": len(event.result or ""),
             },
-        )
-
-    def _record_tool_conversation(self, event: ToolCallEvent) -> None:
-        if not self._scope.channel or not self._scope.chat_id:
-            return
-        self._scope.engine.memory.record_conversation(
-            channel=self._scope.channel,
-            chat_id=self._scope.chat_id,
-            role="tool",
-            content=(
-                "Calling "
-                f"{event.tool_name} with arguments: "
-                f"{json.dumps(event.arguments, ensure_ascii=False)}"
-            ),
-            tool_name=event.tool_name,
-            tool_result=event.result,
         )
 
     async def _maybe_emit_reminder(self, event: ToolCallEvent) -> None:
@@ -369,28 +342,4 @@ class _EngineBackgroundSubscribers:
                     },
                 )
 
-        history_inject = _build_subagent_injection(
-            label=event.label,
-            content=event.content,
-            status=event.status,
-            background=event.background,
-            record_id=event.record_id,
-            artifact_path=event.artifact_path,
-            total_tokens=event.total_tokens,
-            tools_used=event.tools_used,
-            tool_call_counts=event.tool_call_counts,
-            has_side_effects=event.has_side_effects,
-            files_modified=event.files_modified,
-            commands_run=event.commands_run,
-            tool_errors=event.tool_errors,
-            missing_artifacts=event.missing_artifacts,
-            max_tokens=_SUBAGENT_HISTORY_MAX_TOKENS,
-        )
-        self._engine.memory.record_conversation(
-            channel=event.channel,
-            chat_id=event.chat_id,
-            role="user",
-            content=history_inject,
-            entry_type="injection",
-        )
         await self._engine.queue_background_completion(event)

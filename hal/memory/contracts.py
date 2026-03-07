@@ -3,17 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
 
 from hal.memory.store import SearchResult
-
-
-class MemoryExporterPort(Protocol):
-    def export_date(self, target_date: date) -> None: ...
-
-    def export_range(self, start: date, end: date) -> None: ...
 
 
 class MemoryChunkerPort(Protocol):
@@ -40,7 +33,6 @@ class MemoryStorePort(Protocol):
 class MemorySearchDeps:
     """Dependency bundle for memory-search orchestration."""
 
-    exporter: MemoryExporterPort | None
     chunker: MemoryChunkerPort
     store: MemoryStorePort
 

@@ -1,6 +1,5 @@
-"""Tests for MemorySearch — integration of export, chunk, embed, and search."""
+"""Tests for MemorySearch — chunk, embed, and search pipeline."""
 
-from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -8,7 +7,6 @@ import pytest
 
 from hal.memory.chunker import MarkdownChunker
 from hal.memory.contracts import MemorySearchDeps
-from hal.memory.exporter import DailyExporter
 from hal.memory.search import (
     MemorySearch,
     _build_keyword_query,
@@ -35,12 +33,9 @@ class FakeVectorStore:
     async def search(
         self, query_embedding: list[float], *, query_text: str = "", top_k: int = 5
     ) -> list[SearchResult]:
-        # Simple: return all stored chunks ranked by first embedding element similarity
         results = []
         for chunk in self._data.values():
-            # Fake score based on dot product of first element
             score = sum(a * b for a, b in zip(query_embedding[:3], chunk["embedding"][:3]))
-            # Boost score if query_text appears in content (simulates BM25)
             if query_text and query_text.lower() in chunk["content"].lower():
                 score += 0.5
             results.append(
@@ -72,23 +67,6 @@ class FakeVectorStore:
         pass
 
 
-class _ExporterWithoutLog:
-    """Minimal exporter without private _log state (for backfill contract tests)."""
-
-    def __init__(self, daily_dir: Path):
-        self._daily_dir = daily_dir
-
-    def export_date(self, target_date: date) -> None:
-        (self._daily_dir / f"{target_date.isoformat()}.md").write_text(
-            "# Exported\n\ncontent",
-            encoding="utf-8",
-        )
-
-    def export_range(self, start: date, end: date) -> None:
-        for day in range((end - start).days + 1):
-            self.export_date(start + timedelta(days=day))
-
-
 def _fake_embedding(texts: list[str]) -> list[list[float]]:
     """Deterministic fake embeddings based on text hash."""
     result = []
@@ -98,68 +76,41 @@ def _fake_embedding(texts: list[str]) -> list[list[float]]:
     return result
 
 
-@pytest.fixture
-def daily_log(tmp_path):
-    from hal.memory.daily_log import DailyLog
-
-    return DailyLog(tmp_path / "logs")
-
-
-@pytest.fixture
-def daily_dir(tmp_path):
-    d = tmp_path / "daily"
-    d.mkdir()
-    return d
-
-
-@pytest.fixture
-def memory_search(daily_log, daily_dir):
-    exporter = DailyExporter(daily_log, daily_dir)
+def _make_search(tmp_path: Path, **kwargs) -> MemorySearch:
+    """Create a MemorySearch with FakeVectorStore for testing."""
     chunker = MarkdownChunker(max_size=500, overlap_lines=1)
     store = FakeVectorStore()
-    ms = MemorySearch(
-        deps=MemorySearchDeps(exporter=exporter, chunker=chunker, store=store),
+    return MemorySearch(
+        deps=MemorySearchDeps(chunker=chunker, store=store),
         embedding_model="fake-model",
-        daily_dir=daily_dir,
-        log_dir=daily_log.data_dir,
+        source_root=tmp_path,
+        **kwargs,
     )
-    return ms
+
+
+@pytest.fixture
+def memory_search(tmp_path):
+    return _make_search(tmp_path)
 
 
 @pytest.fixture
 def episode_search(tmp_path):
     threads_dir = tmp_path / "work" / "threads"
     threads_dir.mkdir(parents=True, exist_ok=True)
-    chunker = MarkdownChunker(max_size=500, overlap_lines=1)
-    store = FakeVectorStore()
-    return MemorySearch(
-        deps=MemorySearchDeps(exporter=None, chunker=chunker, store=store),
-        embedding_model="fake-model",
-        source_root=tmp_path,
-        episodes_root=threads_dir,
-    )
+    return _make_search(tmp_path, episodes_root=threads_dir)
 
 
-class TestIndexDate:
-    async def test_index_empty(self, memory_search):
-        with patch.object(memory_search, "_embed_texts", new_callable=AsyncMock) as mock_embed:
-            count = await memory_search.index_date(date(2026, 2, 12))
-            assert count == 0
-            mock_embed.assert_not_called()
+class TestIndexFile:
+    async def test_index_empty_nonexistent(self, memory_search, tmp_path):
+        count = await memory_search.index_episode(tmp_path / "does-not-exist.md")
+        assert count == 0
 
-    async def test_index_with_data(self, memory_search, daily_log, daily_dir):
-        from hal.memory.daily_log import LogEntry
-
-        # Write a log entry
-        log_file = daily_log.data_dir / "2026-02-12.jsonl"
-        entry = LogEntry(
-            timestamp="2026-02-12T10:30:00",
-            channel="telegram",
-            chat_id="123",
-            role="user",
-            content="Tell me about the weather",
+    async def test_index_markdown_file(self, memory_search, tmp_path):
+        md_path = tmp_path / "episode.md"
+        md_path.write_text(
+            "# 2026-03-07: Test episode\n\n## Discussion\n\nThe weather in Beijing is sunny\n",
+            encoding="utf-8",
         )
-        log_file.write_text(entry.model_dump_json() + "\n")
 
         with patch.object(
             memory_search,
@@ -167,22 +118,13 @@ class TestIndexDate:
             new_callable=AsyncMock,
             side_effect=lambda texts: _fake_embedding(texts),
         ):
-            count = await memory_search.index_date(date(2026, 2, 12))
+            count = await memory_search._index_file(md_path)
             assert count > 0
 
-    async def test_incremental_index(self, memory_search, daily_log, daily_dir):
+    async def test_incremental_index(self, memory_search, tmp_path):
         """Second call with same data should not re-embed."""
-        from hal.memory.daily_log import LogEntry
-
-        log_file = daily_log.data_dir / "2026-02-12.jsonl"
-        entry = LogEntry(
-            timestamp="2026-02-12T10:30:00",
-            channel="cli",
-            chat_id="direct",
-            role="user",
-            content="Hello world",
-        )
-        log_file.write_text(entry.model_dump_json() + "\n")
+        md_path = tmp_path / "episode.md"
+        md_path.write_text("# A\n\nHello world\n", encoding="utf-8")
 
         with patch.object(
             memory_search,
@@ -190,20 +132,17 @@ class TestIndexDate:
             new_callable=AsyncMock,
             side_effect=lambda texts: _fake_embedding(texts),
         ) as mock_embed:
-            # First indexing: must export first since md doesn't exist yet
-            await memory_search.index_date(date(2026, 2, 12))
+            await memory_search._index_file(md_path)
             first_calls = mock_embed.call_count
 
-            # Re-index — the md file already exists, chunks already in store
-            await memory_search.index_date(date(2026, 2, 12))
-            # Should not call embed again since chunks are already indexed
+            await memory_search._index_file(md_path)
             assert mock_embed.call_count == first_calls
 
     async def test_index_file_clears_stale_source_when_all_chunks_excluded(
-        self, memory_search, daily_dir
+        self, memory_search, tmp_path
     ):
-        source = "2026-02-12.md"
-        md_path = daily_dir / source
+        source = "episode.md"
+        md_path = tmp_path / source
         md_path.write_text(
             "# 2026-02-12\n\n## cron / job-1\n\n**[10:30] User**: should be excluded\n",
             encoding="utf-8",
@@ -231,18 +170,12 @@ class TestIndexDate:
 
 
 class TestSearch:
-    async def test_search_returns_results(self, memory_search, daily_log, daily_dir):
-        from hal.memory.daily_log import LogEntry
-
-        log_file = daily_log.data_dir / "2026-02-12.jsonl"
-        entry = LogEntry(
-            timestamp="2026-02-12T10:30:00",
-            channel="telegram",
-            chat_id="123",
-            role="user",
-            content="The weather in Beijing is sunny",
+    async def test_search_returns_results(self, memory_search, tmp_path):
+        md_path = tmp_path / "episode.md"
+        md_path.write_text(
+            "# 2026-03-07\n\n## telegram / 123\n\nThe weather in Beijing is sunny\n",
+            encoding="utf-8",
         )
-        log_file.write_text(entry.model_dump_json() + "\n")
 
         with patch.object(
             memory_search,
@@ -250,7 +183,7 @@ class TestSearch:
             new_callable=AsyncMock,
             side_effect=lambda texts: _fake_embedding(texts),
         ):
-            await memory_search.index_date(date(2026, 2, 12))
+            await memory_search._index_file(md_path)
             results = await memory_search.search("weather", top_k=3)
             assert len(results) > 0
             assert any(
@@ -272,14 +205,14 @@ class TestSearch:
         fake_results = [
             SearchResult(
                 content="cron update",
-                source="2026-02-12.md",
+                source="episode.md",
                 heading="cron / job-1",
                 score=0.95,
                 source_type="raw",
             ),
             SearchResult(
                 content="user update",
-                source="2026-02-12.md",
+                source="episode.md",
                 heading="telegram / 123",
                 score=0.9,
                 source_type="raw",
@@ -301,33 +234,18 @@ class TestSearch:
         assert len(results) == 1
         assert results[0].heading == "telegram / 123"
 
-    async def test_summary_penalty_applied(self, memory_search, daily_log, daily_dir):
+    async def test_summary_penalty_applied(self, memory_search, tmp_path):
         """Summary chunks should have their scores reduced by the penalty factor."""
-        from hal.memory.daily_log import LogEntry
         from hal.memory.search import _SUMMARY_PENALTY
 
-        log_file = daily_log.data_dir / "2026-02-12.jsonl"
-        entries = [
-            LogEntry(
-                timestamp="2026-02-12T10:30:00",
-                channel="telegram",
-                chat_id="123",
-                role="user",
-                content="Discuss the deployment strategy for production",
-            ),
-            LogEntry(
-                timestamp="2026-02-12T10:31:00",
-                channel="telegram",
-                chat_id="123",
-                role="user",
-                content=(
-                    "[System Summary]\n"
-                    "Agent deployed the app to production using blue-green strategy."
-                ),
-                entry_type="summary",
-            ),
-        ]
-        log_file.write_text("\n".join(e.model_dump_json() for e in entries) + "\n")
+        md_path = tmp_path / "episode.md"
+        md_path.write_text(
+            "# 2026-03-07\n\n## telegram / 123\n\n"
+            "Discuss the deployment strategy for production\n\n"
+            "[System Summary]\n"
+            "Agent deployed the app to production using blue-green strategy.\n",
+            encoding="utf-8",
+        )
 
         with patch.object(
             memory_search,
@@ -335,10 +253,9 @@ class TestSearch:
             new_callable=AsyncMock,
             side_effect=lambda texts: _fake_embedding(texts),
         ):
-            await memory_search.index_date(date(2026, 2, 12))
+            await memory_search._index_file(md_path)
 
             keyword_query = _build_keyword_query("deployment", _build_keyword_terms("deployment"))
-            # Get raw scores from store directly (before penalty)
             raw_results = await memory_search._store.search(
                 _fake_embedding(["deployment"])[0], query_text=keyword_query, top_k=5
             )
@@ -346,43 +263,26 @@ class TestSearch:
                 r.content: r.score for r in raw_results if r.source_type == "summary"
             }
 
-            # Get penalized scores via search()
             results = await memory_search.search("deployment", top_k=5)
             summary_penalized = {r.content: r.score for r in results if r.source_type == "summary"}
 
-            # Verify penalty was applied to summary chunks
             for content, penalized_score in summary_penalized.items():
                 raw_score = summary_raw_scores[content]
                 assert abs(penalized_score - raw_score * _SUMMARY_PENALTY) < 1e-6
 
-    async def test_subagent_penalty_applied(self, memory_search, daily_log, daily_dir):
+    async def test_subagent_penalty_applied(self, memory_search, tmp_path):
         """Subagent chunks should be tagged and mildly down-ranked."""
-        from hal.memory.daily_log import LogEntry
         from hal.memory.search import _SUBAGENT_PENALTY
 
-        log_file = daily_log.data_dir / "2026-02-12.jsonl"
-        entries = [
-            LogEntry(
-                timestamp="2026-02-12T10:30:00",
-                channel="telegram",
-                chat_id="123",
-                role="user",
-                content="Please audit this repository and summarize findings",
-            ),
-            LogEntry(
-                timestamp="2026-02-12T10:31:00",
-                channel="telegram",
-                chat_id="123",
-                role="user",
-                content=(
-                    "[Subagent Result: repo-audit]\n"
-                    "Found 3 critical issues and 2 warnings.\n"
-                    "[Subagent Artifact] /tmp/artifacts/subagent/abc.md"
-                ),
-                entry_type="injection",
-            ),
-        ]
-        log_file.write_text("\n".join(e.model_dump_json() for e in entries) + "\n")
+        md_path = tmp_path / "episode.md"
+        md_path.write_text(
+            "# 2026-03-07\n\n## telegram / 123\n\n"
+            "Please audit this repository and summarize findings\n\n"
+            "[Subagent Result: repo-audit]\n"
+            "Found 3 critical issues and 2 warnings.\n"
+            "[Subagent Artifact] /tmp/artifacts/subagent/abc.md\n",
+            encoding="utf-8",
+        )
 
         with patch.object(
             memory_search,
@@ -390,7 +290,7 @@ class TestSearch:
             new_callable=AsyncMock,
             side_effect=lambda texts: _fake_embedding(texts),
         ):
-            await memory_search.index_date(date(2026, 2, 12))
+            await memory_search._index_file(md_path)
 
             keyword_query = _build_keyword_query("audit", _build_keyword_terms("audit"))
             raw_results = await memory_search._store.search(
@@ -483,16 +383,6 @@ class TestSearch:
             assert results[0].content == "high"
 
 
-class TestExportAndIndexYesterday:
-    async def test_convenience_method(self, memory_search):
-        with patch.object(
-            memory_search, "index_date", new_callable=AsyncMock, return_value=5
-        ) as mock_idx:
-            count = await memory_search.export_and_index_yesterday()
-            assert count == 5
-            mock_idx.assert_called_once()
-
-
 class TestEmbeddingResilience:
     async def test_embed_texts_retries_on_transient_error(self, memory_search):
         with (
@@ -509,12 +399,11 @@ class TestEmbeddingResilience:
             assert mock_embed.await_count == 2
             mock_sleep.assert_awaited_once()
 
-    async def test_index_file_falls_back_to_per_chunk_embedding(self, memory_search, daily_dir):
-        md_path = daily_dir / "2026-02-12.md"
+    async def test_index_file_falls_back_to_per_chunk_embedding(self, memory_search, tmp_path):
+        md_path = tmp_path / "episode.md"
         md_path.write_text("# A\n\nalpha\n\n## B\n\nbeta", encoding="utf-8")
 
         async def flaky_embed(texts: list[str]) -> list[list[float]]:
-            # Simulate batch failure, then one single-chunk failure.
             if len(texts) > 1:
                 return []
             if "beta" in texts[0]:
@@ -526,8 +415,8 @@ class TestEmbeddingResilience:
 
         assert count == 1
 
-    async def test_needs_reindex_detects_chunk_id_mismatch(self, memory_search, daily_dir):
-        md_path = daily_dir / "2026-02-12.md"
+    async def test_needs_reindex_detects_chunk_id_mismatch(self, memory_search, tmp_path):
+        md_path = tmp_path / "episode.md"
         md_path.write_text("# A\n\nalpha", encoding="utf-8")
 
         with patch.object(
@@ -538,7 +427,7 @@ class TestEmbeddingResilience:
         ):
             await memory_search._index_file(md_path)
 
-        source_name = "2026-02-12.md"
+        source_name = "episode.md"
         needs_reindex = await memory_search._needs_reindex(
             source_name, indexed_sources={source_name}
         )
@@ -549,41 +438,6 @@ class TestEmbeddingResilience:
             source_name, indexed_sources={source_name}
         )
         assert needs_reindex is True
-
-
-class TestBackfill:
-    async def test_backfill_uses_explicit_log_dir_without_exporter_private_log(self, tmp_path):
-        log_dir = tmp_path / "logs"
-        log_dir.mkdir()
-        daily_dir = tmp_path / "daily"
-        daily_dir.mkdir()
-        target_date = date.today() - timedelta(days=2)
-        (log_dir / f"{target_date.isoformat()}.jsonl").write_text(
-            '{"timestamp":"2026-01-01T00:00:00","role":"user","content":"x"}\n',
-            encoding="utf-8",
-        )
-
-        ms = MemorySearch(
-            deps=MemorySearchDeps(
-                exporter=_ExporterWithoutLog(daily_dir),
-                chunker=MarkdownChunker(max_size=500, overlap_lines=1),
-                store=FakeVectorStore(),
-            ),
-            embedding_model="fake-model",
-            daily_dir=daily_dir,
-            log_dir=log_dir,
-        )
-
-        with patch.object(
-            ms,
-            "_embed_texts",
-            new_callable=AsyncMock,
-            side_effect=lambda texts: _fake_embedding(texts),
-        ):
-            count = await ms.backfill()
-
-        assert count == 1
-        assert (daily_dir / f"{target_date.isoformat()}.md").exists()
 
 
 class TestEpisodeIndexing:

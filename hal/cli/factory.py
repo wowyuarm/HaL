@@ -51,11 +51,6 @@ def make_provider(config):
     )
 
 
-def make_summary_provider(config):
-    """Create a separate LiteLLMProvider for summary model if needed. Returns None if same provider."""
-    return _make_alternate_provider(config, config.agents.defaults.summary_model)
-
-
 def make_worker_provider(config):
     """Create a separate LiteLLMProvider for worker model if needed. Returns None if same provider."""
     return _make_alternate_provider(config, config.agents.defaults.worker_model)
@@ -148,7 +143,7 @@ def _missing_memory_deps(milvus_uri: str) -> list[str]:
 
 def make_memory_search(config):
     """Create MemorySearch instance from config. Returns None if deps missing."""
-    from hal.workspace import LogRepository, ThreadRepository
+    from hal.workspace import ThreadRepository
 
     missing = _missing_memory_deps(config.memory_search.milvus_uri)
     if missing:
@@ -172,7 +167,6 @@ def make_memory_search(config):
 
     workspace = config.workspace_path
     thread_repo = ThreadRepository(workspace)
-    log_repo = LogRepository(workspace)
     chunker = MarkdownChunker(
         max_size=ms_cfg.max_chunk_size,
         overlap_lines=ms_cfg.chunk_overlap_lines,
@@ -185,11 +179,10 @@ def make_memory_search(config):
     )
 
     return MemorySearch(
-        deps=MemorySearchDeps(exporter=None, chunker=chunker, store=store),
+        deps=MemorySearchDeps(chunker=chunker, store=store),
         embedding_model=ms_cfg.embedding_model,
         source_root=workspace,
         episodes_root=thread_repo.threads_dir(),
-        log_dir=log_repo.logs_dir(),
         exclude_channels=ms_cfg.exclude_channels,
         embedding_dim=ms_cfg.embedding_dim,
         embed_retry_attempts=ms_cfg.embed_retry_attempts,

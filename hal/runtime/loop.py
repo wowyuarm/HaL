@@ -62,10 +62,6 @@ class LoopMetadata:
     total_usage: dict[str, int] = field(default_factory=dict)
     loop_messages: list[dict[str, Any]] = field(default_factory=list)
 
-    @property
-    def needs_summary(self) -> bool:
-        return self.iterations >= 5 or self.has_side_effects
-
 
 class LoopHooks(Protocol):
     """Optional hooks that callers can implement to customize loop behavior.

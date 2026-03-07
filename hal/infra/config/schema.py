@@ -34,20 +34,13 @@ class ChannelsConfig(_StrictModel):
 
 
 class HistoryConfig(_StrictModel):
-    """Conversation history context configuration.
+    """Context history and budget configuration.
 
-    Controls how historical messages are prepared before sending to the LLM.
-    Older assistant messages are truncated to reduce in-context learning
-    contamination (where the model picks up formatting/style from its own
-    earlier outputs).
+    Controls token budgets for memory injection, recall, and thread context.
+    Session history is managed in-memory by the engine.
     """
 
-    max_messages: int = 50  # Max messages loaded from daily log
-    recent_full_turns: int = 3  # Recent assistant messages kept verbatim
-    assistant_truncate_tokens: int = 50  # Max tokens for older assistant messages
-    max_history_tokens: int = 0  # 0 = unlimited; hard cap on total history tokens
     memory_budget_tokens: int = 0  # 0 = unlimited; token budget for MEMORY.md injection
-    history_days: int = 1  # 1 = today only; 2+ includes previous days
     recall_max_total_tokens: int = 500  # Max tokens injected from retrieved memory fragments
     recall_max_per_item_tokens: int = 125  # Max tokens per retrieved memory fragment
     max_thread_registry_size: int = Field(
@@ -75,7 +68,6 @@ class AgentDefaults(_StrictModel):
     max_tokens: int = 8192
     temperature: float = 0.7
     max_tool_iterations: int = 20
-    summary_model: str = "default"  # Model for post-loop summaries; "default" uses main model
     worker_model: str = "default"  # Model for worker agents; "default" uses main
     history: HistoryConfig = Field(default_factory=HistoryConfig)
 
@@ -201,7 +193,6 @@ class EngineConfig(_StrictModel):
         default=120.0, gt=0
     )  # Grace period for user confirmation before auto debrief
     context_advisor_enabled: bool = True  # Enable first-tool-call context advisor hints
-    summary_barrier_timeout_s: float = Field(default=10.0, gt=0)  # Max wait for pending summary
     llm_retry_attempts: int = Field(default=3, ge=1)  # Retry count for retryable LLM API errors
     llm_retry_base_delay_s: float = Field(
         default=0.8, gt=0

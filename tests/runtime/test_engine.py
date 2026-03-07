@@ -247,7 +247,6 @@ class TestDispatch:
         assert out.channel == "telegram"
         assert out.chat_id == "c1"
         assert out.content == "(No response generated.)"
-        assert engine.memory.record_conversation.call_count == 1
 
     async def test_error_response_is_not_written_to_history(self, engine):
         engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
@@ -259,7 +258,6 @@ class TestDispatch:
 
         assert out is not None
         assert out.content.startswith("Error calling LLM:")
-        assert engine.memory.record_conversation.call_count == 1
 
     def test_session_rotates_after_idle_timeout(self, engine):
         engine._engine_config.session_idle_timeout_s = 1.0
@@ -1196,7 +1194,10 @@ class TestMidLoopInjection:
             if m.get("role") == "user"
         )
 
-    async def test_background_completion_event_persisted_by_global_subscriber(self, engine, bus):
+    async def test_background_completion_event_queued_by_global_subscriber(self, engine, bus):
+        original = engine.queue_background_completion
+        engine.queue_background_completion = AsyncMock(side_effect=original)  # type: ignore[method-assign]
+
         await bus.emit(
             SubagentCompleteEvent(
                 label="bg-task",
@@ -1210,12 +1211,7 @@ class TestMidLoopInjection:
             )
         )
 
-        assert engine.memory.record_conversation.called
-        kwargs = engine.memory.record_conversation.call_args.kwargs
-        assert kwargs["channel"] == "telegram"
-        assert kwargs["chat_id"] == "c1"
-        assert kwargs["entry_type"] == "injection"
-        assert "[Background subagent 'bg-task' completed]" in kwargs["content"]
+        engine.queue_background_completion.assert_awaited_once()
 
     async def test_background_completion_after_loop_end_resumes_same_session(self, engine, bus):
         first_meta = LoopMetadata(iterations=1, has_side_effects=False)
@@ -1453,24 +1449,6 @@ class TestRunLoop:
 # ------------------------------------------------------------------
 
 
-class TestLoopMetadata:
-    def test_needs_summary_true_when_many_iterations(self):
-        meta = LoopMetadata(iterations=5)
-        assert meta.needs_summary is True
-
-    def test_needs_summary_true_when_has_side_effects(self):
-        meta = LoopMetadata(iterations=1, has_side_effects=True)
-        assert meta.needs_summary is True
-
-    def test_needs_summary_false_when_few_iterations_no_side_effects(self):
-        meta = LoopMetadata(iterations=2, has_side_effects=False)
-        assert meta.needs_summary is False
-
-    def test_needs_summary_boundary_four_iterations(self):
-        meta = LoopMetadata(iterations=4)
-        assert meta.needs_summary is False
-
-
 class TestExecuteLoopMetadata:
     """Test that _execute_loop tracks files_modified and commands_run."""
 
@@ -1542,108 +1520,6 @@ class TestExecuteLoopMetadata:
         assert meta.has_side_effects is False
         assert meta.files_modified == []
         assert meta.commands_run == []
-
-
-class TestSummaryTrigger:
-    """Test that summary is triggered/skipped correctly in process()."""
-
-    async def test_summary_not_triggered_when_needs_summary_false(self, engine):
-        """No summary task created when loop doesn't qualify."""
-        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
-            return_value=("response", LoopMetadata(iterations=2, has_side_effects=False), [])
-        )
-
-        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
-        await engine.process(msg)
-
-        assert msg.session_key not in engine._pending_summaries
-
-    async def test_summary_triggered_with_default_model(self, engine):
-        """Summary task created using main model when summary_model is 'default'."""
-        engine._summary_model = "default"
-        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
-            return_value=("response", LoopMetadata(iterations=6, has_side_effects=True), [])
-        )
-        engine._generate_summary = AsyncMock()  # type: ignore[method-assign]
-
-        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
-        await engine.process(msg)
-
-        assert msg.session_key in engine._pending_summaries
-
-    async def test_summary_triggered_when_conditions_met(self, engine):
-        """Summary task created when needs_summary=True and summary_model set."""
-        engine._summary_model = "cheap-model"
-        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
-            return_value=("response", LoopMetadata(iterations=6, has_side_effects=True), [])
-        )
-        engine._generate_summary = AsyncMock()  # type: ignore[method-assign]
-
-        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="hi")
-        await engine.process(msg)
-
-        assert msg.session_key in engine._pending_summaries
-
-    async def test_summary_barrier_waits_for_pending_task(self, engine):
-        """process() waits for a pending summary before proceeding."""
-        engine._summary_model = "cheap-model"
-        completed = False
-
-        async def fake_summary(*args):
-            nonlocal completed
-            await asyncio.sleep(0.01)
-            completed = True
-
-        # Simulate a pending summary from a previous call
-        task = asyncio.create_task(fake_summary())
-        session_key = "cli:d"
-        engine._pending_summaries[session_key] = task
-
-        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
-            return_value=("response", LoopMetadata(iterations=1), [])
-        )
-
-        msg = InboundMessage(channel="cli", sender_id="u", chat_id="d", content="follow up")
-        await engine.process(msg)
-
-        assert completed is True
-        assert session_key not in engine._pending_summaries
-
-
-class TestGenerateSummary:
-    async def test_summary_uses_summary_entry_type(self, engine, mock_provider):
-        """generate_summary should record with entry_type='summary'."""
-        from hal.runtime.summary import generate_summary
-
-        mock_provider.chat = AsyncMock(
-            return_value=LLMResponse(content="Summary text", tool_calls=[])
-        )
-
-        meta = LoopMetadata(
-            iterations=6,
-            tools_used=["fs"],
-            files_modified=["/tmp/a.txt"],
-            has_side_effects=True,
-            loop_messages=[],
-        )
-
-        await generate_summary(
-            meta=meta,
-            final_content="final response",
-            channel="telegram",
-            chat_id="c1",
-            provider=mock_provider,
-            model="test-model",
-            memory=engine.memory,
-        )
-
-        engine.memory.record_conversation.assert_called_with(
-            channel="telegram",
-            chat_id="c1",
-            role="user",
-            content="[System Summary]\nSummary text",
-            entry_type="summary",
-        )
 
 
 class TestSubagentInjectionHelpers:

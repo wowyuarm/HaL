@@ -180,7 +180,6 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.engine.session_debrief_enabled is True
     assert cfg.engine.session_debrief_confirm_timeout_s == 120.0
     assert cfg.engine.context_advisor_enabled is True
-    assert cfg.engine.summary_barrier_timeout_s == 10.0
     assert cfg.engine.llm_retry_attempts == 3
     assert cfg.engine.llm_retry_base_delay_s == 0.8
     assert cfg.engine.llm_retry_max_delay_s == 8.0

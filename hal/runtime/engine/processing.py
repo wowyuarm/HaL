@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -27,17 +26,6 @@ _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
 
 def _message_sent_in_turn(tool: Any) -> bool:
     return bool(getattr(tool, "sent_in_turn", False))
-
-
-async def _await_summary_barrier(*, engine: Any, msg: Any) -> None:
-    """Await pending summary task for this session before handling a new message."""
-    task = engine._pending_summaries.pop(msg.session_key, None)
-    if task is None:
-        return
-    try:
-        await asyncio.wait_for(task, timeout=engine._engine_config.summary_barrier_timeout_s)
-    except (asyncio.TimeoutError, Exception) as e:
-        logger.warning(f"Summary barrier: {e}")
 
 
 def _compute_recall_chars(
@@ -182,12 +170,6 @@ def _record_user_turn(*, engine: Any, msg: Any, session_id: str) -> None:
         chat_id=msg.chat_id,
         payload={"content": msg.content, "media": list(msg.media or [])},
     )
-    engine.memory.record_conversation(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        role="user",
-        content=msg.content,
-    )
     engine._mark_threads_touched(msg.session_key, engine._detect_thread_mentions(msg.content))
     engine._update_tool_contexts(msg.channel, msg.chat_id)
 
@@ -214,7 +196,7 @@ async def _persist_completed_turn(
     meta: Any,
     resolved_model: str,
 ) -> bool:
-    """Persist session history, assistant output, snapshot, and follow-up summary task."""
+    """Persist session history, assistant output, and snapshot."""
     record_assistant_history = _should_record_assistant_history(final_content)
     if meta.tools_used:
         engine._mark_threads_touched(
@@ -236,12 +218,6 @@ async def _persist_completed_turn(
     engine._touch_session(msg.session_key)
 
     if record_assistant_history:
-        engine.memory.record_conversation(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            role="assistant",
-            content=final_content,
-        )
         engine.memory.record_event(
             session_id=session_state.session_id,
             event_type="assistant",
@@ -264,17 +240,11 @@ async def _persist_completed_turn(
         final_content=None,
     )
 
-    summary_task = None
-    if record_assistant_history:
-        summary_task = engine._trigger_summary(meta, final_content, msg.channel, msg.chat_id)
-    if summary_task:
-        engine._pending_summaries[msg.session_key] = summary_task
     return record_assistant_history
 
 
 async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage | None:
     """Process a user message end-to-end."""
-    await _await_summary_barrier(engine=engine, msg=msg)
     session_state = engine._ensure_session_state(
         session_key=msg.session_key,
         channel=msg.channel,
