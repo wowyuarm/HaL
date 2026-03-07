@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hal.runtime.engine.progress import (
+from hal.runtime.engine.hooks import (
     _compose_progress_message,
     _extract_progress_text,
     _format_tool_hints,

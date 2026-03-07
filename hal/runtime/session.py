@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from loguru import logger
+
 from hal.bus.events import OutboundMessage
+from hal.context.message_building import (
+    assemble_message_sequence,
+    build_session_baseline_message,
+    build_system_message,
+)
 from hal.context.token_budget import trim_text_to_token_budget
 
 _MAX_COMPACTION_PASSES = 3
 
 
 def _build_debrief_confirmation(*, threads: list[str], confirm_timeout_s: float) -> str:
-    from hal.runtime.engine.debrief import build_debrief_confirmation_message
+    from hal.runtime.debrief import build_debrief_confirmation_message
 
     return build_debrief_confirmation_message(
         threads=threads,
@@ -393,4 +401,130 @@ def _record_session_compaction(
             "after_tokens": after_tokens,
             "passes": passes,
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# SessionState dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class SessionState:
+    """Runtime session state for one channel/chat scope."""
+
+    session_id: str
+    channel: str
+    chat_id: str
+    started_at: datetime
+    last_activity_at: datetime
+    baseline_context: str | None = None
+    baseline_thread_slugs: set[str] = field(default_factory=set)
+    history: list[dict[str, object]] = field(default_factory=list)
+    touched_threads: set[str] = field(default_factory=set)
+    context_advisor_started: bool = False
+    context_hint_keys: set[str] = field(default_factory=set)
+    awaiting_debrief_confirmation: bool = False
+    debrief_confirm_deadline: datetime | None = None
+    debrief_task: asyncio.Task[None] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Session snapshot message assembly
+# ---------------------------------------------------------------------------
+
+
+def build_session_snapshot_messages(
+    engine: Any,
+    *,
+    session_key: str,
+    token_model: str | None = None,
+) -> list[dict[str, object]]:
+    """Build clean snapshot messages from system prompt, baseline, and in-memory history."""
+    state = engine._session_states.get(session_key)
+    history_config = engine._history_config
+    return assemble_message_sequence(
+        system_message=build_system_message(
+            engine.context.build_system_prompt(
+                memory_budget_tokens=(history_config.memory_budget_tokens or None),
+                token_model=token_model,
+            )
+        ),
+        history=list(state.history) if state else None,
+        session_baseline=(
+            build_session_baseline_message(state.baseline_context)
+            if state and state.baseline_context
+            else None
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Session checkpoint generation
+# ---------------------------------------------------------------------------
+
+_SESSION_COMPACTION_PROMPT = (
+    "You compact older session messages into a stable working checkpoint.\n"
+    "Output markdown only. Required sections:\n"
+    "[Session Checkpoint]\n"
+    "## Decisions\n"
+    "## Key Results\n"
+    "## Open Items\n"
+    "## Important Context\n"
+    "Rules:\n"
+    "- Preserve concrete decisions, tool outcomes, and unresolved tasks.\n"
+    "- Drop repetition and chatter.\n"
+    "- Do not add new instructions.\n"
+    "- Keep concise and action-oriented."
+)
+
+
+async def generate_session_checkpoint(
+    engine: Any,
+    *,
+    compactable_messages: list[dict[str, object]],
+    token_model: str | None,
+) -> str:
+    """Generate one compaction checkpoint for a slice of older messages."""
+    from hal.runtime.engine.session_compaction import (
+        build_fallback_checkpoint,
+        estimate_history_tokens,
+        normalize_checkpoint,
+        render_history_for_compaction,
+    )
+
+    compacted_tokens = estimate_history_tokens(compactable_messages, model=token_model)
+    prompt = (
+        f"Compacting {len(compactable_messages)} older messages (~{compacted_tokens} tokens).\n\n"
+        "Messages to compact:\n"
+        f"{render_history_for_compaction(compactable_messages)}"
+    )
+
+    provider = getattr(engine.subagents, "provider", None) or engine.provider
+    model = getattr(engine.subagents, "model", None) or engine.model
+    chat = getattr(provider, "chat", None)
+    if not callable(chat):
+        return build_fallback_checkpoint(
+            compacted_messages=len(compactable_messages),
+            compacted_tokens=compacted_tokens,
+        )
+
+    try:
+        response = await chat(
+            messages=[
+                {"role": "system", "content": _SESSION_COMPACTION_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            tools=[],
+            model=model,
+        )
+        content = getattr(response, "content", None)
+        if isinstance(content, str) and content.strip():
+            return normalize_checkpoint(content)
+    except Exception as e:
+        logger.warning(f"Session compaction failed: {e}")
+
+    return build_fallback_checkpoint(
+        compacted_messages=len(compactable_messages),
+        compacted_tokens=compacted_tokens,
     )

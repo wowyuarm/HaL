@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-from hal.runtime.debrief import resolve_debrief_thread_order
-from hal.runtime.engine.debrief import (
+from hal.runtime.debrief import (
     build_debrief_confirmation_message,
     extract_touched_threads,
     is_debrief_confirm_message,
+    resolve_debrief_thread_order,
 )
 from hal.workspace import (
     apply_episode_state_patch,

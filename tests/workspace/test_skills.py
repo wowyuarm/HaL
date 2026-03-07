@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hal.workspace.skills import SKILL_FILENAME, SkillRepository
+from hal.workspace.layout import SKILL_FILENAME, SkillRepository
 
 
 def test_skill_repository_resolves_paths(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hal.workspace.metrics import MetricsRepository
+from hal.workspace.layout import MetricsRepository
 
 
 def test_metrics_repository_resolves_path(tmp_path: Path) -> None:

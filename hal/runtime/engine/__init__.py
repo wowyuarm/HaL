@@ -16,28 +16,32 @@ from hal.context.metrics import MetricsCollector
 from hal.context.thread_mentions import detect_thread_mentions
 from hal.domain.ports import LLMProviderPort
 from hal.memory.manager import MemoryManager
-from hal.runtime.checkpoint import generate_session_checkpoint
 from hal.runtime.debrief import (
     generate_episode_markdown,
     run_session_debrief,
 )
-from hal.runtime.execution import execute_loop
 from hal.runtime.session import (
+    SessionState,
     build_session_id,
+    build_session_snapshot_messages,
     ensure_session_state,
+    generate_session_checkpoint,
     maybe_compact_session_history,
     tick_session_lifecycle,
     touch_session,
 )
-from hal.runtime.snapshot import build_session_snapshot_messages
 from hal.runtime.subagent import SubagentManager
 from hal.runtime.tool_factory import create_tools
 from hal.workspace import MetricsRepository, ThreadRepository
 
 from .background_resume import _EngineBackgroundResume
 from .inspect import build_context_inspection
-from .processing import build_direct_inbound_message, build_engine_error_response, process_message
-from .session_state import SessionState
+from .processing import (
+    build_direct_inbound_message,
+    build_engine_error_response,
+    execute_loop,
+    process_message,
+)
 from .subagent_injection import (
     ParsedSubagentResult,
     _build_subagent_injection,

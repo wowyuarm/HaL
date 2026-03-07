@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from hal.workspace.logs import LogRepository
+from hal.workspace.layout import LogRepository
 
 
 def test_log_repository_resolves_paths(tmp_path: Path) -> None:

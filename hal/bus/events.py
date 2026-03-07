@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-from hal.domain.subagent_metadata import SubagentArtifactMetadata, SubagentUsageMetadata
+from hal.domain.ports import SubagentArtifactMetadata, SubagentUsageMetadata
 
 
 @dataclass

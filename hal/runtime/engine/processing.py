@@ -17,8 +17,8 @@ from hal.context.metrics import (
 )
 from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
 from hal.domain.message_payloads import estimate_content_chars
-
-from .debrief import is_debrief_confirm_message
+from hal.runtime.debrief import is_debrief_confirm_message
+from hal.runtime.loop import run_tool_loop
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
 _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
@@ -327,3 +327,50 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         return None
 
     return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
+
+
+# ---------------------------------------------------------------------------
+# Tool-loop execution
+# ---------------------------------------------------------------------------
+
+
+async def execute_loop(
+    engine: Any,
+    *,
+    messages: list[dict[str, object]],
+    max_iterations: int,
+    add_assistant_message_fn: Any,
+    add_tool_result_fn: Any,
+    session_key: str | None = None,
+    channel: str | None = None,
+    chat_id: str | None = None,
+) -> tuple[str | None, object, list[object]]:
+    """Run one LLM tool-calling loop and collect injected follow-up messages."""
+    # Deferred import: _EngineLoopHooks lives in hal.runtime.engine.hooks,
+    # a sub-package of hal.runtime. Importing at module level would create a
+    # circular init chain (hal.runtime -> execution -> engine.__init__ -> hal.runtime).
+    from hal.runtime.engine.hooks import _EngineLoopHooks
+
+    hooks = _EngineLoopHooks(
+        engine=engine,
+        session_key=session_key,
+        channel=channel,
+        chat_id=chat_id,
+    )
+    try:
+        final_content, meta = await run_tool_loop(
+            provider=engine.provider,
+            model=engine.model,
+            tools=engine.tools,
+            messages=messages,
+            max_iterations=max_iterations,
+            hooks=hooks,
+            add_assistant_message=add_assistant_message_fn,
+            add_tool_result=add_tool_result_fn,
+            llm_retry_attempts=engine._engine_config.llm_retry_attempts,
+            llm_retry_base_delay_s=engine._engine_config.llm_retry_base_delay_s,
+            llm_retry_max_delay_s=engine._engine_config.llm_retry_max_delay_s,
+        )
+        return final_content, meta, hooks.injected
+    finally:
+        hooks.close()

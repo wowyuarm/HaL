@@ -1,4 +1,4 @@
-"""Workspace layout helpers for stable path conventions.
+"""Workspace layout helpers and thin repository wrappers.
 
 All paths follow the canonical workspace contract:
   system/       — identity, instructions, memory, config
@@ -6,6 +6,10 @@ All paths follow the canonical workspace contract:
   runtime/      — logs, sessions, metrics, cache
   capabilities/ — skills
   data/         — vectors, artifacts, media
+
+Thin repository classes (MetricsRepository, LogRepository, SkillRepository) live
+here alongside WorkspaceLayout to keep per-concern wrappers co-located with the
+path definitions they delegate to.
 """
 
 from __future__ import annotations
@@ -13,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+
+SKILL_FILENAME = "SKILL.md"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,3 +65,49 @@ class WorkspaceLayout:
 
     def subagent_artifacts_dir(self) -> Path:
         return self.artifacts_dir() / "subagent"
+
+
+# ---------------------------------------------------------------------------
+# Thin repository wrappers
+# ---------------------------------------------------------------------------
+
+
+class MetricsRepository:
+    """Repository that resolves context metrics storage path for one workspace."""
+
+    def __init__(self, workspace: Path):
+        self.layout = WorkspaceLayout(workspace)
+
+    def context_metrics_path(self) -> Path:
+        """Return the JSONL path for context metrics."""
+        return self.layout.context_metrics_path()
+
+
+class LogRepository:
+    """Repository for resolving conversation log directory and date files."""
+
+    def __init__(self, workspace: Path):
+        self.layout = WorkspaceLayout(workspace)
+
+    def logs_dir(self) -> Path:
+        """Return root log directory path."""
+        return self.layout.logs_dir()
+
+    def daily_log_path(self, log_date: date) -> Path:
+        """Return one daily JSONL log path."""
+        return self.layout.daily_log_path(log_date)
+
+
+class SkillRepository:
+    """Repository for resolving skills directory and SKILL.md paths."""
+
+    def __init__(self, workspace: Path):
+        self.layout = WorkspaceLayout(workspace)
+
+    def skills_dir(self) -> Path:
+        """Return skills root directory path."""
+        return self.layout.skills_dir()
+
+    def skill_markdown_path(self, name: str) -> Path:
+        """Return one skill markdown path."""
+        return self.skills_dir() / name / SKILL_FILENAME

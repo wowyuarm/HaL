@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.bus.events import MessageInjectEvent, ReminderEvent, SubagentCompleteEvent, ToolCallEvent
+from hal.runtime.debrief import extract_touched_threads
 
-from .debrief import extract_touched_threads
 from .subagent_injection import (
     _SUBAGENT_RUNTIME_MAX_TOKENS,
     _build_subagent_injection,

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from hal.context.token_budget import trim_text_to_token_budget
-from hal.domain.subagent_metadata import SubagentArtifactMetadata, SubagentUsageMetadata
+from hal.domain.ports import SubagentArtifactMetadata, SubagentUsageMetadata
 
 _SUBAGENT_TOKEN_RE = re.compile(r"\[Subagent Total Tokens\]\s*(\d+)")
 _SUBAGENT_ARTIFACT_RE = re.compile(r"^\[Subagent Artifact\]\s*(.+)$", re.MULTILINE)
