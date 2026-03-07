@@ -15,6 +15,13 @@ from hal.workspace.events import EventEntry
 # Debrief confirmation and thread extraction helpers
 # ---------------------------------------------------------------------------
 
+# Inline keyboard callback data and metadata keys
+DEBRIEF_CONFIRM_CB = "debrief:confirm"
+DEBRIEF_CANCEL_CB = "debrief:cancel"
+DEBRIEF_ACTION_KEY = "debrief_action"
+DEBRIEF_ACTION_CONFIRM = "confirm"
+DEBRIEF_ACTION_CANCEL = "cancel"
+
 _THREAD_STATE_PATH_RE = re.compile(r"(?:^|/)threads/([^/]+)/STATE\.md$")
 _CONFIRM_TEXTS = {
     "yes",
@@ -49,6 +56,18 @@ def is_debrief_confirm_message(content: str) -> bool:
     if normalized.startswith("/debrief"):
         return True
     return normalized in _CONFIRM_TEXTS
+
+
+def is_debrief_action_message(metadata: dict[str, Any]) -> str | None:
+    """Return the debrief action from message metadata, or None.
+
+    Used by the engine to detect inline-keyboard callback confirmations
+    before falling back to text-based matching.
+    """
+    action = metadata.get(DEBRIEF_ACTION_KEY)
+    if action in (DEBRIEF_ACTION_CONFIRM, DEBRIEF_ACTION_CANCEL):
+        return action
+    return None
 
 
 def extract_thread_slug_from_value(value: Any) -> str | None:
@@ -293,11 +312,17 @@ def _build_thread_priority_map(context_registry: object) -> dict[str, int]:
 
 
 __all__ = [
+    "DEBRIEF_ACTION_CANCEL",
+    "DEBRIEF_ACTION_CONFIRM",
+    "DEBRIEF_ACTION_KEY",
+    "DEBRIEF_CANCEL_CB",
+    "DEBRIEF_CONFIRM_CB",
     "build_debrief_confirmation_message",
     "extract_thread_slug_from_value",
     "extract_touched_threads",
     "format_session_events_for_prompt",
     "generate_episode_markdown",
+    "is_debrief_action_message",
     "is_debrief_confirm_message",
     "resolve_debrief_thread_order",
     "run_session_debrief",

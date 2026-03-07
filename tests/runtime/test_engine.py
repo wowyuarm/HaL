@@ -345,6 +345,55 @@ class TestDispatch:
         assert out.metadata.get("kind") == "session_debrief_start"
         engine._start_session_debrief.assert_awaited_once_with("telegram:c1", reason="user_confirm")
 
+    async def test_debrief_callback_confirm_via_metadata(self, engine):
+        state = engine._ensure_session_state(
+            session_key="telegram:c1",
+            channel="telegram",
+            chat_id="c1",
+        )
+        state.awaiting_debrief_confirmation = True
+        engine._start_session_debrief = AsyncMock()  # type: ignore[method-assign]
+
+        msg = InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="c1",
+            content="/debrief confirm",
+            metadata={"debrief_action": "confirm"},
+        )
+        out = await engine.process(msg)
+
+        assert out is not None
+        assert out.metadata.get("kind") == "session_debrief_start"
+        engine._start_session_debrief.assert_awaited_once_with(
+            "telegram:c1", reason="user_confirm"
+        )
+
+    async def test_debrief_callback_cancel_via_metadata(self, engine):
+        state = engine._ensure_session_state(
+            session_key="telegram:c1",
+            channel="telegram",
+            chat_id="c1",
+        )
+        state.awaiting_debrief_confirmation = True
+        engine._cancel_debrief_confirmation = MagicMock()  # type: ignore[method-assign]
+
+        msg = InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="c1",
+            content="",
+            metadata={"debrief_action": "cancel"},
+        )
+        out = await engine.process(msg)
+
+        assert out is not None
+        assert out.metadata.get("kind") == "session_debrief_cancelled"
+        assert "cancelled" in out.content.lower()
+        engine._cancel_debrief_confirmation.assert_called_once_with(
+            "telegram:c1", reason="user_cancelled"
+        )
+
     async def test_session_debrief_indexes_written_episodes(self, engine):
         session_key = "telegram:c1"
         state = engine._ensure_session_state(

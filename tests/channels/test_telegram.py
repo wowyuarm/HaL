@@ -957,6 +957,140 @@ def test_read_update_marker_missing() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Inline keyboard tests
+# ---------------------------------------------------------------------------
+
+
+class _InlineKeyboardRecordingBot:
+    """Bot that records send_message calls including reply_markup."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    async def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
+        self.sent.append(
+            {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "reply_markup": reply_markup,
+            }
+        )
+
+
+def test_build_inline_keyboard_structure() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    buttons = [
+        [
+            {"text": "Confirm", "callback_data": "debrief:confirm"},
+            {"text": "Cancel", "callback_data": "debrief:cancel"},
+        ]
+    ]
+    markup = ch._build_inline_keyboard(buttons)
+    assert len(markup.inline_keyboard) == 1
+    row = markup.inline_keyboard[0]
+    assert len(row) == 2
+    assert row[0].text == "Confirm"
+    assert row[0].callback_data == "debrief:confirm"
+    assert row[1].text == "Cancel"
+    assert row[1].callback_data == "debrief:cancel"
+
+
+@pytest.mark.asyncio
+async def test_send_with_inline_buttons_attaches_keyboard() -> None:
+    bot = _InlineKeyboardRecordingBot()
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    _attach_bot(ch, bot)
+
+    msg = OutboundMessage(
+        channel="telegram",
+        chat_id="123",
+        content="Debrief ready?",
+        metadata={
+            "inline_buttons": [
+                [
+                    {"text": "Confirm", "callback_data": "debrief:confirm"},
+                    {"text": "Cancel", "callback_data": "debrief:cancel"},
+                ]
+            ]
+        },
+    )
+    await ch.send(msg)
+
+    assert len(bot.sent) == 1
+    call = bot.sent[0]
+    assert call["chat_id"] == 123
+    assert call["reply_markup"] is not None
+    assert len(call["reply_markup"].inline_keyboard) == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_query_confirm_publishes_inbound() -> None:
+    ch = TelegramChannel(
+        TelegramConfig(enabled=True, token="t"),
+        MessageBus(),
+    )
+    ch._handle_message = AsyncMock()  # type: ignore[method-assign]
+
+    class _Query:
+        data = "debrief:confirm"
+
+        class message:
+            chat_id = 123
+            text = "Debrief ready?"
+
+        async def answer(self):
+            pass
+
+        async def edit_message_text(self, text):
+            pass
+
+    class _Update:
+        callback_query = _Query()
+        effective_user = _User(42, username="alice")
+
+    await ch._on_callback_query(_Update(), context=None)
+
+    ch._handle_message.assert_awaited_once()
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["content"] == "/debrief confirm"
+    assert kwargs["metadata"]["debrief_action"] == "confirm"
+
+
+@pytest.mark.asyncio
+async def test_callback_query_cancel_publishes_inbound() -> None:
+    ch = TelegramChannel(
+        TelegramConfig(enabled=True, token="t"),
+        MessageBus(),
+    )
+    ch._handle_message = AsyncMock()  # type: ignore[method-assign]
+
+    class _Query:
+        data = "debrief:cancel"
+
+        class message:
+            chat_id = 456
+            text = "Debrief ready?"
+
+        async def answer(self):
+            pass
+
+        async def edit_message_text(self, text):
+            pass
+
+    class _Update:
+        callback_query = _Query()
+        effective_user = _User(42)
+
+    await ch._on_callback_query(_Update(), context=None)
+
+    ch._handle_message.assert_awaited_once()
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["content"] == ""
+    assert kwargs["metadata"]["debrief_action"] == "cancel"
+
+
+# ---------------------------------------------------------------------------
 # _send_startup_notification tests
 # ---------------------------------------------------------------------------
 

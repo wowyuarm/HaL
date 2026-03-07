@@ -251,6 +251,8 @@ async def _send_debrief_confirmation(
     confirm_timeout_s: float,
 ) -> None:
     """Send one debrief confirmation prompt and open its confirmation window."""
+    from hal.runtime.debrief import DEBRIEF_CANCEL_CB, DEBRIEF_CONFIRM_CB
+
     msg = _build_debrief_confirmation(
         threads=sorted(state.touched_threads),
         confirm_timeout_s=confirm_timeout_s,
@@ -264,6 +266,12 @@ async def _send_debrief_confirmation(
                 "system_meta": True,
                 "kind": "session_debrief_confirmation",
                 "session_id": state.session_id,
+                "inline_buttons": [
+                    [
+                        {"text": "Confirm", "callback_data": DEBRIEF_CONFIRM_CB},
+                        {"text": "Cancel", "callback_data": DEBRIEF_CANCEL_CB},
+                    ],
+                ],
             },
         )
     )

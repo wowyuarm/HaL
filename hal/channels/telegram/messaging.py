@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 
 from loguru import logger
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from hal.bus.events import OutboundMessage
@@ -206,14 +206,65 @@ class TelegramMessagingMixin:
             )
 
     async def _send_outbound_text(self, *, chat_id: int, msg: OutboundMessage) -> None:
-        """Send non-empty outbound content with optional append-mode semantics."""
+        """Send non-empty outbound content with optional append-mode or inline-keyboard semantics."""
         if not msg.content or msg.content == _EMPTY_MESSAGE_SENTINEL:
+            return
+        inline_buttons = msg.metadata.get("inline_buttons")
+        if inline_buttons:
+            await self._send_with_inline_keyboard(chat_id, msg.content, inline_buttons)
             return
         append_mode = msg.metadata.get(_APPEND_MODE_META_KEY)
         if append_mode == PROGRESS_APPEND_MODE_CONCAT:
             await self._send_appendable_text(chat_id, msg)
             return
         await self._send_chunked_text(chat_id, msg.content)
+
+    @staticmethod
+    def _build_inline_keyboard(
+        buttons_data: list[list[dict[str, str]]],
+    ) -> InlineKeyboardMarkup:
+        """Build InlineKeyboardMarkup from a generic button structure.
+
+        ``buttons_data`` is a list of rows; each row is a list of dicts
+        with ``text`` and ``callback_data`` keys.
+        """
+        keyboard = [
+            [
+                InlineKeyboardButton(text=btn["text"], callback_data=btn["callback_data"])
+                for btn in row
+            ]
+            for row in buttons_data
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    async def _send_with_inline_keyboard(
+        self,
+        chat_id: int,
+        text: str,
+        buttons_data: list[list[dict[str, str]]],
+    ) -> None:
+        """Send a single message with an attached inline keyboard."""
+        if not self._app:
+            return
+        markup = self._build_inline_keyboard(buttons_data)
+        try:
+            html_text = _markdown_to_telegram_html(text)
+            await self._app.bot.send_message(
+                chat_id=chat_id,
+                text=html_text,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        except Exception as e:
+            logger.warning(f"HTML send with keyboard failed, retrying plain text: {e}")
+            try:
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=markup,
+                )
+            except Exception as e2:
+                logger.error(f"Failed to send message with inline keyboard: {e2}")
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""

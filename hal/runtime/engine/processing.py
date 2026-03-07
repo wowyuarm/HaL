@@ -17,7 +17,7 @@ from hal.context.metrics import (
 )
 from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
 from hal.domain.message_payloads import estimate_content_chars
-from hal.runtime.debrief import is_debrief_confirm_message
+from hal.runtime.debrief import is_debrief_action_message, is_debrief_confirm_message
 from hal.runtime.loop import run_tool_loop
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
@@ -147,6 +147,27 @@ async def _maybe_handle_debrief_confirmation(
     """Handle pending debrief confirmation before treating the inbound as normal work."""
     if not session_state.awaiting_debrief_confirmation:
         return None
+
+    # Inline-keyboard path: check metadata first
+    action = is_debrief_action_message(msg.metadata)
+    if action == "confirm":
+        await engine._start_session_debrief(msg.session_key, reason="user_confirm")
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="Confirmed. Starting session debrief now.",
+            metadata={"system_meta": True, "kind": "session_debrief_start"},
+        )
+    if action == "cancel":
+        engine._cancel_debrief_confirmation(msg.session_key, reason="user_cancelled")
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="Session debrief cancelled.",
+            metadata={"system_meta": True, "kind": "session_debrief_cancelled"},
+        )
+
+    # Text-based fallback (non-Telegram channels, /debrief command)
     if is_debrief_confirm_message(msg.content):
         await engine._start_session_debrief(msg.session_key, reason="user_confirm")
         return OutboundMessage(

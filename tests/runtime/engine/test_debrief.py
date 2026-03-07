@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from hal.runtime.debrief import (
     build_debrief_confirmation_message,
     extract_touched_threads,
+    is_debrief_action_message,
     is_debrief_confirm_message,
     resolve_debrief_thread_order,
 )
@@ -34,6 +35,22 @@ def test_is_debrief_confirm_message() -> None:
     assert is_debrief_confirm_message("confirm")
     assert is_debrief_confirm_message("/debrief now")
     assert not is_debrief_confirm_message("let us continue")
+
+
+def test_is_debrief_action_message_confirm() -> None:
+    assert is_debrief_action_message({"debrief_action": "confirm"}) == "confirm"
+
+
+def test_is_debrief_action_message_cancel() -> None:
+    assert is_debrief_action_message({"debrief_action": "cancel"}) == "cancel"
+
+
+def test_is_debrief_action_message_missing_key() -> None:
+    assert is_debrief_action_message({}) is None
+
+
+def test_is_debrief_action_message_invalid_value() -> None:
+    assert is_debrief_action_message({"debrief_action": "bogus"}) is None
 
 
 def test_build_debrief_confirmation_message_contains_threads() -> None:
