@@ -350,7 +350,7 @@ One-line purpose of this thread.
 
 ### 4.6 Indexing Pipeline
 
-Replaces current DailyExporter pipeline:
+Replaces former DailyExporter pipeline (removed):
 
 ```
 Session Debriefer writes episodes
@@ -372,7 +372,7 @@ MemorySearch.search() returns episode chunks
   injected as <relevant_memories> in dynamic context
 ```
 
-DailyExporter is deprecated. Chunker and VectorStore require minimal changes
+DailyExporter has been removed. Chunker and VectorStore require minimal changes
 (source path format, metadata fields).
 
 ---
@@ -384,10 +384,10 @@ DailyExporter is deprecated. Chunker and VectorStore require minimal changes
 | Component | Current | New | Migration |
 |-----------|---------|-----|-----------|
 | **Context files** | SOUL + USER + AGENTS + TOOLS | SOUL + INSTRUCTIONS + MEMORY | Merge files, update ContextBuilder |
-| **History loading** | DailyLog JSONL by day window | In-memory session state | Rewrite history management |
-| **DailyLog** | Per-day JSONL files | Unified events.jsonl with session_id | Schema change |
-| **DailyExporter** | JSONL -> daily markdown | Deprecated (episodes replace) | Remove |
-| **Summary** | Per-loop summary after 5+ tool calls | In-session compaction + episode compaction | Replace mechanism |
+| **History loading** | DailyLog JSONL by day window | In-memory session state | Done — session-only path |
+| **DailyLog** | Per-day JSONL files | Unified events.jsonl with session_id | Done — DailyLog removed |
+| **DailyExporter** | JSONL -> daily markdown | Deprecated (episodes replace) | Done — removed |
+| **Summary** | Per-loop summary after 5+ tool calls | In-session compaction + episode compaction | Done — removed |
 | **MemorySearch** | Index daily markdown | Index episodes | Change source path |
 | **ContextBuilder** | 5-layer with dynamic context | Same structure, new content sources | Moderate refactor |
 | **Memory (MEMORY.md)** | Facts + project state | Facts only (project state -> threads) | Content migration |
@@ -435,7 +435,7 @@ Phase 5: Episode Indexing
   - MarkdownChunker indexes episodes instead of daily markdown
   - VectorStore metadata: thread association
   - MemorySearch.search() returns episode chunks
-  - DailyExporter deprecated
+  - DailyExporter removed
   - Old daily markdown files retained as archive
 
 Phase 6: In-Session Compaction

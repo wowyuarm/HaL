@@ -37,7 +37,7 @@ Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider
 | Domain | `hal/domain/` | Semantic types: ContextUnit, ports, metadata |
 | Context | `hal/context/` | Context compilation: builder, compiler, registry, baseline |
 | Runtime | `hal/runtime/` | Orchestration: engine, loop, subagent, session lifecycle |
-| Memory | `hal/memory/` | MemoryManager, daily log, search, vector store |
+| Memory | `hal/memory/` | MemoryManager, event log, search, vector store |
 | Workspace | `hal/workspace/` | Persistence: layout, repos (threads, episodes, sessions) |
 | Capabilities | `hal/capabilities/` | Tools and skills |
 | Bus | `hal/bus/` | MessageBus, typed events |
@@ -49,17 +49,14 @@ Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider
 
 `AgentEngine` lives in a package:
 - `__init__.py`: engine wiring and public methods.
-- `processing.py`: main `process_message()` path.
-- `hooks.py`: per-loop hook adapter (`_EngineLoopHooks`).
+- `processing.py`: main `process_message()` path + `execute_loop()` entry point.
+- `hooks.py`: per-loop hook adapter (`_EngineLoopHooks`) + progress formatting.
 - `subscribers.py`: event subscribers for tool/memory/subagent injections.
 - `background_resume.py`: background subagent completion continuation.
 - `inspect.py`: context inspection payload builder.
-- `progress.py`: tool progress text formatting.
 - `subagent_injection.py`: parse/build subagent metadata injections.
-- `session_state.py`: SessionState dataclass.
 - `session_compaction.py`: in-session history splitting.
 - `context_advisor.py`: worker model hint generation.
-- `debrief.py`: session debrief confirmation and thread extraction.
 
 ### Runtime Loop (`hal/runtime/loop.py`)
 
@@ -85,7 +82,7 @@ Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider
 - `dynamic_context.py`: XML context block rendering.
 - `prompt_layers.py`: system-prompt layer rendering (identity, bootstrap, skills, situation).
 - `units.py`: ContextUnit wrappers for skills and threads.
-- `history.py`: history loading from session or memory.
+- `history.py`: history loading from session.
 - `token_budget.py`: token estimation and text trimming.
 - `metrics.py`: context metrics collection.
 - `thread_mentions.py`: thread mention detection in messages.
@@ -103,9 +100,9 @@ Pydantic-based strict config (`extra="forbid"`):
 ### Memory (`hal/memory/`)
 
 `MemoryManager` coordinates:
-- daily log (`daily_log.py`)
-- long-term memory (`long_term.py`)
-- optional semantic memory search stack (`search.py`, `store.py`, `chunker.py`, `exporter.py`)
+- event recording (`events.jsonl` via `EventLogRepository`)
+- long-term memory (`MemoryRepository` for `MEMORY.md`)
+- optional semantic memory search stack (`search.py`, `store.py`, `chunker.py`)
 
 Memory-search imports are optional so base memory usage works without extras installed.
 
@@ -137,15 +134,14 @@ hal/
 ├── infra/
 │   ├── config/
 │   └── providers/
-├── memory/           # MemoryManager, daily log, search, store
+├── memory/           # MemoryManager, search, store
 ├── runtime/
 │   ├── bootstrap/    # Gateway wiring
 │   ├── engine/       # AgentEngine and components
 │   ├── subagent/     # SubagentManager
 │   ├── loop.py       # Shared tool-calling loop
-│   ├── session.py    # Session lifecycle
-│   ├── debrief.py    # Episode generation
-│   └── ...           # execution, checkpoint, snapshot, summary
+│   ├── session.py    # Session lifecycle, state, snapshot, checkpoint
+│   └── debrief.py    # Episode generation + confirmation helpers
 ├── utils/            # Generic helpers
 ├── workspace/        # Persistence (layout, repos)
 └── bridge/
@@ -159,7 +155,7 @@ hal/
   system/             # SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml
   work/threads/       # Thread dirs (STATE.md + THREAD.yaml + episodes/)
   work/inbox/         # Unrouted items
-  runtime/logs/       # events.jsonl + daily JSONL
+  runtime/logs/       # events.jsonl
   runtime/sessions/   # Session snapshots
   runtime/metrics/    # context_metrics.jsonl
   capabilities/skills/ # Skill packages
