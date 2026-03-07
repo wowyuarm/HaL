@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hal.capabilities.tools.recall import RecallTool
-from hal.core.memory.store import SearchResult
+from hal.memory.store import SearchResult
 
 
 class DummyMemorySearch:

@@ -113,7 +113,7 @@ def test_make_memory_search_uses_episode_indexing_defaults(monkeypatch, tmp_path
             captured.update(kwargs)
 
     monkeypatch.setattr(factory, "_module_available", lambda _name: True)
-    monkeypatch.setattr("hal.core.memory.search.MemorySearch", DummyMemorySearch)
+    monkeypatch.setattr("hal.memory.search.MemorySearch", DummyMemorySearch)
 
     result = factory.make_memory_search(config)
 
@@ -125,7 +125,7 @@ def test_make_memory_search_uses_episode_indexing_defaults(monkeypatch, tmp_path
     assert deps.exporter is None
 
 
-def test_make_memory_search_prefers_v3_workspace_roots(monkeypatch, tmp_path: Path) -> None:
+def test_make_memory_search_prefers_workspace_roots(monkeypatch, tmp_path: Path) -> None:
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     workspace = config.workspace_path
@@ -139,7 +139,7 @@ def test_make_memory_search_prefers_v3_workspace_roots(monkeypatch, tmp_path: Pa
             captured.update(kwargs)
 
     monkeypatch.setattr(factory, "_module_available", lambda _name: True)
-    monkeypatch.setattr("hal.core.memory.search.MemorySearch", DummyMemorySearch)
+    monkeypatch.setattr("hal.memory.search.MemorySearch", DummyMemorySearch)
 
     result = factory.make_memory_search(config)
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from hal.workspace.logs import LogRepository
 
 
-def test_log_repository_resolves_v3_paths(tmp_path: Path) -> None:
+def test_log_repository_resolves_paths(tmp_path: Path) -> None:
     repository = LogRepository(tmp_path)
 
     assert repository.logs_dir() == tmp_path / "runtime" / "logs"

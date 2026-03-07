@@ -28,7 +28,7 @@ def test_session_repository_writes_and_reads_snapshot(tmp_path: Path) -> None:
     assert snapshot.messages == messages
 
 
-def test_session_repository_resolves_v3_sessions_dir(tmp_path: Path) -> None:
+def test_session_repository_resolves_sessions_dir(tmp_path: Path) -> None:
     repository = SessionRepository(tmp_path)
     repository.write_snapshot(
         session_key="telegram:c2",

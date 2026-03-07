@@ -8,7 +8,7 @@ from loguru import logger
 
 from hal.bus.events import OutboundMessage
 from hal.capabilities.tools.base import Tool
-from hal.core.ports import SubagentExecutionResult, SubagentPort
+from hal.domain.ports import SubagentExecutionResult, SubagentPort
 
 # Interval (seconds) between progress messages for sync spawn.
 _PROGRESS_INTERVAL = 30

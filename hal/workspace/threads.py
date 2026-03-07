@@ -266,7 +266,7 @@ def collect_thread_registry_entries(
     *,
     max_entries: int,
 ) -> list[ThreadRegistryEntry]:
-    """Collect and rank thread registry entries from workspace threads/."""
+    """Collect and rank thread registry entries from workspace work/threads/."""
     return ThreadRepository(workspace).collect_registry_entries(max_entries=max_entries)
 
 

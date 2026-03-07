@@ -10,14 +10,6 @@ from .episodes import (
 from .layout import WorkspaceLayout
 from .logs import LogRepository
 from .metrics import MetricsRepository
-from .migration import (
-    MigrationAction,
-    WorkspaceMigrationReport,
-    export_workspace_migration_report,
-    export_workspace_migration_rollback_script,
-    migrate_workspace_v3,
-    plan_workspace_v3_migration,
-)
 from .sessions import SessionRepository, SessionSnapshot
 from .skills import SKILL_FILENAME, SkillRepository
 from .system_files import SystemRepository, WorkspaceDocument
@@ -47,7 +39,6 @@ __all__ = [
     "SubagentExecutionRecord",
     "MetricsRepository",
     "LogRepository",
-    "MigrationAction",
     "SessionRepository",
     "SessionSnapshot",
     "SkillRepository",
@@ -58,14 +49,9 @@ __all__ = [
     "ThreadEpisodeWriteResult",
     "ThreadRepository",
     "ThreadRegistryEntry",
-    "WorkspaceMigrationReport",
     "WorkspaceLayout",
     "WorkspaceDocument",
     "collect_thread_episode_paths",
-    "export_workspace_migration_rollback_script",
-    "migrate_workspace_v3",
-    "plan_workspace_v3_migration",
-    "export_workspace_migration_report",
     "apply_episode_state_patch",
     "build_episode_file_name",
     "collect_thread_registry_entries",

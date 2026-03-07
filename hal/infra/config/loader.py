@@ -4,19 +4,18 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from loguru import logger
 
 from hal.infra.config.schema import Config
 
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
-    return Path.home() / ".hal" / "config.yaml"
+    return Path.home() / ".hal" / "system" / "config.yaml"
 
 
 def get_auth_path() -> Path:
     """Get the auth credentials file path."""
-    return Path.home() / ".hal" / "auth.yaml"
+    return Path.home() / ".hal" / "system" / "auth.yaml"
 
 
 def load_config(config_path: Path | None = None) -> Config:
@@ -43,18 +42,6 @@ def load_config(config_path: Path | None = None) -> Config:
         config = Config.model_validate(data)
     else:
         config = Config()
-
-    # Warn about old workspace layout
-    old_workspace = Path.home() / ".hal" / "workspace"
-    new_soul = config.workspace_path / "SOUL.md"
-    if old_workspace.is_dir() and not new_soul.exists():
-        logger.warning(
-            "Detected old layout {}. Run: mv {}/* {} && rmdir {}",
-            old_workspace,
-            old_workspace,
-            config.workspace_path,
-            old_workspace,
-        )
 
     return config
 

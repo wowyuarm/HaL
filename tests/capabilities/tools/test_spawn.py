@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hal.capabilities.tools.spawn import SpawnTool
-from hal.core.ports import SubagentExecutionResult
+from hal.domain.ports import SubagentExecutionResult
 
 
 def test_format_result_includes_structured_subagent_metadata() -> None:

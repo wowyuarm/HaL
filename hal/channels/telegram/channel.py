@@ -17,7 +17,7 @@ from .lifecycle import TelegramLifecycleMixin
 from .messaging import TelegramMessagingMixin
 
 if TYPE_CHECKING:
-    from hal.core.memory.manager import MemoryManager
+    from hal.memory.manager import MemoryManager
 
 
 class TelegramChannel(

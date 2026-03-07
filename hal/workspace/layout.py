@@ -1,6 +1,6 @@
 """Workspace layout helpers for stable path conventions.
 
-All paths follow the v3 workspace contract:
+All paths follow the canonical workspace contract:
   system/       — identity, instructions, memory, config
   work/         — threads, inbox
   runtime/      — logs, sessions, metrics, cache
@@ -17,7 +17,7 @@ from pathlib import Path
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceLayout:
-    """Canonical path layout for one HaL workspace root (v3)."""
+    """Canonical path layout for one HaL workspace root."""
 
     root: Path
 

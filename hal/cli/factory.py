@@ -160,10 +160,10 @@ def make_memory_search(config):
         return None
 
     try:
-        from hal.core.memory.chunker import MarkdownChunker
-        from hal.core.memory.contracts import MemorySearchDeps
-        from hal.core.memory.search import MemorySearch
-        from hal.core.memory.store import VectorStore
+        from hal.memory.chunker import MarkdownChunker
+        from hal.memory.contracts import MemorySearchDeps
+        from hal.memory.search import MemorySearch
+        from hal.memory.store import VectorStore
     except ImportError as e:
         console.print(f"[yellow]Memory search unavailable (missing dependency: {e})[/yellow]")
         return None

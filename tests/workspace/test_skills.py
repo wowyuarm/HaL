@@ -5,7 +5,7 @@ from pathlib import Path
 from hal.workspace.skills import SKILL_FILENAME, SkillRepository
 
 
-def test_skill_repository_resolves_v3_paths(tmp_path: Path) -> None:
+def test_skill_repository_resolves_paths(tmp_path: Path) -> None:
     repository = SkillRepository(tmp_path)
 
     assert repository.skills_dir() == tmp_path / "capabilities" / "skills"

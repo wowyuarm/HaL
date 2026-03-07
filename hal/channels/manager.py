@@ -13,7 +13,7 @@ from hal.channels.base import BaseChannel
 from hal.infra.config.schema import Config
 
 if TYPE_CHECKING:
-    from hal.core.memory.manager import MemoryManager
+    from hal.memory.manager import MemoryManager
 
 
 class ChannelManager:

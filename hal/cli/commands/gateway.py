@@ -16,8 +16,8 @@ def gateway(
 ):
     """Start the HaL gateway."""
     from hal import __logo__
-    from hal.core.bootstrap.gateway import build_gateway_runtime
     from hal.infra.config.loader import load_config
+    from hal.runtime.bootstrap.gateway import build_gateway_runtime
 
     if verbose:
         import logging

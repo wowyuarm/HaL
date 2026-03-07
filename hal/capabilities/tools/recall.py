@@ -9,7 +9,7 @@ from loguru import logger
 from hal.capabilities.tools.base import Tool
 
 if TYPE_CHECKING:
-    from hal.core.memory.search import MemorySearch
+    from hal.memory.search import MemorySearch
 
 
 class RecallTool(Tool):

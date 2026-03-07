@@ -12,7 +12,7 @@ class SkillsLoader:
     """
     Loader for agent skills.
 
-    Skills live in <workspace>/skills/<name>/SKILL.md.
+    Skills live in <workspace>/capabilities/skills/<name>/SKILL.md.
     Each skill directory can also contain scripts, references, etc.
     """
 

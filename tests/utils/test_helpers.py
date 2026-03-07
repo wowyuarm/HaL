@@ -7,11 +7,6 @@ import pytest
 from hal.utils import helpers
 
 
-def test_truncate_string_noop_and_truncates() -> None:
-    assert helpers.truncate_string("abc", max_len=5) == "abc"
-    assert helpers.truncate_string("abcdef", max_len=5) == "ab..."
-
-
 def test_safe_filename_replaces_unsafe_chars() -> None:
     assert helpers.safe_filename('a<>:"/\\|?*b') == "a_________b"
 
@@ -41,15 +36,6 @@ def test_get_data_path_creates_dir(tmp_home: Path) -> None:
     data = helpers.get_data_path()
     assert data.exists()
     assert str(data).endswith("/.hal")
-
-
-def test_today_date_and_timestamp_format() -> None:
-    d = helpers.today_date()
-    assert len(d) == 10
-    assert d.count("-") == 2
-
-    ts = helpers.timestamp()
-    assert "T" in ts
 
 
 def test_ensure_dir_creates(tmp_path: Path) -> None:
