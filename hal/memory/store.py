@@ -60,14 +60,22 @@ class VectorStore:
 
         if self._client.has_collection(self._collection_name):
             # Migrate: drop collection when required metadata fields are missing.
-            info = self._client.describe_collection(self._collection_name)
-            field_names = {f["name"] for f in info.get("fields", [])}
+            try:
+                info = self._client.describe_collection(self._collection_name)
+                field_names = {f["name"] for f in info.get("fields", [])}
+            except Exception as e:
+                logger.warning(f"Failed to describe collection, will recreate: {e}")
+                field_names = set()
+
             if "source_type" not in field_names or "thread" not in field_names:
                 logger.info(
                     f"Migrating collection '{self._collection_name}': "
                     "adding required metadata fields (drop + recreate)"
                 )
-                self._client.drop_collection(self._collection_name)
+                try:
+                    self._client.drop_collection(self._collection_name)
+                except Exception as e:
+                    logger.warning(f"Failed to drop collection during migration: {e}")
             else:
                 return
 

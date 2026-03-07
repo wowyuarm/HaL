@@ -98,10 +98,10 @@ def _assert_startup_injection(
     expect_update_info: bool,
 ) -> None:
     """Validate memory/event side effects of startup notification."""
-    memory_manager.record_conversation.assert_called_once()
-    call_kwargs = memory_manager.record_conversation.call_args.kwargs
-    assert call_kwargs["entry_type"] == "injection"
-    assert expected_content_fragment in call_kwargs["content"]
+    memory_manager.record_event.assert_called_once()
+    call_kwargs = memory_manager.record_event.call_args.kwargs
+    assert call_kwargs["event_type"] == "system_startup"
+    assert expected_content_fragment in call_kwargs["payload"]["content"]
     channel.bus.emit.assert_awaited_once()
     event = channel.bus.emit.await_args.args[0]  # type: ignore[union-attr]
     assert isinstance(event, SystemStartupEvent)

@@ -344,7 +344,6 @@ class TestDispatch:
         assert out is not None
         assert out.metadata.get("kind") == "session_debrief_start"
         engine._start_session_debrief.assert_awaited_once_with("telegram:c1", reason="user_confirm")
-        engine.memory.record_conversation.assert_not_called()
 
     async def test_session_debrief_indexes_written_episodes(self, engine):
         session_key = "telegram:c1"

@@ -133,14 +133,14 @@ class TelegramLifecycleMixin:
                 )
             else:
                 injection = f"[System: HaL service started. Now running {commit_info}.]"
-            self.memory_manager.record_conversation(
+            self.memory_manager.record_event(
+                session_id=f"startup_{commit_info.split()[0] if commit_info else 'unknown'}",
+                event_type="system_startup",
                 channel="telegram",
                 chat_id=owner_id,
-                role="user",
-                content=injection,
-                entry_type="injection",
+                payload={"content": injection},
             )
-            logger.info("Startup context written to daily_log as injection")
+            logger.info("Startup context written to event log")
 
         await self.bus.emit(
             SystemStartupEvent(
