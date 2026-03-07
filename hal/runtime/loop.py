@@ -38,9 +38,6 @@ _USAGE_PROMPT_ALIAS_KEY = "input_tokens"
 _USAGE_COMPLETION_ALIAS_KEY = "output_tokens"
 _USAGE_PROMPT_DETAILS_KEY = "prompt_tokens_details"
 _USAGE_PROMPT_CACHED_KEY = "cached_tokens"
-_DEFAULT_LLM_RETRY_ATTEMPTS = 3
-_DEFAULT_LLM_RETRY_BASE_DELAY_S = 0.8
-_DEFAULT_LLM_RETRY_MAX_DELAY_S = 8.0
 
 
 @dataclass
@@ -470,9 +467,9 @@ async def run_tool_loop(
     hooks: LoopHooks | None = None,
     add_assistant_message: Any | None = None,
     add_tool_result: Any | None = None,
-    llm_retry_attempts: int = _DEFAULT_LLM_RETRY_ATTEMPTS,
-    llm_retry_base_delay_s: float = _DEFAULT_LLM_RETRY_BASE_DELAY_S,
-    llm_retry_max_delay_s: float = _DEFAULT_LLM_RETRY_MAX_DELAY_S,
+    llm_retry_attempts: int = 3,
+    llm_retry_base_delay_s: float = 0.8,
+    llm_retry_max_delay_s: float = 8.0,
 ) -> tuple[str | None, LoopMetadata]:
     """Execute the LLM tool-calling loop.
 

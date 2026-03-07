@@ -388,9 +388,9 @@ async def execute_loop(
             hooks=hooks,
             add_assistant_message=add_assistant_message_fn,
             add_tool_result=add_tool_result_fn,
-            llm_retry_attempts=engine._engine_config.llm_retry_attempts,
-            llm_retry_base_delay_s=engine._engine_config.llm_retry_base_delay_s,
-            llm_retry_max_delay_s=engine._engine_config.llm_retry_max_delay_s,
+            llm_retry_attempts=engine._engine_config.llm_retry.attempts,
+            llm_retry_base_delay_s=engine._engine_config.llm_retry.base_delay_s,
+            llm_retry_max_delay_s=engine._engine_config.llm_retry.max_delay_s,
         )
         return final_content, meta, hooks.injected
     finally:

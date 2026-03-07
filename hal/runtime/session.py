@@ -71,7 +71,7 @@ def ensure_session_state(engine: Any, *, session_key: str, channel: str, chat_id
             engine._clear_session_snapshot(session_key)
         state = None
 
-    timeout_s = max(float(engine._engine_config.session_idle_timeout_s), 1.0)
+    timeout_s = max(float(engine._engine_config.session.idle_timeout_s), 1.0)
     idle_timed_out = False
     if state is not None:
         if not state.awaiting_debrief_confirmation and state.debrief_task is None:
@@ -125,19 +125,20 @@ class SessionCompactionSettings:
 
 def resolve_session_compaction_settings(engine_config: object) -> SessionCompactionSettings | None:
     """Resolve compaction settings, or None when compaction should be skipped."""
-    if not bool(getattr(engine_config, "session_compaction_enabled", False)):
+    session = getattr(engine_config, "session", engine_config)
+    if not bool(getattr(session, "compaction_enabled", False)):
         return None
 
-    token_budget = int(getattr(engine_config, "session_compaction_token_budget", 0))
+    token_budget = int(getattr(session, "compaction_token_budget", 0))
     if token_budget <= 0:
         return None
 
     keep_recent_turns = max(
-        int(getattr(engine_config, "session_compaction_recent_user_turns", 2)),
+        int(getattr(session, "compaction_recent_user_turns", 2)),
         1,
     )
     checkpoint_tokens = max(
-        int(getattr(engine_config, "session_compaction_checkpoint_tokens", 1200)),
+        int(getattr(session, "compaction_checkpoint_tokens", 1200)),
         100,
     )
     return SessionCompactionSettings(
@@ -149,12 +150,12 @@ def resolve_session_compaction_settings(engine_config: object) -> SessionCompact
 
 async def tick_session_lifecycle(engine: Any) -> None:
     """Handle idle-session confirmation/debrief lifecycle."""
-    if not engine._engine_config.session_debrief_enabled:
+    if not engine._engine_config.debrief.enabled:
         return
 
     now = datetime.now()
-    timeout_s = max(float(engine._engine_config.session_idle_timeout_s), 1.0)
-    confirm_timeout_s = max(float(engine._engine_config.session_debrief_confirm_timeout_s), 1.0)
+    timeout_s = max(float(engine._engine_config.session.idle_timeout_s), 1.0)
+    confirm_timeout_s = max(float(engine._engine_config.debrief.confirm_timeout_s), 1.0)
 
     for session_key, state in list(engine._session_states.items()):
         if _cleanup_finished_debrief(engine, session_key, state):

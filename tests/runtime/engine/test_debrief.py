@@ -4,7 +4,6 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from hal.runtime.debrief import (
-    _MAX_EVENT_TOKENS,
     _cap_text,
     build_debrief_confirmation_message,
     extract_touched_threads,
@@ -154,7 +153,7 @@ def test_cap_text_truncates_large_text() -> None:
 def test_format_session_events_respects_per_event_cap() -> None:
     from hal.workspace.events import EventEntry
 
-    huge_content = "x" * 20000  # ~5000 tokens, well over _MAX_EVENT_TOKENS
+    huge_content = "x" * 20000  # ~5000 tokens, well over default max_event_tokens (1500)
     events = [
         EventEntry(session="s1", type="user_message", payload={"content": huge_content}),
         EventEntry(session="s1", type="assistant", payload={"content": "short reply"}),

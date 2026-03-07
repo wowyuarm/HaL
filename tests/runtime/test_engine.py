@@ -260,7 +260,7 @@ class TestDispatch:
         assert out.content.startswith("Error calling LLM:")
 
     def test_session_rotates_after_idle_timeout(self, engine):
-        engine._engine_config.session_idle_timeout_s = 1.0
+        engine._engine_config.session.idle_timeout_s = 1.0
         key = "telegram:c1"
         first = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
         first_id = first.session_id
@@ -501,10 +501,10 @@ class TestSessionCompaction:
     async def test_compacts_history_when_token_budget_exceeded(self, engine):
         session_key = "telegram:c1"
         engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
-        engine._engine_config.session_compaction_enabled = True
-        engine._engine_config.session_compaction_token_budget = 80
-        engine._engine_config.session_compaction_recent_user_turns = 1
-        engine._engine_config.session_compaction_checkpoint_tokens = 200
+        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.compaction_token_budget = 80
+        engine._engine_config.session.compaction_recent_user_turns = 1
+        engine._engine_config.session.compaction_checkpoint_tokens = 200
 
         history = [
             {"role": "user", "content": "old request " * 20},
@@ -532,8 +532,8 @@ class TestSessionCompaction:
     async def test_skips_compaction_when_under_budget(self, engine):
         session_key = "telegram:c1"
         engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
-        engine._engine_config.session_compaction_enabled = True
-        engine._engine_config.session_compaction_token_budget = 10000
+        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.compaction_token_budget = 10000
 
         history = [
             {"role": "user", "content": "short"},
@@ -554,10 +554,10 @@ class TestSessionCompaction:
     async def test_compaction_counts_tool_call_payloads_in_budget(self, engine):
         session_key = "telegram:c1"
         engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
-        engine._engine_config.session_compaction_enabled = True
-        engine._engine_config.session_compaction_token_budget = 120
-        engine._engine_config.session_compaction_recent_user_turns = 1
-        engine._engine_config.session_compaction_checkpoint_tokens = 200
+        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.compaction_token_budget = 120
+        engine._engine_config.session.compaction_recent_user_turns = 1
+        engine._engine_config.session.compaction_checkpoint_tokens = 200
 
         history = [
             {"role": "user", "content": "look it up"},

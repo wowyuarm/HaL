@@ -170,19 +170,28 @@ def test_defaults_match_original_hardcoded_values() -> None:
     """Verify that default config values match the original hardcoded constants."""
     cfg = Config()
 
-    # Engine
+    # Engine top-level
     assert cfg.engine.inbound_poll_timeout_s == 1.0
-    assert cfg.engine.session_idle_timeout_s == 300.0
-    assert cfg.engine.session_compaction_enabled is True
-    assert cfg.engine.session_compaction_token_budget == 150000
-    assert cfg.engine.session_compaction_recent_user_turns == 2
-    assert cfg.engine.session_compaction_checkpoint_tokens == 1800
-    assert cfg.engine.session_debrief_enabled is True
-    assert cfg.engine.session_debrief_confirm_timeout_s == 120.0
     assert cfg.engine.context_advisor_enabled is True
-    assert cfg.engine.llm_retry_attempts == 3
-    assert cfg.engine.llm_retry_base_delay_s == 0.8
-    assert cfg.engine.llm_retry_max_delay_s == 8.0
+
+    # Engine → session
+    assert cfg.engine.session.idle_timeout_s == 300.0
+    assert cfg.engine.session.compaction_enabled is True
+    assert cfg.engine.session.compaction_token_budget == 150000
+    assert cfg.engine.session.compaction_recent_user_turns == 2
+    assert cfg.engine.session.compaction_checkpoint_tokens == 1800
+
+    # Engine → debrief
+    assert cfg.engine.debrief.enabled is True
+    assert cfg.engine.debrief.confirm_timeout_s == 120.0
+    assert cfg.engine.debrief.max_event_tokens == 1500
+    assert cfg.engine.debrief.max_state_tokens == 8000
+    assert cfg.engine.debrief.max_prompt_tokens == 100_000
+
+    # Engine → llm_retry
+    assert cfg.engine.llm_retry.attempts == 3
+    assert cfg.engine.llm_retry.base_delay_s == 0.8
+    assert cfg.engine.llm_retry.max_delay_s == 8.0
 
     # Web tools
     assert cfg.tools.web.search.max_results == 5

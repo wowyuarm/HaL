@@ -36,10 +36,10 @@ _CONFIRM_TEXTS = {
     "\u2705",
 }
 
-# Token-based budget constants for debrief rendering
-_MAX_EVENT_TOKENS = 1500  # Per-event token cap (prevents one huge payload from eating budget)
-_MAX_STATE_TOKENS = 8000  # STATE.md token cap
-_MAX_DEBRIEF_PROMPT_TOKENS = 100_000  # Overall prompt token budget
+# Token-based budget defaults for debrief rendering (overridable via DebriefConfig)
+_DEFAULT_MAX_EVENT_TOKENS = 1500
+_DEFAULT_MAX_STATE_TOKENS = 8000
+_DEFAULT_MAX_PROMPT_TOKENS = 100_000
 _TRUNCATION_SUFFIX = "\n...[truncated]"
 
 
@@ -112,17 +112,18 @@ def format_session_events_for_prompt(
     events: list[EventEntry],
     *,
     model: str | None = None,
-    max_tokens: int = _MAX_DEBRIEF_PROMPT_TOKENS,
+    max_tokens: int = _DEFAULT_MAX_PROMPT_TOKENS,
+    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
 ) -> str:
     """Render compact event stream for worker-model debrief input.
 
-    Each event is individually capped at ``_MAX_EVENT_TOKENS``. The full
+    Each event is individually capped at *max_event_tokens*. The full
     rendered output is then trimmed to *max_tokens* as a safety net.
     """
     lines: list[str] = []
     for event in events:
         payload = event.payload or {}
-        preview = _event_preview(payload, model=model)
+        preview = _event_preview(payload, model=model, max_event_tokens=max_event_tokens)
         lines.append(f"- [{event.ts}] {event.type}: {preview}")
     rendered = "\n".join(lines) if lines else "- (no events)"
     return trim_text_to_token_budget(
@@ -130,7 +131,12 @@ def format_session_events_for_prompt(
     )
 
 
-def _event_preview(payload: dict[str, Any], *, model: str | None = None) -> str:
+def _event_preview(
+    payload: dict[str, Any],
+    *,
+    model: str | None = None,
+    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
+) -> str:
     """Extract a concise preview from one event payload, token-capped."""
     if not payload:
         return "(empty)"
@@ -138,17 +144,22 @@ def _event_preview(payload: dict[str, Any], *, model: str | None = None) -> str:
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             text = value.strip().replace("\n", " ")
-            return _cap_text(text, model=model)
+            return _cap_text(text, model=model, max_event_tokens=max_event_tokens)
     fallback = str(payload)
-    return _cap_text(fallback, model=model)
+    return _cap_text(fallback, model=model, max_event_tokens=max_event_tokens)
 
 
-def _cap_text(text: str, *, model: str | None = None) -> str:
-    """Trim text to _MAX_EVENT_TOKENS if it exceeds the budget."""
-    if estimate_text_tokens(text, model=model) <= _MAX_EVENT_TOKENS:
+def _cap_text(
+    text: str,
+    *,
+    model: str | None = None,
+    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
+) -> str:
+    """Trim text to max_event_tokens if it exceeds the budget."""
+    if estimate_text_tokens(text, model=model) <= max_event_tokens:
         return text
     return trim_text_to_token_budget(
-        text, _MAX_EVENT_TOKENS, model=model, suffix="...[truncated]"
+        text, max_event_tokens, model=model, suffix="...[truncated]"
     )
 
 
@@ -182,9 +193,15 @@ async def run_session_debrief(engine: Any, session_key: str) -> None:
 
     worker_model = engine._worker_model
     worker_provider = engine._worker_provider
+    debrief_cfg = engine._engine_config.debrief
 
     events = engine.memory.event_log.read_session(session_id)
-    rendered_events = format_session_events_for_prompt(events, model=worker_model)
+    rendered_events = format_session_events_for_prompt(
+        events,
+        model=worker_model,
+        max_tokens=debrief_cfg.max_prompt_tokens,
+        max_event_tokens=debrief_cfg.max_event_tokens,
+    )
     updated_threads: list[str] = []
     written_episodes: list[Path] = []
 
@@ -203,6 +220,7 @@ async def run_session_debrief(engine: Any, session_key: str) -> None:
             thread_slug=thread_slug,
             state_content=state_content,
             rendered_events=rendered_events,
+            max_state_tokens=debrief_cfg.max_state_tokens,
         )
         write_result = engine.thread_repository.record_debrief_episode(
             thread_slug=thread_slug,
@@ -244,10 +262,11 @@ async def generate_episode_markdown(
     thread_slug: str,
     state_content: str,
     rendered_events: str,
+    max_state_tokens: int = _DEFAULT_MAX_STATE_TOKENS,
 ) -> str:
     """Generate thread episode markdown via worker model with fallback."""
     trimmed_state = trim_text_to_token_budget(
-        state_content, _MAX_STATE_TOKENS, model=worker_model, suffix=_TRUNCATION_SUFFIX
+        state_content, max_state_tokens, model=worker_model, suffix=_TRUNCATION_SUFFIX
     )
     prompt = (
         f"Thread: {thread_slug}\nSession: {session_id}\n\n"

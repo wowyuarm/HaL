@@ -169,37 +169,56 @@ class MemorySearchConfig(_StrictModel):
     embed_timeout_s: float = Field(default=60.0, gt=0)  # HTTP timeout for embedding API calls
 
 
+class SessionConfig(_StrictModel):
+    """Session lifecycle and compaction configuration."""
+
+    idle_timeout_s: float = Field(default=300.0, gt=0)  # Idle timeout before debrief trigger
+    compaction_enabled: bool = True  # Enable in-session history compaction when budget exceeded
+    compaction_token_budget: int = Field(
+        default=150000, ge=1000
+    )  # Approx token ceiling for in-memory session history
+    compaction_recent_user_turns: int = Field(
+        default=2, ge=1
+    )  # Keep latest N user turns raw when compacting older history
+    compaction_checkpoint_tokens: int = Field(
+        default=1800, ge=100
+    )  # Max token budget per generated checkpoint block
+
+
+class DebriefConfig(_StrictModel):
+    """Session debrief configuration."""
+
+    enabled: bool = True  # Enable idle-session debrief confirmation + processing
+    confirm_timeout_s: float = Field(
+        default=120.0, gt=0
+    )  # Grace period for user confirmation before auto debrief
+    max_event_tokens: int = Field(
+        default=1500, ge=100
+    )  # Per-event token cap in debrief event stream
+    max_state_tokens: int = Field(
+        default=8000, ge=100
+    )  # Per-thread STATE.md token cap for debrief input
+    max_prompt_tokens: int = Field(
+        default=100_000, ge=1000
+    )  # Overall prompt token budget for episode generation
+
+
+class LLMRetryConfig(_StrictModel):
+    """LLM provider retry configuration with exponential backoff."""
+
+    attempts: int = Field(default=3, ge=1)  # Retry count for retryable LLM API errors
+    base_delay_s: float = Field(default=0.8, gt=0)  # Base delay (seconds) for backoff
+    max_delay_s: float = Field(default=8.0, gt=0)  # Upper bound (seconds) for delay
+
+
 class EngineConfig(_StrictModel):
     """Agent engine runtime configuration."""
 
     inbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Bus consume poll interval
-    session_idle_timeout_s: float = Field(
-        default=300.0, gt=0
-    )  # Idle timeout for rotating to a new session_id
-    session_compaction_enabled: bool = (
-        True  # Enable in-session history compaction when budget is exceeded
-    )
-    session_compaction_token_budget: int = Field(
-        default=150000, ge=1000
-    )  # Approx token ceiling for in-memory session history
-    session_compaction_recent_user_turns: int = Field(
-        default=2, ge=1
-    )  # Keep latest N user turns raw when compacting older history
-    session_compaction_checkpoint_tokens: int = Field(
-        default=1800, ge=100
-    )  # Max token budget per generated checkpoint block
-    session_debrief_enabled: bool = True  # Enable idle-session debrief confirmation + processing
-    session_debrief_confirm_timeout_s: float = Field(
-        default=120.0, gt=0
-    )  # Grace period for user confirmation before auto debrief
     context_advisor_enabled: bool = True  # Enable first-tool-call context advisor hints
-    llm_retry_attempts: int = Field(default=3, ge=1)  # Retry count for retryable LLM API errors
-    llm_retry_base_delay_s: float = Field(
-        default=0.8, gt=0
-    )  # Base delay (seconds) for LLM retry backoff
-    llm_retry_max_delay_s: float = Field(
-        default=8.0, gt=0
-    )  # Upper bound (seconds) for LLM retry delay
+    session: SessionConfig = Field(default_factory=SessionConfig)
+    debrief: DebriefConfig = Field(default_factory=DebriefConfig)
+    llm_retry: LLMRetryConfig = Field(default_factory=LLMRetryConfig)
 
 
 class Config(BaseSettings):
