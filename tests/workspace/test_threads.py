@@ -198,3 +198,93 @@ def test_collect_thread_episode_paths_wrapper_uses_repository(tmp_path: Path) ->
     (episode_dir / "2026-03-06-actions.md").write_text("# Episode\n", encoding="utf-8")
 
     assert collect_thread_episode_paths(tmp_path) == [episode_dir / "2026-03-06-actions.md"]
+
+
+# ---------------------------------------------------------------------------
+# Auto-bootstrap: THREAD.yaml only → STATE.md generated
+# ---------------------------------------------------------------------------
+
+
+def test_thread_yaml_only_bootstraps_state_md(tmp_path: Path) -> None:
+    """A directory with only THREAD.yaml should auto-generate STATE.md on discovery."""
+    thread_dir = tmp_path / "work" / "threads" / "new-project"
+    thread_dir.mkdir(parents=True)
+    (thread_dir / "THREAD.yaml").write_text(
+        "name: New Project\n"
+        "status: active\n"
+        "goal: Build the next big thing.\n"
+        "related_threads:\n"
+        "  - hal-architecture\n",
+        encoding="utf-8",
+    )
+
+    entries = collect_thread_registry_entries(tmp_path, max_entries=20)
+
+    assert len(entries) == 1
+    assert entries[0].slug == "new-project"
+    assert entries[0].name == "New Project"
+    assert entries[0].status == "active"
+    assert entries[0].description == "Build the next big thing."
+    assert entries[0].related_threads == ("hal-architecture",)
+
+    # STATE.md was auto-generated
+    state = (thread_dir / "STATE.md").read_text(encoding="utf-8")
+    assert "# New Project" in state
+    assert "Status: active" in state
+    assert "Build the next big thing." in state
+    assert "## Current State" in state
+
+
+def test_thread_yaml_only_bootstrap_uses_slug_as_fallback_title(tmp_path: Path) -> None:
+    """When THREAD.yaml has no name/title, slug is used."""
+    thread_dir = tmp_path / "work" / "threads" / "quick-task"
+    thread_dir.mkdir(parents=True)
+    (thread_dir / "THREAD.yaml").write_text("status: active\n", encoding="utf-8")
+
+    entries = collect_thread_registry_entries(tmp_path, max_entries=20)
+
+    assert len(entries) == 1
+    assert entries[0].slug == "quick-task"
+    state = (thread_dir / "STATE.md").read_text(encoding="utf-8")
+    assert "# quick-task" in state
+    assert "Status: active" in state
+
+
+def test_empty_dir_without_yaml_or_state_is_ignored(tmp_path: Path) -> None:
+    """Directories with neither STATE.md nor THREAD.yaml are skipped."""
+    thread_dir = tmp_path / "work" / "threads" / "empty-dir"
+    thread_dir.mkdir(parents=True)
+
+    entries = collect_thread_registry_entries(tmp_path, max_entries=20)
+    assert len(entries) == 0
+
+
+def test_bootstrapped_thread_can_receive_debrief_episode(tmp_path: Path) -> None:
+    """After bootstrap, debrief should be able to patch the thread normally."""
+    thread_dir = tmp_path / "work" / "threads" / "bootstrapped"
+    thread_dir.mkdir(parents=True)
+    (thread_dir / "THREAD.yaml").write_text(
+        "name: Bootstrapped Thread\nstatus: active\ngoal: Test bootstrap.\n",
+        encoding="utf-8",
+    )
+
+    # Trigger bootstrap
+    repo = ThreadRepository(tmp_path)
+    repo.collect_registry_entries(max_entries=20)
+
+    # Now record an episode
+    episode = (
+        "# 2026-03-07: First session\n\n"
+        "## What Happened\n- Initial work done.\n\n"
+        "## Decisions\n- Use bootstrap approach.\n"
+    )
+    result = repo.record_debrief_episode(
+        thread_slug="bootstrapped",
+        session_id="s_1",
+        episode_markdown=episode,
+        now=datetime(2026, 3, 7, 10, 0, 0),
+    )
+
+    assert result is not None
+    assert "### 2026-03-07: First session" in result.state_content
+    assert "- Use bootstrap approach." in result.state_content

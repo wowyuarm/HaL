@@ -158,7 +158,10 @@ class ThreadRepository:
         """Load one normalized registry entry from a thread directory."""
         state_path = thread_dir / THREAD_STATE_FILENAME
         if not state_path.is_file():
-            return None
+            # Auto-bootstrap: if THREAD.yaml exists, generate initial STATE.md.
+            if not (thread_dir / THREAD_METADATA_FILENAME).is_file():
+                return None
+            self._bootstrap_state_from_metadata(thread_dir)
         try:
             state_content = state_path.read_text(encoding="utf-8")
         except Exception:
@@ -230,6 +233,24 @@ class ThreadRepository:
         if not has_machine_metadata:
             return None
         return self._relative_thread_path(thread_slug, THREAD_METADATA_FILENAME)
+
+    def _bootstrap_state_from_metadata(self, thread_dir: Path) -> None:
+        """Generate initial STATE.md from THREAD.yaml when only metadata exists."""
+        metadata = load_thread_metadata(thread_dir / THREAD_METADATA_FILENAME)
+        title = metadata.get("name") or metadata.get("title") or thread_dir.name
+        status = metadata.get("status", "active")
+        goal = metadata.get("goal") or metadata.get("description") or "No description provided."
+        content = (
+            f"# {title}\n"
+            f"Status: {status}\n\n"
+            f"## Goal\n{goal}\n\n"
+            "## Current State\nThread created.\n\n"
+            "## Key Decisions\n\n"
+            "## Open Items\n\n"
+            "## Recent Episodes\n"
+        )
+        state_path = thread_dir / THREAD_STATE_FILENAME
+        state_path.write_text(content, encoding="utf-8")
 
     @staticmethod
     def _rank_registry_entries(entries: list[ThreadRegistryEntry]) -> list[ThreadRegistryEntry]:
