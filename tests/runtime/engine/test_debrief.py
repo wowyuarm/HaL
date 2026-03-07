@@ -4,8 +4,11 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from hal.runtime.debrief import (
+    _MAX_EVENT_TOKENS,
+    _cap_text,
     build_debrief_confirmation_message,
     extract_touched_threads,
+    format_session_events_for_prompt,
     is_debrief_action_message,
     is_debrief_confirm_message,
     resolve_debrief_thread_order,
@@ -133,3 +136,46 @@ def test_resolve_debrief_thread_order_expands_related_and_prefers_priority() -> 
     )
 
     assert ordered == ["hal-architecture", "github-actions"]
+
+
+def test_cap_text_passes_short_text_through() -> None:
+    short = "hello world"
+    assert _cap_text(short) == short
+
+
+def test_cap_text_truncates_large_text() -> None:
+    # ~1500 tokens ≈ ~6000 chars; create something well over that
+    large = "word " * 3000  # ~15000 chars ≈ ~3750 tokens
+    result = _cap_text(large)
+    assert len(result) < len(large)
+    assert result.endswith("...[truncated]")
+
+
+def test_format_session_events_respects_per_event_cap() -> None:
+    from hal.workspace.events import EventEntry
+
+    huge_content = "x" * 20000  # ~5000 tokens, well over _MAX_EVENT_TOKENS
+    events = [
+        EventEntry(session="s1", type="user_message", payload={"content": huge_content}),
+        EventEntry(session="s1", type="assistant", payload={"content": "short reply"}),
+    ]
+    rendered = format_session_events_for_prompt(events)
+    # The huge event should be truncated, but the short one preserved
+    assert "short reply" in rendered
+    assert "...[truncated]" in rendered
+    # Overall output should be much smaller than the raw input
+    assert len(rendered) < len(huge_content)
+
+
+def test_format_session_events_overall_budget() -> None:
+    from hal.workspace.events import EventEntry
+
+    # Create many events that individually fit but collectively exceed a small budget
+    events = [
+        EventEntry(session="s1", type="msg", payload={"content": f"event number {i}"})
+        for i in range(500)
+    ]
+    rendered = format_session_events_for_prompt(events, max_tokens=200)
+    # Should be trimmed to roughly 200 tokens (~800 chars)
+    assert rendered.endswith("...[truncated]")
+    assert len(rendered) < 2000

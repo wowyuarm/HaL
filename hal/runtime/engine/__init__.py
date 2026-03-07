@@ -139,6 +139,8 @@ class AgentEngine:
 
         sa_provider = worker_provider or provider
         sa_model = self.model if worker_model == "default" else worker_model
+        self._worker_provider = sa_provider
+        self._worker_model = sa_model
         self.subagents = SubagentManager(
             provider=sa_provider,
             workspace=workspace,
