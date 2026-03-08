@@ -23,7 +23,9 @@ ruff format hal/
 
 ## Architecture Overview
 
-HaL is an async, bus-driven personal butler. Channels send inbound messages to a shared `MessageBus`; the engine consumes, runs the LLM/tool loop, and publishes outbound messages.
+HaL is a stateful collaboration system — see `DESIGN.md` for foundational invariants.
+
+Async, bus-driven: channels send inbound messages to a shared `MessageBus`; the engine consumes, runs the LLM/tool loop, and publishes outbound messages.
 
 ```
 Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider

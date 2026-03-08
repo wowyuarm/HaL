@@ -126,9 +126,7 @@ def format_session_events_for_prompt(
         preview = _event_preview(payload, model=model, max_event_tokens=max_event_tokens)
         lines.append(f"- [{event.ts}] {event.type}: {preview}")
     rendered = "\n".join(lines) if lines else "- (no events)"
-    return trim_text_to_token_budget(
-        rendered, max_tokens, model=model, suffix=_TRUNCATION_SUFFIX
-    )
+    return trim_text_to_token_budget(rendered, max_tokens, model=model, suffix=_TRUNCATION_SUFFIX)
 
 
 def _event_preview(
@@ -158,9 +156,7 @@ def _cap_text(
     """Trim text to max_event_tokens if it exceeds the budget."""
     if estimate_text_tokens(text, model=model) <= max_event_tokens:
         return text
-    return trim_text_to_token_budget(
-        text, max_event_tokens, model=model, suffix="...[truncated]"
-    )
+    return trim_text_to_token_budget(text, max_event_tokens, model=model, suffix="...[truncated]")
 
 
 # ---------------------------------------------------------------------------

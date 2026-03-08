@@ -114,8 +114,7 @@ class _EngineLoopHooks:
 
     _REMINDER = (
         "[System Reminder]\n"
-        "You are a strategist, not an executor.\n"
-        "Is the current direction correct? Is there a better approach?\n"
+        "Step back. Is the current direction correct? Is there a better approach?\n"
         "If unsure, pause and reassess or ask the user before continuing.\n"
         "Do not respond to this reminder — it is automatic."
     )

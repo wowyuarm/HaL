@@ -1,7 +1,7 @@
 [project]
 name = "HaL"
 version = "0.1.0"
-description = "Yu's personal digital butler - orchestrator and leader"
+description = "Collaborative intelligence framework for human-AI partnership"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
