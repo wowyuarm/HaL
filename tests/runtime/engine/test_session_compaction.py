@@ -89,5 +89,13 @@ def test_render_history_for_compaction_includes_tool_calls_and_reasoning() -> No
 def test_build_fallback_checkpoint_contains_summary_fields() -> None:
     text = build_fallback_checkpoint(compacted_messages=5, compacted_tokens=1200)
     assert "[Session Checkpoint]" in text
-    assert "## Decisions" in text
-    assert "## Open Items" in text
+    assert "5 older messages" in text
+    assert "1200" in text
+
+
+def test_normalize_checkpoint_strips_analysis_tags() -> None:
+    raw = "<analysis>\nthinking...\n</analysis>\n[Session Checkpoint]\n\n## Work done\n- stuff"
+    result = normalize_checkpoint(raw)
+    assert "<analysis>" not in result
+    assert "[Session Checkpoint]" in result
+    assert "## Work done" in result

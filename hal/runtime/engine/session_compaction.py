@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from hal.context.token_budget import estimate_content_tokens
@@ -12,6 +13,8 @@ _MAX_RENDER_CHAR_PER_MESSAGE = 2400
 _MAX_RENDER_TOTAL_CHARS = 60000
 _MAX_REASONING_CHAR_PER_MESSAGE = 1200
 _MAX_TOOL_ARGS_CHAR_PER_MESSAGE = 600
+
+_ANALYSIS_TAG_RE = re.compile(r"<analysis>.*?</analysis>\s*", re.DOTALL)
 
 
 def estimate_history_tokens(history: list[dict[str, Any]], *, model: str | None = None) -> int:
@@ -71,8 +74,16 @@ def render_history_for_compaction(messages: list[dict[str, Any]]) -> str:
 
 
 def normalize_checkpoint(content: str) -> str:
-    """Normalize model output into a stable checkpoint format."""
+    """Normalize model output into a stable checkpoint format.
+
+    Strips <analysis>...</analysis> blocks (used for chain-of-thought during
+    compaction) and ensures the checkpoint header is present.
+    """
     text = (content or "").strip()
+    if not text:
+        return _SESSION_CHECKPOINT_HEADER
+    # Strip analysis tags — they served as worker-model reasoning scaffolding.
+    text = _ANALYSIS_TAG_RE.sub("", text).strip()
     if not text:
         return _SESSION_CHECKPOINT_HEADER
     if _SESSION_CHECKPOINT_HEADER in text:
@@ -84,14 +95,9 @@ def build_fallback_checkpoint(*, compacted_messages: int, compacted_tokens: int)
     """Build deterministic fallback checkpoint when model compaction fails."""
     return (
         f"{_SESSION_CHECKPOINT_HEADER}\n\n"
-        "## What Was Compacted\n"
-        f"- Compacted {compacted_messages} older messages (~{compacted_tokens} tokens).\n\n"
-        "## Decisions\n"
-        "- none\n\n"
-        "## Key Results\n"
-        "- none\n\n"
-        "## Open Items\n"
-        "- [ ] Review earlier details from events log if needed.\n"
+        f"Compacted {compacted_messages} older messages (~{compacted_tokens} tokens).\n"
+        "No structured checkpoint could be generated. "
+        "Review events log for earlier details if needed.\n"
     )
 
 

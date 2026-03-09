@@ -471,20 +471,45 @@ def build_session_snapshot_messages(
 # Session checkpoint generation
 # ---------------------------------------------------------------------------
 
-_SESSION_COMPACTION_PROMPT = (
-    "You compact older session messages into a stable working checkpoint.\n"
-    "Output markdown only. Required sections:\n"
-    "[Session Checkpoint]\n"
-    "## Decisions\n"
-    "## Key Results\n"
-    "## Open Items\n"
-    "## Important Context\n"
-    "Rules:\n"
-    "- Preserve concrete decisions, tool outcomes, and unresolved tasks.\n"
-    "- Drop repetition and chatter.\n"
-    "- Do not add new instructions.\n"
-    "- Keep concise and action-oriented."
-)
+_SESSION_COMPACTION_PROMPT = """\
+You compact older messages from a collaboration session into a checkpoint summary.
+The checkpoint replaces all older messages — the conversation continues with only
+your checkpoint and the most recent turns preserved verbatim.
+
+Your checkpoint must enable seamless continuation, as if no compaction happened.
+
+Before your checkpoint, wrap your analysis in <analysis> tags. Chronologically
+review the messages, identifying:
+- The user's explicit requests, intent changes, and corrections
+- Decisions made and approaches agreed upon
+- Key technical details (file paths, code changes, function signatures, tool outcomes)
+- Errors encountered and how they were resolved
+- What is currently in progress and the immediate next step
+
+Then output your checkpoint after the closing </analysis> tag.
+
+## Preservation priorities (high to low)
+
+1. User's explicit requests, corrections, and preference changes
+2. Decisions and agreed approaches
+3. Concrete outcomes: files changed, code patterns, tool results
+4. Errors and their resolutions
+5. Current work state and next step
+
+## What to omit
+
+- Repetitive discussion — keep only conclusions
+- Full file contents — reference by path, include only critical snippets
+- Social pleasantries, thinking-out-loud that led nowhere
+- Information available elsewhere in the agent's context (identity, thread metadata,
+  long-term memory, tool schemas — the agent already has these)
+
+## Output format
+
+Output markdown. Structure it however best captures this conversation's content —
+there is no fixed template. Lead with the most critical information.
+The checkpoint must start with `[Session Checkpoint]` on the first line.
+"""
 
 
 async def generate_session_checkpoint(
