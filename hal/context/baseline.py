@@ -70,6 +70,12 @@ async def compile_baseline_plan(
             preferred_slugs=preferred_thread_slugs,
             max_entries=max_active_threads,
         )
+        logger.debug(
+            "baseline: recall={} mentioned={} active={}",
+            recalled_thread_slugs,
+            mentioned_thread_slugs,
+            [str(e.get("slug", "")) for e in baseline_active_threads],
+        )
         session_baseline = context_builder.build_dynamic_context_block(
             channel=channel,
             chat_id=chat_id,

@@ -182,6 +182,8 @@ async def maybe_compact_session_history(
     if after_tokens >= before_tokens:
         return history
 
+    logger.debug("compaction: {} → {} tokens ({} passes)", before_tokens, after_tokens, passes)
+
     _record_session_compaction(
         engine,
         session_key=session_key,

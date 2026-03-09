@@ -274,82 +274,85 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         chat_id=msg.chat_id,
     )
 
-    # /brief command — start background brief worker and end session
-    is_brief, brief_prompt = _parse_brief_command(msg.content)
-    if is_brief:
-        return await _handle_brief_command(
-            engine=engine, msg=msg, session_state=session_state, user_prompt=brief_prompt
+    with logger.contextualize(session=session_state.session_id):
+        # /brief command — start background brief worker and end session
+        is_brief, brief_prompt = _parse_brief_command(msg.content)
+        if is_brief:
+            return await _handle_brief_command(
+                engine=engine, msg=msg, session_state=session_state, user_prompt=brief_prompt
+            )
+
+        _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
+
+        resolved_model = engine.provider.resolve_model(engine.model)
+        hc = engine._history_config
+        history = engine._get_session_history(msg.session_key)
+        compiled = await engine.context_compiler.compile_session_turn(
+            SessionTurnRequest(
+                history=history,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                token_model=resolved_model,
+                memory_budget_tokens=(hc.memory_budget_tokens or None),
+                recall_max_total_tokens=hc.recall_max_total_tokens,
+                recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+                existing_baseline=engine._get_session_baseline(msg.session_key),
+            )
         )
-
-    _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
-
-    resolved_model = engine.provider.resolve_model(engine.model)
-    hc = engine._history_config
-    history = engine._get_session_history(msg.session_key)
-    compiled = await engine.context_compiler.compile_session_turn(
-        SessionTurnRequest(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            token_model=resolved_model,
-            memory_budget_tokens=(hc.memory_budget_tokens or None),
-            recall_max_total_tokens=hc.recall_max_total_tokens,
+        _apply_compiled_turn_context(engine=engine, msg=msg, compiled=compiled)
+        messages = compiled.messages
+        search_results = compiled.search_results
+        recall_chars = _compute_recall_chars(
+            search_results=search_results,
             recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-            existing_baseline=engine._get_session_baseline(msg.session_key),
+            resolved_model=resolved_model,
         )
-    )
-    _apply_compiled_turn_context(engine=engine, msg=msg, compiled=compiled)
-    messages = compiled.messages
-    search_results = compiled.search_results
-    recall_chars = _compute_recall_chars(
-        search_results=search_results,
-        recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-        resolved_model=resolved_model,
-    )
-    pre_metrics = _build_pre_metrics(
-        msg=msg,
-        mode=mode,
-        messages=messages,
-        history=history,
-        search_results=search_results,
-        recall_chars=recall_chars,
-    )
-
-    engine._set_session_active(msg.session_key, True)
-    try:
-        final_content, meta, _injected = await engine._execute_loop(
-            messages,
-            engine.max_iterations,
-            session_key=msg.session_key,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
+        pre_metrics = _build_pre_metrics(
+            msg=msg,
+            mode=mode,
+            messages=messages,
+            history=history,
+            search_results=search_results,
+            recall_chars=recall_chars,
         )
-    finally:
-        engine._set_session_active(msg.session_key, False)
-    _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
-    engine._record_metrics(pre_metrics)
 
-    final_content = _normalize_final_content(final_content)
-    await _persist_completed_turn(
-        engine=engine,
-        msg=msg,
-        session_state=session_state,
-        messages=messages,
-        final_content=final_content,
-        meta=meta,
-        resolved_model=resolved_model,
-    )
+        engine._set_session_active(msg.session_key, True)
+        try:
+            final_content, meta, _injected = await engine._execute_loop(
+                messages,
+                engine.max_iterations,
+                session_key=msg.session_key,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
+        finally:
+            engine._set_session_active(msg.session_key, False)
+        _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
+        engine._record_metrics(pre_metrics)
 
-    preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-    logger.info(f"[engine] response: {preview}")
+        final_content = _normalize_final_content(final_content)
+        await _persist_completed_turn(
+            engine=engine,
+            msg=msg,
+            session_state=session_state,
+            messages=messages,
+            final_content=final_content,
+            meta=meta,
+            resolved_model=resolved_model,
+        )
 
-    if _message_sent_in_turn(engine.tools.get("message")):
-        logger.info("[engine] message already sent via message tool, suppressing final outbound")
-        return None
+        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        logger.info(f"[engine] response: {preview}")
 
-    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
+        if _message_sent_in_turn(engine.tools.get("message")):
+            logger.info(
+                "[engine] message already sent via message tool, suppressing final outbound"
+            )
+            return None
+
+        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
 
 
 # ---------------------------------------------------------------------------

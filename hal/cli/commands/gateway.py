@@ -3,10 +3,36 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
 
 import typer
+from loguru import logger
 
 from .root import app, console
+
+_LOG_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<8} | "
+    "{extra[session]} | {name}:{function}:{line} - {message}"
+)
+
+
+def _configure_logging(*, verbose: bool) -> None:
+    """Configure loguru sinks: stderr + persistent file."""
+    logger.remove()
+    logger.configure(extra={"session": "-"})
+
+    stderr_level = "DEBUG" if verbose else "INFO"
+    logger.add(sys.stderr, level=stderr_level, format=_LOG_FORMAT)
+
+    log_path = Path.home() / ".hal" / "runtime" / "logs" / "hal.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.add(log_path, level="DEBUG", format=_LOG_FORMAT, rotation="10 MB", retention="1 week")
+
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
 
 
 @app.command()
@@ -19,10 +45,7 @@ def gateway(
     from hal.infra.config.loader import load_config
     from hal.runtime.bootstrap.gateway import build_gateway_runtime
 
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
+    _configure_logging(verbose=verbose)
 
     console.print(f"{__logo__} Starting HaL gateway on port {port}...")
 
