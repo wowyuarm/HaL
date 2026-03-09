@@ -197,7 +197,7 @@ class DebriefConfig(_StrictModel):
     )  # Per-event token cap in debrief event stream
     max_state_tokens: int = Field(
         default=8000, ge=100
-    )  # Per-thread STATE.md token cap for debrief input
+    )  # Per-thread BRIEF.md token cap for debrief input
     max_prompt_tokens: int = Field(
         default=100_000, ge=1000
     )  # Overall prompt token budget for episode generation

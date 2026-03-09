@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ DEBRIEF_ACTION_KEY = "debrief_action"
 DEBRIEF_ACTION_CONFIRM = "confirm"
 DEBRIEF_ACTION_CANCEL = "cancel"
 
-_THREAD_STATE_PATH_RE = re.compile(r"(?:^|/)threads/([^/]+)/STATE\.md$")
+_THREAD_STATE_PATH_RE = re.compile(r"(?:^|/)threads/([^/]+)/BRIEF\.md$")
 _CONFIRM_TEXTS = {
     "yes",
     "y",
@@ -43,13 +44,21 @@ _DEFAULT_MAX_PROMPT_TOKENS = 100_000
 _TRUNCATION_SUFFIX = "\n...[truncated]"
 
 
+@dataclass(frozen=True, slots=True)
+class DebriefOutput:
+    """Structured output from the debrief worker model."""
+
+    episode_markdown: str
+    brief_markdown: str | None  # None = keep current brief unchanged
+
+
 def build_debrief_confirmation_message(*, threads: list[str], confirm_timeout_s: float) -> str:
     """Build user-visible confirmation text before starting session debrief."""
     thread_text = ", ".join(threads)
     timeout_m = max(int(confirm_timeout_s // 60), 1)
     return (
         "This session touched threads: "
-        f"{thread_text}. I will update episodes/STATE in about {timeout_m} minute(s). "
+        f"{thread_text}. I will update briefs/episodes in about {timeout_m} minute(s). "
         "Reply to continue chatting and cancel this debrief, or reply 'confirm' to start now."
     )
 
@@ -77,7 +86,7 @@ def is_debrief_action_message(metadata: dict[str, Any]) -> str | None:
 
 
 def extract_thread_slug_from_value(value: Any) -> str | None:
-    """Extract thread slug from arbitrary string value containing threads/.../STATE.md."""
+    """Extract thread slug from arbitrary string value containing threads/.../BRIEF.md."""
     if not isinstance(value, str):
         return None
     normalized = value.replace("\\", "/")
@@ -163,25 +172,51 @@ def _cap_text(
 # Debrief orchestration
 # ---------------------------------------------------------------------------
 
-_EPISODE_SYSTEM_PROMPT = (
-    "You convert one session event stream into a compact thread episode.\n"
-    "Return markdown only with sections:\n"
-    "# <date>: <title>\n"
-    "Threads: [<thread>]\n"
-    "Primary: <thread>\n"
-    "Session: <session_id>\n"
-    "## What Happened\n"
-    "## Decisions\n"
-    "## Status\n"
-    "## Artifacts\n"
-    "## Open\n"
-    "## Source Events\n"
-    "Keep it concise and action-oriented."
+_DEBRIEF_SYSTEM_PROMPT = (
+    "You maintain collaboration briefs for an ongoing thread. "
+    "Each session, you receive the current brief and the session's event stream. "
+    "You produce two outputs:\n\n"
+    "1. An **episode** — immutable record of this session's contribution. "
+    "Start with a markdown heading (# date: title), then free-form content: "
+    "what happened, decisions made, outcomes. Concise and factual.\n\n"
+    "2. An **updated brief** — replaces the current brief entirely. "
+    "This is what a collaborator reads at the start of the next session. "
+    "It should answer: Where do things stand? What's been decided? "
+    "What needs attention? What's the recent trajectory?\n\n"
+    "The brief is a living document, not a log. Remove outdated information. "
+    "Update status. Evolve its structure as the thread develops. "
+    "Different threads warrant different structures — a technical project needs "
+    "architecture decisions and blockers; a learning journey needs insights "
+    "and open questions; daily coordination needs action items and reminders.\n\n"
+    "If the session didn't meaningfully advance this thread, output a minimal "
+    "episode and return the brief unchanged.\n\n"
+    "Format your response exactly as:\n"
+    "---EPISODE---\n"
+    "[episode markdown]\n"
+    "---BRIEF---\n"
+    "[complete updated brief markdown]"
 )
+
+_EPISODE_MARKER = "---EPISODE---"
+_BRIEF_MARKER = "---BRIEF---"
+
+
+def _parse_debrief_response(raw: str) -> DebriefOutput:
+    """Split worker response into episode + brief. Fallback: entire output as episode."""
+    ep_idx = raw.find(_EPISODE_MARKER)
+    br_idx = raw.find(_BRIEF_MARKER)
+    if ep_idx < 0 or br_idx < 0 or br_idx <= ep_idx:
+        return DebriefOutput(episode_markdown=raw.strip(), brief_markdown=None)
+    episode = raw[ep_idx + len(_EPISODE_MARKER) : br_idx].strip()
+    brief = raw[br_idx + len(_BRIEF_MARKER) :].strip()
+    return DebriefOutput(
+        episode_markdown=episode or raw.strip(),
+        brief_markdown=brief or None,
+    )
 
 
 async def run_session_debrief(engine: Any, session_key: str) -> None:
-    """Generate episodes and patch state files for one closed session."""
+    """Generate episodes and update briefs for one closed session."""
     state = engine._session_states.get(session_key)
     if state is None:
         return
@@ -201,29 +236,46 @@ async def run_session_debrief(engine: Any, session_key: str) -> None:
     updated_threads: list[str] = []
     written_episodes: list[Path] = []
 
+    # Build thread metadata lookup for name/scope.
+    thread_meta: dict[str, dict[str, str]] = {}
+    try:
+        for item in engine.context_registry.thread_snapshot():
+            slug = str(item.get("slug", ""))
+            if slug:
+                thread_meta[slug] = {
+                    "name": str(item.get("name", slug)),
+                    "scope": str(item.get("scope", "")),
+                }
+    except Exception:
+        pass
+
     for thread_slug in resolve_debrief_thread_order(
         context_registry=engine.context_registry,
         touched_threads=state.touched_threads,
     ):
-        state_content = engine.thread_repository.read_state(thread_slug)
-        if state_content is None:
+        brief_content = engine.thread_repository.read_state(thread_slug)
+        if brief_content is None:
             continue
 
-        episode_markdown = await generate_episode_markdown(
+        meta = thread_meta.get(thread_slug, {})
+        output = await generate_debrief_output(
             worker_provider,
             worker_model=worker_model,
             session_id=session_id,
             thread_slug=thread_slug,
-            state_content=state_content,
+            brief_content=brief_content,
             rendered_events=rendered_events,
+            thread_name=meta.get("name", thread_slug),
+            scope=meta.get("scope", ""),
             max_state_tokens=debrief_cfg.max_state_tokens,
         )
         write_result = engine.thread_repository.record_debrief_episode(
             thread_slug=thread_slug,
             session_id=session_id,
-            episode_markdown=episode_markdown,
+            episode_markdown=output.episode_markdown,
+            brief_markdown=output.brief_markdown,
             now=datetime.now(),
-            state_content=state_content,
+            state_content=brief_content,
         )
         if write_result is None:
             continue
@@ -250,40 +302,52 @@ async def run_session_debrief(engine: Any, session_key: str) -> None:
     )
 
 
-async def generate_episode_markdown(
+async def generate_debrief_output(
     provider: Any,
     *,
     worker_model: str,
     session_id: str,
     thread_slug: str,
-    state_content: str,
+    brief_content: str,
     rendered_events: str,
+    thread_name: str = "",
+    scope: str = "",
     max_state_tokens: int = _DEFAULT_MAX_STATE_TOKENS,
-) -> str:
-    """Generate thread episode markdown via worker model with fallback."""
-    trimmed_state = trim_text_to_token_budget(
-        state_content, max_state_tokens, model=worker_model, suffix=_TRUNCATION_SUFFIX
+) -> DebriefOutput:
+    """Generate episode + updated brief via worker model with fallback."""
+    trimmed_brief = trim_text_to_token_budget(
+        brief_content, max_state_tokens, model=worker_model, suffix=_TRUNCATION_SUFFIX
     )
+    header_parts = [f"Thread: {thread_slug}"]
+    if thread_name and thread_name != thread_slug:
+        header_parts.append(f"Name: {thread_name}")
+    if scope:
+        header_parts.append(f"Scope: {scope}")
+    header_parts.append(f"Session: {session_id}")
     prompt = (
-        f"Thread: {thread_slug}\nSession: {session_id}\n\n"
-        f"Current STATE.md:\n{trimmed_state}\n\n"
+        "\n".join(header_parts) + f"\n\nCurrent BRIEF.md:\n{trimmed_brief}\n\n"
         f"Session events:\n{rendered_events}"
     )
     try:
         response = await provider.chat(
             messages=[
-                {"role": "system", "content": _EPISODE_SYSTEM_PROMPT},
+                {"role": "system", "content": _DEBRIEF_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             tools=[],
             model=worker_model,
         )
         if response.content and isinstance(response.content, str):
-            return response.content.strip()
+            return _parse_debrief_response(response.content)
     except Exception as e:
         logger.warning(f"Session debrief generation failed for {thread_slug}: {e}")
 
-    return _build_fallback_episode_markdown(session_id=session_id, thread_slug=thread_slug)
+    return DebriefOutput(
+        episode_markdown=_build_fallback_episode_markdown(
+            session_id=session_id, thread_slug=thread_slug
+        ),
+        brief_markdown=None,
+    )
 
 
 def _build_fallback_episode_markdown(*, session_id: str, thread_slug: str) -> str:
@@ -291,21 +355,9 @@ def _build_fallback_episode_markdown(*, session_id: str, thread_slug: str) -> st
     date_prefix = datetime.now().strftime("%Y-%m-%d")
     return (
         f"# {date_prefix}: Session update for {thread_slug}\n\n"
-        f"Threads: [{thread_slug}]\n"
-        f"Primary: {thread_slug}\n"
         f"Session: {session_id}\n\n"
-        "## What Happened\n"
-        "- Session debrief fallback summary generated.\n\n"
-        "## Decisions\n"
-        "- none\n\n"
-        "## Status\n"
-        "- unchanged\n\n"
-        "## Artifacts\n"
-        "- none\n\n"
-        "## Open\n"
-        "- [ ] Review this fallback and refine manually if needed.\n\n"
-        "## Source Events\n"
-        f"- {session_id}\n"
+        "## Summary\n"
+        "- Session debrief fallback — worker model generation failed.\n"
     )
 
 
@@ -367,11 +419,12 @@ __all__ = [
     "DEBRIEF_ACTION_KEY",
     "DEBRIEF_CANCEL_CB",
     "DEBRIEF_CONFIRM_CB",
+    "DebriefOutput",
     "build_debrief_confirmation_message",
     "extract_thread_slug_from_value",
     "extract_touched_threads",
     "format_session_events_for_prompt",
-    "generate_episode_markdown",
+    "generate_debrief_output",
     "is_debrief_action_message",
     "is_debrief_confirm_message",
     "resolve_debrief_thread_order",

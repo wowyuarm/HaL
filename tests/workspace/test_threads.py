@@ -15,7 +15,7 @@ from hal.workspace.threads import (
 def test_collect_thread_registry_entries_reads_metadata(tmp_path: Path) -> None:
     thread_dir = tmp_path / "work" / "threads" / "github-actions"
     thread_dir.mkdir(parents=True)
-    (thread_dir / "STATE.md").write_text(
+    (thread_dir / "BRIEF.md").write_text(
         "# GitHub Actions\n"
         "Status: active\n"
         "Pinned: true\n\n"
@@ -37,21 +37,21 @@ def test_collect_thread_registry_entries_reads_metadata(tmp_path: Path) -> None:
 def test_collect_thread_registry_entries_prioritizes_active_then_recent(tmp_path: Path) -> None:
     active_dir = tmp_path / "work" / "threads" / "active"
     active_dir.mkdir(parents=True)
-    (active_dir / "STATE.md").write_text(
+    (active_dir / "BRIEF.md").write_text(
         "# Active\nStatus: active\n\n## Goal\nCurrent work.\n",
         encoding="utf-8",
     )
 
     old_inactive = tmp_path / "work" / "threads" / "old"
     old_inactive.mkdir(parents=True)
-    (old_inactive / "STATE.md").write_text(
+    (old_inactive / "BRIEF.md").write_text(
         "# Old\nStatus: inactive\n\n## Goal\nOlder work.\n",
         encoding="utf-8",
     )
 
     new_inactive = tmp_path / "work" / "threads" / "new"
     new_inactive.mkdir(parents=True)
-    (new_inactive / "STATE.md").write_text(
+    (new_inactive / "BRIEF.md").write_text(
         "# New\nStatus: inactive\n\n## Goal\nNewer work.\n",
         encoding="utf-8",
     )
@@ -64,7 +64,7 @@ def test_collect_thread_registry_entries_prioritizes_active_then_recent(tmp_path
 def test_thread_yaml_overrides_machine_metadata(tmp_path: Path) -> None:
     thread_dir = tmp_path / "work" / "threads" / "hal-architecture"
     thread_dir.mkdir(parents=True)
-    (thread_dir / "STATE.md").write_text(
+    (thread_dir / "BRIEF.md").write_text(
         "# HaL Architecture\nStatus: inactive\nPinned: false\n\n## Goal\nLegacy goal.\n",
         encoding="utf-8",
     )
@@ -107,7 +107,7 @@ def test_thread_repository_reads_and_writes_state_and_episode(tmp_path: Path) ->
     state_path = repo.write_state("hal-architecture", "# HaL Architecture\nStatus: active\n")
     episode_path = repo.write_episode("hal-architecture", "episode.md", "# Episode\n")
 
-    assert state_path == tmp_path / "work" / "threads" / "hal-architecture" / "STATE.md"
+    assert state_path == tmp_path / "work" / "threads" / "hal-architecture" / "BRIEF.md"
     assert (
         episode_path
         == tmp_path / "work" / "threads" / "hal-architecture" / "episodes" / "episode.md"
@@ -119,7 +119,7 @@ def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: 
     repo = ThreadRepository(tmp_path)
     repo.write_state(
         "github-actions",
-        "# GitHub Actions\nStatus: active\n\n## Current State\n- Existing status\n",
+        "# GitHub Actions\nStatus: active\n\n## Purpose\nShip automation workflow.\n",
     )
     episode = (
         "# 2026-03-06: Workflow update\n\n"
@@ -134,11 +134,17 @@ def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: 
         "## Open\n"
         "- [ ] Verify in CI.\n"
     )
+    brief = (
+        "# GitHub Actions\nStatus: active\n\n"
+        "## Purpose\nShip automation workflow.\n\n"
+        "## Key Decisions\n- Use label-based routing.\n"
+    )
 
     result = repo.record_debrief_episode(
         thread_slug="github-actions",
         session_id="s_1",
         episode_markdown=episode,
+        brief_markdown=brief,
         now=datetime(2026, 3, 6, 9, 0, 0),
     )
     assert result is not None
@@ -152,18 +158,16 @@ def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: 
         / "episodes"
         / "2026-03-06-github-actions-s_1.md"
     )
-    assert "### 2026-03-06: Workflow update" in result.state_content
     assert "- Use label-based routing." in result.state_content
-    assert "- [ ] Verify in CI." in result.state_content
     assert "## Recent Episodes" in result.state_content
-    assert "### 2026-03-06: Workflow update" in repo.read_state("github-actions")
+    assert "- Use label-based routing." in repo.read_state("github-actions")
 
 
 def test_thread_repository_records_debrief_episode_updates_state_status(tmp_path: Path) -> None:
     repo = ThreadRepository(tmp_path)
     repo.write_state(
         "github-actions",
-        "# GitHub Actions\nStatus: active\n\n## Current State\n- Existing status\n",
+        "# GitHub Actions\nStatus: active\n\n## Purpose\nShip automation workflow.\n",
     )
     episode = (
         "# 2026-03-06: Workflow pause\n\n"
@@ -173,17 +177,15 @@ def test_thread_repository_records_debrief_episode_updates_state_status(tmp_path
         "## What Happened\n"
         "- Work paused pending decision.\n\n"
         "## Decisions\n"
-        "- Wait for architecture update.\n\n"
-        "## Status\n"
-        "- paused\n\n"
-        "## Open\n"
-        "- [ ] Resume after architecture decision.\n"
+        "- Wait for architecture update.\n"
     )
+    brief = "# GitHub Actions\nStatus: paused\n\n## Purpose\nShip automation workflow.\n"
 
     result = repo.record_debrief_episode(
         thread_slug="github-actions",
         session_id="s_2",
         episode_markdown=episode,
+        brief_markdown=brief,
         now=datetime(2026, 3, 6, 9, 30, 0),
     )
     assert result is not None
@@ -201,12 +203,12 @@ def test_collect_thread_episode_paths_wrapper_uses_repository(tmp_path: Path) ->
 
 
 # ---------------------------------------------------------------------------
-# Auto-bootstrap: THREAD.yaml only → STATE.md generated
+# Auto-bootstrap: THREAD.yaml only → BRIEF.md generated
 # ---------------------------------------------------------------------------
 
 
 def test_thread_yaml_only_bootstraps_state_md(tmp_path: Path) -> None:
-    """A directory with only THREAD.yaml should auto-generate STATE.md on discovery."""
+    """A directory with only THREAD.yaml should auto-generate BRIEF.md on discovery."""
     thread_dir = tmp_path / "work" / "threads" / "new-project"
     thread_dir.mkdir(parents=True)
     (thread_dir / "THREAD.yaml").write_text(
@@ -227,12 +229,12 @@ def test_thread_yaml_only_bootstraps_state_md(tmp_path: Path) -> None:
     assert entries[0].description == "Build the next big thing."
     assert entries[0].related_threads == ("hal-architecture",)
 
-    # STATE.md was auto-generated
-    state = (thread_dir / "STATE.md").read_text(encoding="utf-8")
+    # BRIEF.md was auto-generated
+    state = (thread_dir / "BRIEF.md").read_text(encoding="utf-8")
     assert "# New Project" in state
     assert "Status: active" in state
     assert "Build the next big thing." in state
-    assert "## Current State" in state
+    assert "## Purpose" in state
 
 
 def test_thread_yaml_only_bootstrap_uses_slug_as_fallback_title(tmp_path: Path) -> None:
@@ -245,13 +247,13 @@ def test_thread_yaml_only_bootstrap_uses_slug_as_fallback_title(tmp_path: Path) 
 
     assert len(entries) == 1
     assert entries[0].slug == "quick-task"
-    state = (thread_dir / "STATE.md").read_text(encoding="utf-8")
+    state = (thread_dir / "BRIEF.md").read_text(encoding="utf-8")
     assert "# quick-task" in state
     assert "Status: active" in state
 
 
 def test_empty_dir_without_yaml_or_state_is_ignored(tmp_path: Path) -> None:
-    """Directories with neither STATE.md nor THREAD.yaml are skipped."""
+    """Directories with neither BRIEF.md nor THREAD.yaml are skipped."""
     thread_dir = tmp_path / "work" / "threads" / "empty-dir"
     thread_dir.mkdir(parents=True)
 
@@ -260,7 +262,7 @@ def test_empty_dir_without_yaml_or_state_is_ignored(tmp_path: Path) -> None:
 
 
 def test_bootstrapped_thread_can_receive_debrief_episode(tmp_path: Path) -> None:
-    """After bootstrap, debrief should be able to patch the thread normally."""
+    """After bootstrap, debrief should be able to update the thread brief normally."""
     thread_dir = tmp_path / "work" / "threads" / "bootstrapped"
     thread_dir.mkdir(parents=True)
     (thread_dir / "THREAD.yaml").write_text(
@@ -272,19 +274,25 @@ def test_bootstrapped_thread_can_receive_debrief_episode(tmp_path: Path) -> None
     repo = ThreadRepository(tmp_path)
     repo.collect_registry_entries(max_entries=20)
 
-    # Now record an episode
+    # Now record an episode with a worker-generated brief
     episode = (
         "# 2026-03-07: First session\n\n"
         "## What Happened\n- Initial work done.\n\n"
         "## Decisions\n- Use bootstrap approach.\n"
     )
+    brief = (
+        "# Bootstrapped Thread\nStatus: active\n\n"
+        "## Purpose\nTest bootstrap.\n\n"
+        "## Key Decisions\n- Use bootstrap approach.\n"
+    )
     result = repo.record_debrief_episode(
         thread_slug="bootstrapped",
         session_id="s_1",
         episode_markdown=episode,
+        brief_markdown=brief,
         now=datetime(2026, 3, 7, 10, 0, 0),
     )
 
     assert result is not None
-    assert "### 2026-03-07: First session" in result.state_content
     assert "- Use bootstrap approach." in result.state_content
+    assert "## Recent Episodes" in result.state_content

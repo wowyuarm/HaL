@@ -254,21 +254,6 @@ class _EngineLoopHooks:
             return str(content)
         return ""
 
-    def _record_context_hint_event(self, hint: str) -> None:
-        """Best-effort event logging for advisor-generated context hints."""
-        if not self._session_key:
-            return
-        session_id = self._engine._get_session_id(self._session_key)
-        if not session_id:
-            return
-        self._engine.memory.record_event(
-            session_id=session_id,
-            event_type="context_hint",
-            channel=self._channel,
-            chat_id=self._chat_id,
-            payload={"content": hint},
-        )
-
     def _collect_completed_context_hint(self) -> None:
         """Move one finished advisor result into the pending hint buffer."""
         if not self._advisor_task or not self._advisor_task.done():
@@ -312,12 +297,11 @@ class _EngineLoopHooks:
         )
 
     def _flush_context_hints(self, messages: list[dict[str, Any]]) -> None:
-        """Append buffered context hints and persist their event trail."""
+        """Append buffered context hints as user messages."""
         if not self._pending_context_hints:
             return
         for hint in self._pending_context_hints:
             messages.append({"role": "user", "content": hint})
-            self._record_context_hint_event(hint)
         self._pending_context_hints.clear()
 
     @staticmethod
@@ -332,16 +316,14 @@ class _EngineLoopHooks:
         tool_calls: list[Any],
         assistant_content: str | None,
     ) -> None:
-        """Start non-blocking advisor task once per session on substantive tool usage."""
+        """Start non-blocking advisor task per loop on substantive tool usage."""
         if not self._session_key:
             return
         if not self._engine._engine_config.context_advisor_enabled:
             return
-        if self._advisor_task is not None:
+        if self._advisor_task is not None and not self._advisor_task.done():
             return
         if not has_substantive_tool_calls(tool_calls):
-            return
-        if not self._engine._begin_context_advisor(self._session_key):
             return
 
         self._advisor_task = asyncio.create_task(
@@ -364,16 +346,12 @@ class _EngineLoopHooks:
 
         skill_registry = self._engine.context_registry.skill_snapshot()
         thread_registry = self._engine.context_registry.thread_snapshot()
-        context_unit_registry = self._engine.context_registry.context_unit_snapshot()
-        if not isinstance(context_unit_registry, list):
-            context_unit_registry = []
         advisor_input = build_context_advisor_input(
             latest_user_message=self._latest_user_message,
             assistant_content=assistant_content,
             tool_calls=tool_calls,
             skill_registry=skill_registry,
             thread_registry=thread_registry,
-            context_unit_registry=context_unit_registry,
         )
 
         try:

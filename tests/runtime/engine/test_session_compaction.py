@@ -46,7 +46,7 @@ def test_estimate_history_tokens_includes_tool_calls_and_reasoning() -> None:
                     {
                         "id": "tc_1",
                         "type": "function",
-                        "function": {"name": "fs", "arguments": '{"path":"threads/x/STATE.md"}'},
+                        "function": {"name": "fs", "arguments": '{"path":"threads/x/BRIEF.md"}'},
                     }
                 ],
                 "reasoning_content": "Need to inspect the active thread state before editing.",
@@ -75,7 +75,7 @@ def test_render_history_for_compaction_includes_tool_calls_and_reasoning() -> No
                     {
                         "id": "tc_1",
                         "type": "function",
-                        "function": {"name": "fs", "arguments": '{"path":"threads/x/STATE.md"}'},
+                        "function": {"name": "fs", "arguments": '{"path":"threads/x/BRIEF.md"}'},
                     }
                 ],
                 "reasoning_content": "Need more context first.",

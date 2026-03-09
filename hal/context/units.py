@@ -55,6 +55,7 @@ def build_thread_context_unit(entry: ThreadRegistryEntry) -> ThreadContextUnit:
         mtime=entry.mtime,
         related_threads=entry.related_threads,
         updated_at=entry.updated_at,
+        scope=entry.scope,
     )
 
 
@@ -113,7 +114,7 @@ def render_thread_unit_registry_markdown(manifests: list[ContextUnitManifest]) -
 
     lines = [
         "# Threads",
-        "Known workstreams. Read STATE.md when a thread is relevant.",
+        "Known workstreams. Read BRIEF.md when a thread is relevant.",
         "",
     ]
     for manifest in manifests:

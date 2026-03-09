@@ -15,13 +15,13 @@ from .thread_metadata import (
     resolve_thread_metadata,
 )
 from .thread_state import (
-    apply_episode_state_patch,
     build_episode_file_name,
+    ensure_recent_episodes_section,
     extract_episode_title,
 )
 
 THREADS_DIRNAME = "threads"
-THREAD_STATE_FILENAME = "STATE.md"
+THREAD_STATE_FILENAME = "BRIEF.md"
 _THREAD_STATUS_ACTIVE = "active"
 
 
@@ -40,6 +40,7 @@ class ThreadRegistryEntry:
     state_content: str
     related_threads: tuple[str, ...] = ()
     updated_at: str | None = None
+    scope: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +65,7 @@ class ThreadRepository:
         return self.layout.threads_dir()
 
     def state_path(self, thread_slug: str) -> Path:
-        """Resolve one thread's STATE.md path."""
+        """Resolve one thread's BRIEF.md path."""
         return self.threads_dir() / thread_slug / THREAD_STATE_FILENAME
 
     def metadata_path(self, thread_slug: str) -> Path:
@@ -76,7 +77,7 @@ class ThreadRepository:
         return self.episodes.episode_path(thread_slug, episode_file_name)
 
     def read_state(self, thread_slug: str) -> str | None:
-        """Read one thread STATE.md file, returning None when unavailable."""
+        """Read one thread BRIEF.md file, returning None when unavailable."""
         path = self.state_path(thread_slug)
         if not path.is_file():
             return None
@@ -86,7 +87,7 @@ class ThreadRepository:
             return None
 
     def write_state(self, thread_slug: str, content: str) -> Path:
-        """Write one thread STATE.md file, creating parent directories as needed."""
+        """Write one thread BRIEF.md file, creating parent directories as needed."""
         path = self.state_path(thread_slug)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -102,10 +103,11 @@ class ThreadRepository:
         thread_slug: str,
         session_id: str,
         episode_markdown: str,
+        brief_markdown: str | None = None,
         now: datetime,
         state_content: str | None = None,
     ) -> ThreadEpisodeWriteResult | None:
-        """Write one debrief episode and merge its hot-state patch into STATE.md."""
+        """Write one debrief episode and update BRIEF.md."""
         base_state = state_content if state_content is not None else self.read_state(thread_slug)
         if base_state is None:
             return None
@@ -118,12 +120,11 @@ class ThreadRepository:
         episode_path = self.write_episode(thread_slug, episode_file_name, episode_markdown)
         episode_title = extract_episode_title(episode_markdown)
         episode_rel_path = f"episodes/{episode_file_name}"
-        next_state = apply_episode_state_patch(
-            base_state,
-            episode_markdown=episode_markdown,
-            episode_rel_path=episode_rel_path,
-            episode_title=episode_title,
-        )
+
+        # Use worker-generated brief when available, otherwise keep current brief.
+        next_state = brief_markdown if brief_markdown is not None else base_state
+        # Always append the new episode link.
+        next_state = ensure_recent_episodes_section(next_state, episode_rel_path, episode_title)
         self.write_state(thread_slug, next_state)
         return ThreadEpisodeWriteResult(
             episode_path=episode_path,
@@ -158,7 +159,7 @@ class ThreadRepository:
         """Load one normalized registry entry from a thread directory."""
         state_path = thread_dir / THREAD_STATE_FILENAME
         if not state_path.is_file():
-            # Auto-bootstrap: if THREAD.yaml exists, generate initial STATE.md.
+            # Auto-bootstrap: if THREAD.yaml exists, generate initial BRIEF.md.
             if not (thread_dir / THREAD_METADATA_FILENAME).is_file():
                 return None
             self._bootstrap_state_from_metadata(thread_dir)
@@ -219,6 +220,7 @@ class ThreadRepository:
             state_content=state_content,
             related_threads=resolved.related_threads,
             updated_at=resolved.updated_at,
+            scope=resolved.scope,
         )
 
     @staticmethod
@@ -235,20 +237,17 @@ class ThreadRepository:
         return self._relative_thread_path(thread_slug, THREAD_METADATA_FILENAME)
 
     def _bootstrap_state_from_metadata(self, thread_dir: Path) -> None:
-        """Generate initial STATE.md from THREAD.yaml when only metadata exists."""
+        """Generate initial BRIEF.md from THREAD.yaml when only metadata exists."""
         metadata = load_thread_metadata(thread_dir / THREAD_METADATA_FILENAME)
         title = metadata.get("name") or metadata.get("title") or thread_dir.name
         status = metadata.get("status", "active")
         goal = metadata.get("goal") or metadata.get("description") or "No description provided."
-        content = (
-            f"# {title}\n"
-            f"Status: {status}\n\n"
-            f"## Goal\n{goal}\n\n"
-            "## Current State\nThread created.\n\n"
-            "## Key Decisions\n\n"
-            "## Open Items\n\n"
-            "## Recent Episodes\n"
-        )
+        scope = metadata.get("scope", "")
+        parts = [f"# {title}", f"Status: {status}", "", "## Purpose", goal]
+        if scope:
+            parts.extend(["", "## Scope", scope])
+        parts.append("")
+        content = "\n".join(parts) + "\n"
         state_path = thread_dir / THREAD_STATE_FILENAME
         state_path.write_text(content, encoding="utf-8")
 
@@ -268,7 +267,7 @@ class ThreadRepository:
 
 
 def thread_state_path(workspace: Path, thread_slug: str) -> Path:
-    """Resolve one thread's STATE.md path in the workspace."""
+    """Resolve one thread's BRIEF.md path in the workspace."""
     return ThreadRepository(workspace).state_path(thread_slug)
 
 

@@ -365,9 +365,7 @@ class TestDispatch:
 
         assert out is not None
         assert out.metadata.get("kind") == "session_debrief_start"
-        engine._start_session_debrief.assert_awaited_once_with(
-            "telegram:c1", reason="user_confirm"
-        )
+        engine._start_session_debrief.assert_awaited_once_with("telegram:c1", reason="user_confirm")
 
     async def test_debrief_callback_cancel_via_metadata(self, engine):
         state = engine._ensure_session_state(
@@ -406,15 +404,18 @@ class TestDispatch:
         engine.provider.chat = AsyncMock(  # type: ignore[method-assign]
             return_value=LLMResponse(
                 content=(
+                    "---EPISODE---\n"
                     "# 2026-03-06: Workflow update\n\n"
                     "Threads: [github-actions]\n"
                     "Primary: github-actions\n"
                     "Session: s_test\n\n"
                     "## What Happened\n- Updated workflow draft.\n\n"
                     "## Decisions\n- none\n\n"
-                    "## Artifacts\n- none\n\n"
                     "## Open\n- [ ] Verify in CI.\n\n"
                     "## Source Events\n- s_test\n"
+                    "---BRIEF---\n"
+                    "# GitHub Actions\n\nStatus: active\n\n"
+                    "## Purpose\nShip automation workflow.\n"
                 ),
                 tool_calls=[],
             )
@@ -424,8 +425,8 @@ class TestDispatch:
 
         thread_dir = engine.workspace / "work" / "threads" / "github-actions"
         thread_dir.mkdir(parents=True, exist_ok=True)
-        (thread_dir / "STATE.md").write_text(
-            "# GitHub Actions\n\nStatus: active\n\n## Current State\n- draft\n",
+        (thread_dir / "BRIEF.md").write_text(
+            "# GitHub Actions\n\nStatus: active\n\n## Purpose\n- draft\n",
             encoding="utf-8",
         )
 
@@ -435,11 +436,9 @@ class TestDispatch:
         payload = engine.memory.record_event.call_args.kwargs["payload"]
         assert payload["episode_count"] == 1
         assert payload["indexed_chunks"] == 2
-        updated_state = (thread_dir / "STATE.md").read_text(encoding="utf-8")
-        assert "### 2026-03-06: Workflow update" in updated_state
-        assert "- Updated workflow draft." in updated_state
-        assert "## Open Items" in updated_state
-        assert "- [ ] Verify in CI." in updated_state
+        updated_state = (thread_dir / "BRIEF.md").read_text(encoding="utf-8")
+        assert "Ship automation workflow." in updated_state
+        assert "## Recent Episodes" in updated_state
 
     async def test_session_debrief_expands_related_threads_with_priority_order(self, engine):
         session_key = "telegram:c1"
@@ -463,14 +462,16 @@ class TestDispatch:
         for slug in ("github-actions", "hal-architecture"):
             thread_dir = engine.workspace / "work" / "threads" / slug
             thread_dir.mkdir(parents=True, exist_ok=True)
-            (thread_dir / "STATE.md").write_text(
+            (thread_dir / "BRIEF.md").write_text(
                 f"# {slug}\n\nStatus: active\n\n## Current State\n- draft\n",
                 encoding="utf-8",
             )
 
-        async def _fake_episode_markdown(*_args, **kwargs):
+        async def _fake_debrief_output(*_args, **kwargs):
+            from hal.runtime.debrief import DebriefOutput
+
             slug = kwargs["thread_slug"]
-            return (
+            episode = (
                 f"# 2026-03-06: Update {slug}\n\n"
                 f"Threads: [{slug}]\n"
                 f"Primary: {slug}\n"
@@ -482,10 +483,11 @@ class TestDispatch:
                 "## Open\n- [ ] Verify in CI.\n\n"
                 "## Source Events\n- s_test\n"
             )
+            return DebriefOutput(episode_markdown=episode, brief_markdown=None)
 
         with patch(
-            "hal.runtime.debrief.generate_episode_markdown",
-            new=AsyncMock(side_effect=_fake_episode_markdown),
+            "hal.runtime.debrief.generate_debrief_output",
+            new=AsyncMock(side_effect=_fake_debrief_output),
         ) as mock_generate:
             await engine._run_session_debrief(session_key)
 
@@ -596,7 +598,7 @@ class TestThreadTouching:
                 "name": "GitHub Actions",
                 "status": "active",
                 "description": "workflow work",
-                "state_path": "threads/github-actions/STATE.md",
+                "state_path": "threads/github-actions/BRIEF.md",
             }
         ]
 
@@ -609,7 +611,7 @@ class TestThreadTouching:
                 "name": "GitHub Actions",
                 "status": "active",
                 "description": "workflow work",
-                "state_path": "threads/github-actions/STATE.md",
+                "state_path": "threads/github-actions/BRIEF.md",
             }
         ]
         engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
@@ -815,7 +817,7 @@ class TestExecuteLoop:
                 "name": "GitHub Actions",
                 "status": "active",
                 "description": "workflow",
-                "state_path": "threads/github-actions/STATE.md",
+                "state_path": "threads/github-actions/BRIEF.md",
             }
         ]
 
@@ -856,7 +858,7 @@ class TestExecuteLoop:
         )
         assert worker_provider.chat.await_count == 1
 
-    async def test_context_advisor_runs_once_per_session(self, engine, mock_provider):
+    async def test_context_advisor_runs_per_loop(self, engine, mock_provider):
         session_key = "telegram:c1"
         engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
         engine.context_registry.skill_snapshot.return_value = [
@@ -910,7 +912,8 @@ class TestExecuteLoop:
             chat_id="c1",
         )
 
-        assert worker_provider.chat.await_count == 1
+        # Context advisor now runs once per loop invocation, not once per session
+        assert worker_provider.chat.await_count == 2
 
     async def test_retryable_llm_error_retries_and_recovers(self, engine, mock_provider):
         mock_provider.chat.side_effect = [

@@ -111,6 +111,7 @@ class ThreadContextUnit:
     mtime: float = 0.0
     related_threads: tuple[str, ...] = ()
     updated_at: str | None = None
+    scope: str = ""
 
     kind: ContextUnitKind = "thread"
 
@@ -133,6 +134,8 @@ class ThreadContextUnit:
             snapshot["updated_at"] = self.updated_at
         if self.related_threads:
             snapshot["related_threads"] = self.related_threads
+        if self.scope:
+            snapshot["scope"] = self.scope
         return snapshot
 
     def load(self) -> str | None:
@@ -152,6 +155,7 @@ class ThreadContextUnit:
             "name": self.name,
             "status": self.status,
             "description": self.description,
+            "scope": self.scope,
             "state_path": self.location,
             "priority": self.priority(),
             "pinned": self.pinned,
@@ -164,6 +168,7 @@ class ThreadContextUnit:
             "name": self.name,
             "status": self.status,
             "description": self.description,
+            "scope": self.scope,
             "pinned": self.pinned,
             "state_path": self.location,
             "mtime": self.mtime,

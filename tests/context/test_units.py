@@ -91,7 +91,7 @@ description: Plain note helper
 def test_build_thread_unit_manifests_reflects_workspace_state(tmp_path: Path) -> None:
     thread_dir = tmp_path / "work" / "threads" / "hal-architecture"
     thread_dir.mkdir(parents=True)
-    (thread_dir / "STATE.md").write_text(
+    (thread_dir / "BRIEF.md").write_text(
         "# HaL Architecture\nStatus: active\n\n## Goal\nRefine the context system.\n",
         encoding="utf-8",
     )
@@ -103,13 +103,13 @@ def test_build_thread_unit_manifests_reflects_workspace_state(tmp_path: Path) ->
     assert manifests[0].key == "hal-architecture"
     assert manifests[0].status == "active"
     assert manifests[0].description == "Refine the context system."
-    assert manifests[0].location == "threads/hal-architecture/STATE.md"
+    assert manifests[0].location == "threads/hal-architecture/BRIEF.md"
 
 
 def test_build_thread_units_returns_context_unit_objects(tmp_path: Path) -> None:
     thread_dir = tmp_path / "work" / "threads" / "github-actions"
     thread_dir.mkdir(parents=True)
-    (thread_dir / "STATE.md").write_text(
+    (thread_dir / "BRIEF.md").write_text(
         "# GitHub Actions\nStatus: active\n\n## Goal\nShip automation.\n",
         encoding="utf-8",
     )
@@ -154,7 +154,7 @@ description: Use <x> & y
 def test_render_thread_unit_registry_markdown_includes_status(tmp_path: Path) -> None:
     thread_dir = tmp_path / "work" / "threads" / "github-actions"
     thread_dir.mkdir(parents=True)
-    (thread_dir / "STATE.md").write_text(
+    (thread_dir / "BRIEF.md").write_text(
         "# GitHub Actions\nStatus: active\n\n## Goal\nShip automation.\n",
         encoding="utf-8",
     )
@@ -165,4 +165,4 @@ def test_render_thread_unit_registry_markdown_includes_status(tmp_path: Path) ->
 
     assert "# Threads" in text
     assert "GitHub Actions [active]" in text
-    assert "threads/github-actions/STATE.md" in text
+    assert "threads/github-actions/BRIEF.md" in text

@@ -17,9 +17,7 @@ from .layout import (
 from .sessions import SessionRepository, SessionSnapshot
 from .system_files import SystemRepository, WorkspaceDocument
 from .thread_state import (
-    apply_episode_state_patch,
     build_episode_file_name,
-    ensure_current_state_note,
     ensure_recent_episodes_section,
 )
 from .threads import (
@@ -55,10 +53,8 @@ __all__ = [
     "WorkspaceLayout",
     "WorkspaceDocument",
     "collect_thread_episode_paths",
-    "apply_episode_state_patch",
     "build_episode_file_name",
     "collect_thread_registry_entries",
-    "ensure_current_state_note",
     "ensure_recent_episodes_section",
     "episode_path_for_thread",
     "thread_metadata_path",

@@ -17,7 +17,6 @@ from hal.context.thread_mentions import detect_thread_mentions
 from hal.domain.ports import LLMProviderPort
 from hal.memory.manager import MemoryManager
 from hal.runtime.debrief import (
-    generate_episode_markdown,
     run_session_debrief,
 )
 from hal.runtime.session import (
@@ -303,16 +302,6 @@ class AgentEngine:
         """Best-effort thread mention detection from user-visible text."""
         return detect_thread_mentions(text, self.context_registry.thread_snapshot())
 
-    def _begin_context_advisor(self, session_key: str) -> bool:
-        """Mark context advisor start for a session once. Returns True on first call."""
-        state = self._session_states.get(session_key)
-        if state is None:
-            return False
-        if state.context_advisor_started:
-            return False
-        state.context_advisor_started = True
-        return True
-
     def _filter_new_context_hint_keys(self, session_key: str, keys: list[str]) -> set[str]:
         """Return keys not yet suggested in the session and mark them as seen."""
         state = self._session_states.get(session_key)
@@ -362,25 +351,8 @@ class AgentEngine:
         self._clear_session_snapshot(session_key)
 
     async def _run_session_debrief(self, session_key: str) -> None:
-        """Generate episodes and patch state files for one closed session."""
+        """Generate episodes and update briefs for one closed session."""
         await run_session_debrief(self, session_key)
-
-    async def _generate_episode_markdown(
-        self,
-        *,
-        session_id: str,
-        thread_slug: str,
-        state_content: str,
-        rendered_events: str,
-    ) -> str:
-        """Generate thread episode markdown via worker/main model with fallback."""
-        return await generate_episode_markdown(
-            self,
-            session_id=session_id,
-            thread_slug=thread_slug,
-            state_content=state_content,
-            rendered_events=rendered_events,
-        )
 
     async def _maybe_compact_session_history(
         self,

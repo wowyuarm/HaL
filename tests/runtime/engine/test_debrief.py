@@ -4,7 +4,9 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from hal.runtime.debrief import (
+    DebriefOutput,
     _cap_text,
+    _parse_debrief_response,
     build_debrief_confirmation_message,
     extract_touched_threads,
     format_session_events_for_prompt,
@@ -13,9 +15,7 @@ from hal.runtime.debrief import (
     resolve_debrief_thread_order,
 )
 from hal.workspace import (
-    apply_episode_state_patch,
     build_episode_file_name,
-    ensure_current_state_note,
     ensure_recent_episodes_section,
 )
 
@@ -23,9 +23,9 @@ from hal.workspace import (
 def test_extract_touched_threads_from_nested_fs_args() -> None:
     args = {
         "action": "read",
-        "path": "/tmp/workspace/threads/github-actions/STATE.md",
+        "path": "/tmp/workspace/threads/github-actions/BRIEF.md",
         "extra": [
-            {"candidate": "threads/hal-architecture/STATE.md"},
+            {"candidate": "threads/hal-architecture/BRIEF.md"},
             "ignore/me",
         ],
     }
@@ -77,46 +77,6 @@ def test_ensure_recent_episodes_section_appends_once() -> None:
     assert "- [Title](episodes/x.md)" in updated
     updated_again = ensure_recent_episodes_section(updated, "episodes/x.md", "Title")
     assert updated_again.count("- [Title](episodes/x.md)") == 1
-
-
-def test_ensure_current_state_note_appends_once() -> None:
-    base = "# Thread\nStatus: active\n"
-    updated = ensure_current_state_note(base, "note-1")
-    assert "## Current State" in updated
-    assert "- note-1" in updated
-    updated_again = ensure_current_state_note(updated, "note-1")
-    assert updated_again.count("- note-1") == 1
-
-
-def test_apply_episode_state_patch_merges_hot_sections() -> None:
-    state = "# Thread\nStatus: active\n\n## Current State\n- old status\n"
-    episode = (
-        "# 2026-03-06: Workflow update\n\n"
-        "Threads: [github-actions]\n"
-        "Primary: github-actions\n"
-        "Session: s_1\n\n"
-        "## What Happened\n"
-        "- Updated workflow draft.\n"
-        "- Added review step.\n\n"
-        "## Decisions\n"
-        "- Use label-based routing.\n\n"
-        "## Open\n"
-        "- [ ] Verify in CI.\n"
-    )
-
-    updated = apply_episode_state_patch(
-        state,
-        episode_markdown=episode,
-        episode_rel_path="episodes/2026-03-06-github-actions-s_1.md",
-    )
-
-    assert "### 2026-03-06: Workflow update" in updated
-    assert "- Updated workflow draft." in updated
-    assert "## Key Decisions" in updated
-    assert "- Use label-based routing." in updated
-    assert "## Open Items" in updated
-    assert "- [ ] Verify in CI." in updated
-    assert "## Recent Episodes" in updated
 
 
 def test_resolve_debrief_thread_order_expands_related_and_prefers_priority() -> None:
@@ -178,3 +138,35 @@ def test_format_session_events_overall_budget() -> None:
     # Should be trimmed to roughly 200 tokens (~800 chars)
     assert rendered.endswith("...[truncated]")
     assert len(rendered) < 2000
+
+
+def test_parse_debrief_response_splits_episode_and_brief() -> None:
+    raw = (
+        "---EPISODE---\n"
+        "# 2026-03-06: Update\n\n"
+        "## What Happened\n- Did work.\n"
+        "---BRIEF---\n"
+        "# Thread\nStatus: active\n\n## Purpose\nNew brief content.\n"
+    )
+    result = _parse_debrief_response(raw)
+    assert isinstance(result, DebriefOutput)
+    assert "# 2026-03-06: Update" in result.episode_markdown
+    assert "## What Happened" in result.episode_markdown
+    assert result.brief_markdown is not None
+    assert "New brief content." in result.brief_markdown
+
+
+def test_parse_debrief_response_fallback_without_markers() -> None:
+    raw = "# 2026-03-06: Update\n\n## What Happened\n- Did work.\n"
+    result = _parse_debrief_response(raw)
+    assert isinstance(result, DebriefOutput)
+    assert result.episode_markdown == raw.strip()
+    assert result.brief_markdown is None
+
+
+def test_parse_debrief_response_empty_brief_returns_none() -> None:
+    raw = "---EPISODE---\n# Episode\n---BRIEF---\n"
+    result = _parse_debrief_response(raw)
+    assert isinstance(result, DebriefOutput)
+    assert result.episode_markdown == "# Episode"
+    assert result.brief_markdown is None

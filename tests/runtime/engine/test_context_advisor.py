@@ -49,11 +49,11 @@ def test_build_context_hint_text() -> None:
             threads=["thread-a"],
             reason="matches current task",
         ),
-        thread_path_map={"thread-a": "threads/thread-a/STATE.md"},
+        thread_path_map={"thread-a": "threads/thread-a/BRIEF.md"},
     )
     assert "[Context Hint]" in hint
     assert "skill-a" in hint
-    assert "threads/thread-a/STATE.md" in hint
+    assert "threads/thread-a/BRIEF.md" in hint
 
 
 def test_build_context_advisor_input_and_messages() -> None:
@@ -68,11 +68,8 @@ def test_build_context_advisor_input_and_messages() -> None:
                 "name": "Thread A",
                 "status": "active",
                 "description": "work",
-                "state_path": "threads/thread-a/STATE.md",
+                "state_path": "threads/thread-a/BRIEF.md",
             }
-        ],
-        context_unit_registry=[
-            {"kind": "thread", "key": "thread-a", "priority": 200, "related_threads": ["thread-b"]}
         ],
     )
 
@@ -85,7 +82,6 @@ def test_build_context_advisor_input_and_messages() -> None:
     assert "context advisor" in messages[0]["content"]
     assert messages[1]["role"] == "user"
     assert "thread-a" in messages[1]["content"]
-    assert "context_unit_registry" in messages[1]["content"]
 
 
 async def test_request_context_advisor_suggestion() -> None:
@@ -101,7 +97,6 @@ async def test_request_context_advisor_suggestion() -> None:
         tool_calls=[_ToolCall("fs", {"action": "read"})],
         skill_registry=[],
         thread_registry=[],
-        context_unit_registry=[],
     )
     suggestion = await request_context_advisor_suggestion(
         chat=chat,
@@ -137,11 +132,11 @@ def test_build_context_hint_keys_and_filter_suggestion() -> None:
 def test_build_thread_path_map() -> None:
     mapping = build_thread_path_map(
         [
-            {"slug": "thread-a", "state_path": "threads/thread-a/STATE.md"},
-            {"slug": "thread-b", "state_path": "threads/thread-b/STATE.md"},
+            {"slug": "thread-a", "state_path": "threads/thread-a/BRIEF.md"},
+            {"slug": "thread-b", "state_path": "threads/thread-b/BRIEF.md"},
         ]
     )
     assert mapping == {
-        "thread-a": "threads/thread-a/STATE.md",
-        "thread-b": "threads/thread-b/STATE.md",
+        "thread-a": "threads/thread-a/BRIEF.md",
+        "thread-b": "threads/thread-b/BRIEF.md",
     }

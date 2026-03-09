@@ -21,12 +21,13 @@ _DEFAULT_THREAD_DESCRIPTION = "No description provided."
 
 @dataclass(frozen=True, slots=True)
 class ResolvedThreadMetadata:
-    """Merged thread metadata from STATE.md and optional THREAD.yaml."""
+    """Merged thread metadata from BRIEF.md and optional THREAD.yaml."""
 
     status: str
     pinned: bool
     title: str
     description: str
+    scope: str
     related_threads: tuple[str, ...]
     updated_at: str | None
     has_machine_metadata: bool
@@ -59,6 +60,7 @@ def resolve_thread_metadata(
             metadata.get("description") or metadata.get("goal"),
             fallback=description,
         ),
+        scope=_normalize_text(metadata.get("scope"), fallback=""),
         related_threads=_normalize_related_threads(metadata.get("related_threads")),
         updated_at=_normalize_optional_text(metadata.get("updated_at")),
         has_machine_metadata=bool(metadata),

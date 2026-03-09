@@ -44,7 +44,7 @@ Platform: {runtime}
 Workspace: {workspace_path}
 Layout:
   system/              — SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml
-  work/threads/        — long-running workstreams (STATE.md + episodes/)
+  work/threads/        — long-running workstreams (BRIEF.md + episodes/)
   capabilities/skills/ — skill packages (each has SKILL.md)
   runtime/logs/        — session event logs (JSONL)
   data/artifacts/      — generated artifacts (subagent reports under data/artifacts/subagent/)

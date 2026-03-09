@@ -38,7 +38,7 @@ High autonomy, low overreach.
 ## 5. Long-term progression over episodic chat
 
 The unit of work is a thread, not a conversation. Threads span sessions.
-Continuity comes from state progression — STATE.md, episodes, memory —
+Continuity comes from state progression — BRIEF.md, episodes, memory —
 not from history retention. Chat is the medium, not the work.
 
 ---

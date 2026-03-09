@@ -198,7 +198,7 @@ class TestBuildSystemPrompt:
     def test_includes_thread_registry_summary(self, workspace: Path) -> None:
         threads = workspace / "work" / "threads" / "github-actions"
         threads.mkdir(parents=True)
-        (threads / "STATE.md").write_text(
+        (threads / "BRIEF.md").write_text(
             "# GitHub Actions\nStatus: active\n\n## Goal\nShip AI workflow.",
             encoding="utf-8",
         )
@@ -213,7 +213,7 @@ class TestBuildSystemPrompt:
         prompt = cc.build_system_prompt()
         assert "# Threads" in prompt
         assert "GitHub Actions [active]" in prompt
-        assert "threads/github-actions/STATE.md" in prompt
+        assert "threads/github-actions/BRIEF.md" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +439,7 @@ class TestDynamicContext:
     def test_active_thread_state_injected_into_dynamic_context(self, workspace: Path) -> None:
         threads = workspace / "work" / "threads" / "hal-architecture"
         threads.mkdir(parents=True)
-        (threads / "STATE.md").write_text(
+        (threads / "BRIEF.md").write_text(
             "# HaL Architecture\nStatus: active\n\n## Current State\nRefactoring context model.",
             encoding="utf-8",
         )
@@ -455,12 +455,12 @@ class TestDynamicContext:
         user_content = msgs[-1]["content"]
         assert "<active_threads>" in user_content
         assert "Refactoring context model." in user_content
-        assert 'state_path="threads/hal-architecture/STATE.md"' in user_content
+        assert 'state_path="threads/hal-architecture/BRIEF.md"' in user_content
 
     def test_inactive_thread_state_not_auto_injected(self, workspace: Path) -> None:
         threads = workspace / "work" / "threads" / "paused-thread"
         threads.mkdir(parents=True)
-        (threads / "STATE.md").write_text(
+        (threads / "BRIEF.md").write_text(
             "# Paused Work\nStatus: inactive\n\n## Current State\nDo not auto-load.",
             encoding="utf-8",
         )
@@ -479,14 +479,14 @@ class TestDynamicContext:
     def test_thread_registry_respects_max_size(self, workspace: Path) -> None:
         active = workspace / "work" / "threads" / "active-thread"
         active.mkdir(parents=True)
-        (active / "STATE.md").write_text(
+        (active / "BRIEF.md").write_text(
             "# Active\nStatus: active\n\n## Goal\nPriority first.",
             encoding="utf-8",
         )
 
         inactive = workspace / "work" / "threads" / "inactive-thread"
         inactive.mkdir(parents=True)
-        (inactive / "STATE.md").write_text(
+        (inactive / "BRIEF.md").write_text(
             "# Inactive\nStatus: inactive\n\n## Goal\nSecondary.",
             encoding="utf-8",
         )

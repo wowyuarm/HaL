@@ -32,7 +32,7 @@ name: notes
 description: Plain note helper
 ---""",
     )
-    (thread_dir / "STATE.md").write_text(
+    (thread_dir / "BRIEF.md").write_text(
         "# HaL Architecture\nStatus: active\n\n## Goal\nRefine the context system.\n",
         encoding="utf-8",
     )
@@ -56,7 +56,7 @@ def test_registry_builds_skill_and_thread_snapshots(registry: ContextRegistry) -
     assert thread["name"] == "HaL Architecture"
     assert thread["status"] == "active"
     assert thread["description"] == "Refine the context system."
-    assert thread["state_path"] == "threads/hal-architecture/STATE.md"
+    assert thread["state_path"] == "threads/hal-architecture/BRIEF.md"
     assert thread["priority"] == 200
     assert thread["pinned"] is False
     assert thread["related_threads"] == ()
@@ -92,11 +92,11 @@ name: notes
 description: Plain note helper
 ---""",
     )
-    (active_dir / "STATE.md").write_text(
+    (active_dir / "BRIEF.md").write_text(
         "# Active Thread\nStatus: active\n\n## Goal\nKeep moving.\n",
         encoding="utf-8",
     )
-    (paused_dir / "STATE.md").write_text(
+    (paused_dir / "BRIEF.md").write_text(
         "# Paused Thread\nStatus: paused\n\n## Goal\nWait for input.\n",
         encoding="utf-8",
     )
@@ -131,11 +131,11 @@ name: notes
 description: Plain note helper
 ---""",
     )
-    (active_dir / "STATE.md").write_text(
+    (active_dir / "BRIEF.md").write_text(
         "# Active Thread\nStatus: active\n\n## Goal\nKeep moving.\n",
         encoding="utf-8",
     )
-    (paused_dir / "STATE.md").write_text(
+    (paused_dir / "BRIEF.md").write_text(
         "# Paused Thread\nStatus: paused\n\n## Goal\nWait for input.\n",
         encoding="utf-8",
     )
@@ -178,15 +178,15 @@ name: notes
 description: Plain note helper
 ---""",
     )
-    (thread_a / "STATE.md").write_text(
+    (thread_a / "BRIEF.md").write_text(
         "# Thread A\nStatus: active\n\n## Goal\nA goal.\n",
         encoding="utf-8",
     )
-    (thread_b / "STATE.md").write_text(
+    (thread_b / "BRIEF.md").write_text(
         "# Thread B\nStatus: active\n\n## Goal\nB goal.\n",
         encoding="utf-8",
     )
-    (thread_c / "STATE.md").write_text(
+    (thread_c / "BRIEF.md").write_text(
         "# Thread C\nStatus: active\n\n## Goal\nC goal.\n",
         encoding="utf-8",
     )

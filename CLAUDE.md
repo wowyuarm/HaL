@@ -155,7 +155,7 @@ hal/
 ```text
 ~/.hal/
   system/             # SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml
-  work/threads/       # Thread dirs (STATE.md + THREAD.yaml + episodes/)
+  work/threads/       # Thread dirs (BRIEF.md + THREAD.yaml + episodes/)
   work/inbox/         # Unrouted items
   runtime/logs/       # events.jsonl
   runtime/sessions/   # Session snapshots

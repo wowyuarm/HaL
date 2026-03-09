@@ -17,7 +17,7 @@ def test_build_dynamic_context_block_renders_meta_threads_and_recall() -> None:
         active_threads=[
             {
                 "name": "GitHub Actions",
-                "state_path": "threads/github-actions/STATE.md",
+                "state_path": "threads/github-actions/BRIEF.md",
                 "state_content": "## Current State\n- Drafted workflow.",
             }
         ],
@@ -40,7 +40,7 @@ def test_build_dynamic_context_block_renders_meta_threads_and_recall() -> None:
     assert "<channel>telegram</channel>" in text
     assert "<chat_id>c1</chat_id>" in text
     assert "<active_threads>" in text
-    assert "threads/github-actions/STATE.md" in text
+    assert "threads/github-actions/BRIEF.md" in text
     assert "<relevant_memories>" in text
     assert "episodes/workflow.md" in text
 
@@ -52,12 +52,12 @@ def test_build_dynamic_context_block_limits_active_thread_states_by_budget() -> 
         active_threads=[
             {
                 "name": "Thread High",
-                "state_path": "threads/high/STATE.md",
+                "state_path": "threads/high/BRIEF.md",
                 "state_content": "A " * 400,
             },
             {
                 "name": "Thread Low",
-                "state_path": "threads/low/STATE.md",
+                "state_path": "threads/low/BRIEF.md",
                 "state_content": "B " * 400,
             },
         ],
@@ -69,8 +69,8 @@ def test_build_dynamic_context_block_limits_active_thread_states_by_budget() -> 
         token_model="test-model",
     )
 
-    assert "threads/high/STATE.md" in text
-    assert "threads/low/STATE.md" not in text
+    assert "threads/high/BRIEF.md" in text
+    assert "threads/low/BRIEF.md" not in text
 
 
 def test_collect_recall_lines_respects_total_budget() -> None:

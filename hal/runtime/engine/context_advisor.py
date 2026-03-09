@@ -34,7 +34,6 @@ class ContextAdvisorInput:
     tool_calls: list[dict[str, Any]]
     skill_registry: list[dict[str, object]]
     thread_registry: list[dict[str, object]]
-    context_unit_registry: list[dict[str, object]]
 
     def as_payload(self) -> dict[str, object]:
         """Return JSON-serializable advisor payload."""
@@ -44,7 +43,6 @@ class ContextAdvisorInput:
             "tool_calls": self.tool_calls,
             "skill_registry": self.skill_registry,
             "thread_registry": self.thread_registry,
-            "context_unit_registry": self.context_unit_registry,
         }
 
 
@@ -71,7 +69,6 @@ def build_context_advisor_input(
     tool_calls: list[Any],
     skill_registry: list[dict[str, object]],
     thread_registry: list[dict[str, object]],
-    context_unit_registry: list[dict[str, object]],
 ) -> ContextAdvisorInput:
     """Build the compact advisor input snapshot from loop/runtime state."""
     return ContextAdvisorInput(
@@ -80,7 +77,6 @@ def build_context_advisor_input(
         tool_calls=extract_tool_call_preview(tool_calls),
         skill_registry=skill_registry,
         thread_registry=thread_registry,
-        context_unit_registry=context_unit_registry,
     )
 
 
@@ -88,7 +84,7 @@ def build_context_advisor_messages(advisor_input: ContextAdvisorInput) -> list[d
     """Render provider request messages for the advisor model."""
     return [
         {"role": "system", "content": _CONTEXT_ADVISOR_SYSTEM_PROMPT},
-        {"role": "user", "content": str(advisor_input.as_payload())},
+        {"role": "user", "content": json.dumps(advisor_input.as_payload(), indent=2, default=str)},
     ]
 
 
@@ -172,7 +168,7 @@ def build_context_hint_text(
         if state_path:
             lines.append(f"- Thread `{thread}` may be relevant. Read `{state_path}` if needed.")
         else:
-            lines.append(f"- Thread `{thread}` may be relevant. Check its STATE.md if needed.")
+            lines.append(f"- Thread `{thread}` may be relevant. Check its BRIEF.md if needed.")
     if suggestion.reason:
         lines.append(f"Reason: {suggestion.reason}")
     lines.append("If you already have sufficient context, ignore this hint.")

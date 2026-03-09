@@ -431,7 +431,6 @@ class SessionState:
     baseline_thread_slugs: set[str] = field(default_factory=set)
     history: list[dict[str, object]] = field(default_factory=list)
     touched_threads: set[str] = field(default_factory=set)
-    context_advisor_started: bool = False
     context_hint_keys: set[str] = field(default_factory=set)
     awaiting_debrief_confirmation: bool = False
     debrief_confirm_deadline: datetime | None = None

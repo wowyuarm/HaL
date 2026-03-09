@@ -10,7 +10,7 @@ def test_detect_thread_mentions_matches_slug_and_title_tokens() -> None:
             "name": "GitHub Actions",
             "status": "active",
             "description": "workflow work",
-            "state_path": "threads/github-actions/STATE.md",
+            "state_path": "threads/github-actions/BRIEF.md",
         }
     ]
 
@@ -24,14 +24,14 @@ def test_detect_thread_mentions_ignores_ambiguous_shared_tokens() -> None:
             "name": "HaL Architecture",
             "status": "active",
             "description": "kernel work",
-            "state_path": "threads/hal-architecture/STATE.md",
+            "state_path": "threads/hal-architecture/BRIEF.md",
         },
         {
             "slug": "blog-architecture",
             "name": "Blog Architecture",
             "status": "active",
             "description": "site work",
-            "state_path": "threads/blog-architecture/STATE.md",
+            "state_path": "threads/blog-architecture/BRIEF.md",
         },
     ]
 
@@ -45,7 +45,7 @@ def test_detect_thread_mentions_supports_cjk_thread_names() -> None:
             "name": "上下文系统",
             "status": "active",
             "description": "kernel work",
-            "state_path": "threads/hal-context-system/STATE.md",
+            "state_path": "threads/hal-context-system/BRIEF.md",
         }
     ]
 
