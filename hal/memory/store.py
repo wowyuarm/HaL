@@ -95,21 +95,11 @@ class VectorStore:
         schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)
         schema.add_field(field_name="source", datatype=DataType.VARCHAR, max_length=1024)
         schema.add_field(field_name="heading", datatype=DataType.VARCHAR, max_length=1024)
-        schema.add_field(
-            field_name="thread",
-            datatype=DataType.VARCHAR,
-            max_length=256,
-            default_value="",
-        )
+        schema.add_field(field_name="thread", datatype=DataType.VARCHAR, max_length=256)
         schema.add_field(field_name="heading_level", datatype=DataType.INT16)
         schema.add_field(field_name="start_line", datatype=DataType.INT32)
         schema.add_field(field_name="end_line", datatype=DataType.INT32)
-        schema.add_field(
-            field_name="source_type",
-            datatype=DataType.VARCHAR,
-            max_length=32,
-            default_value="raw",
-        )
+        schema.add_field(field_name="source_type", datatype=DataType.VARCHAR, max_length=32)
 
         # BM25 auto-generates sparse_vector from content
         schema.add_function(
