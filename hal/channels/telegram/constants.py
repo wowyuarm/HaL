@@ -17,8 +17,8 @@ GIT_LOG_TIMEOUT_S = 5
 # Commands registered with Telegram's command menu
 BOT_COMMANDS = [
     BotCommand("start", "Start the bot"),
-    BotCommand("reset", "Reset conversation history"),
     BotCommand("brief", "Update thread briefs for this session"),
+    BotCommand("drop", "End session without briefing"),
     BotCommand("context", "Show current LLM context"),
     BotCommand("help", "Show available commands"),
 ]

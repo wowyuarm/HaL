@@ -150,6 +150,11 @@ def _parse_brief_command(content: str) -> tuple[bool, str]:
     return False, ""
 
 
+def _is_drop_command(content: str) -> bool:
+    """Return True when *content* is a ``/drop`` session command."""
+    return content.strip() == "/drop"
+
+
 async def _handle_brief_command(
     *, engine: Any, msg: Any, session_state: Any, user_prompt: str
 ) -> OutboundMessage:
@@ -179,6 +184,30 @@ async def _handle_brief_command(
         chat_id=msg.chat_id,
         content="Starting session brief...",
         metadata={"system_meta": True, "kind": "session_brief_start"},
+    )
+
+
+async def _handle_drop_command(*, engine: Any, msg: Any, session_state: Any) -> OutboundMessage:
+    """Handle /drop: end session immediately without running brief worker."""
+    _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
+
+    engine.memory.record_event(
+        session_id=session_state.session_id,
+        event_type="session_end",
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        payload={"reason": "user_drop"},
+    )
+
+    # Remove session state so next message starts fresh
+    engine._session_states.pop(msg.session_key, None)
+    engine._clear_session_snapshot(msg.session_key)
+
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content="Session dropped. Next message starts a fresh session.",
+        metadata={"system_meta": True, "kind": "session_drop"},
     )
 
 
@@ -281,6 +310,10 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             return await _handle_brief_command(
                 engine=engine, msg=msg, session_state=session_state, user_prompt=brief_prompt
             )
+
+        # /drop command — end session immediately without briefing
+        if _is_drop_command(msg.content):
+            return await _handle_drop_command(engine=engine, msg=msg, session_state=session_state)
 
         _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
 

@@ -25,22 +25,6 @@ class TelegramCommandsMixin:
             "Type /help to see available commands."
         )
 
-    async def _on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /reset command — session rotates automatically on idle."""
-        if not update.message or not update.effective_user:
-            return
-
-        sender_id = self._sender_id_for_allowlist(update.effective_user)
-        if not self.is_allowed(sender_id):
-            await update.message.reply_text("⛔ You are not allowed to use this bot.")
-            return
-
-        chat_id = str(update.message.chat_id)
-        session_key = f"{self.name}:{chat_id}"
-
-        logger.info(f"Session reset requested for {session_key}")
-        await update.message.reply_text("🔄 Session cleared. Let's start fresh!")
-
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command."""
         if not update.message:
@@ -49,7 +33,8 @@ class TelegramCommandsMixin:
         help_text = (
             "🔴 <b>HaL commands</b>\n\n"
             "/start — Start the bot\n"
-            "/reset — Reset conversation history\n"
+            "/brief — Update thread briefs for this session\n"
+            "/drop — End session without briefing\n"
             "/context [message] — Inspect current LLM context (compact)\n"
             "/context full [message] — Inspect with raw messages\n"
             "/help — Show this help message\n\n"

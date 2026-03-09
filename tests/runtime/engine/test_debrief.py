@@ -163,6 +163,16 @@ def test_parse_brief_command() -> None:
     assert _parse_brief_command("  /brief  some prompt  ") == (True, "some prompt")
 
 
+def test_is_drop_command() -> None:
+    from hal.runtime.engine.processing import _is_drop_command
+
+    assert _is_drop_command("/drop") is True
+    assert _is_drop_command("  /drop  ") is True
+    assert _is_drop_command("/drop extra") is False
+    assert _is_drop_command("/dropping") is False
+    assert _is_drop_command("hello /drop") is False
+
+
 def test_build_brief_tools_restricted(tmp_path: Path) -> None:
     tools = _build_brief_tools(tmp_path)
     assert tools.has("fs")

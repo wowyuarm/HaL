@@ -656,19 +656,6 @@ async def test_stop_cancels_typing_tasks_and_shuts_down_app() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_reset_replies_acknowledgment() -> None:
-    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
-
-    msg = _Message(chat_id=123, text="/reset")
-    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
-    update = _Update(message=msg, user=_User(1))
-
-    await ch._on_reset(update, context=None)  # type: ignore[arg-type]
-
-    msg.reply_text.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_on_context_without_inspector_replies_warning() -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
 
