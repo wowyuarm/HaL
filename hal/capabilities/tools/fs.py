@@ -21,9 +21,21 @@ _FS_EDIT_MISSING_PARAMS_ERROR = (
 )
 
 
-def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
-    """Resolve path and optionally enforce directory restriction."""
-    resolved = Path(path).expanduser().resolve()
+def _resolve_path(
+    path: str,
+    allowed_dir: Path | None = None,
+    base_dir: Path | None = None,
+) -> Path:
+    """Resolve path and optionally enforce directory restriction.
+
+    Relative paths are resolved against *base_dir* when provided,
+    otherwise against the process working directory.  Absolute paths
+    and paths starting with ``~`` are unaffected by *base_dir*.
+    """
+    p = Path(path).expanduser()
+    if base_dir and not p.is_absolute():
+        p = base_dir / p
+    resolved = p.resolve()
     if allowed_dir:
         try:
             resolved.relative_to(allowed_dir.resolve())
@@ -33,11 +45,15 @@ def _resolve_path(path: str, allowed_dir: Path | None = None) -> Path:
 
 
 def _resolve_existing_path(
-    path: str, *, allowed_dir: Path | None = None, expect: str
+    path: str,
+    *,
+    allowed_dir: Path | None = None,
+    base_dir: Path | None = None,
+    expect: str,
 ) -> tuple[Path | None, str | None]:
     """Resolve a path and validate it exists with expected type."""
     try:
-        resolved = _resolve_path(path, allowed_dir)
+        resolved = _resolve_path(path, allowed_dir, base_dir)
     except PermissionError as e:
         return None, f"Error: {e}"
 
@@ -64,13 +80,17 @@ class _ExistingPathTool(Tool):
     _EXPECTED_PATH_TYPE = "file"
     _ERROR_PREFIX = "Error: "
 
-    def __init__(self, allowed_dir: Path | None = None):
+    def __init__(self, allowed_dir: Path | None = None, base_dir: Path | None = None):
         self._allowed_dir = allowed_dir
+        self._base_dir = base_dir
 
     async def execute(self, path: str, **kwargs: Any) -> str:
         try:
             resolved_path, error = _resolve_existing_path(
-                path, allowed_dir=self._allowed_dir, expect=self._EXPECTED_PATH_TYPE
+                path,
+                allowed_dir=self._allowed_dir,
+                base_dir=self._base_dir,
+                expect=self._EXPECTED_PATH_TYPE,
             )
             if error:
                 return error
@@ -178,8 +198,9 @@ class ReadFileTool(_ExistingPathTool):
 class WriteFileTool(Tool):
     """Tool to write content to a file."""
 
-    def __init__(self, allowed_dir: Path | None = None):
+    def __init__(self, allowed_dir: Path | None = None, base_dir: Path | None = None):
         self._allowed_dir = allowed_dir
+        self._base_dir = base_dir
 
     @property
     def name(self) -> str:
@@ -202,7 +223,7 @@ class WriteFileTool(Tool):
 
     async def execute(self, path: str, content: str, **kwargs: Any) -> str:
         try:
-            file_path = _resolve_path(path, self._allowed_dir)
+            file_path = _resolve_path(path, self._allowed_dir, self._base_dir)
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             return f"Successfully wrote {len(content)} bytes to {path}"
@@ -353,11 +374,13 @@ class ListDirTool(_ExistingPathTool):
 _FsActionHandler = Callable[[str, dict[str, Any]], Awaitable[str]]
 
 
-def _build_fs_action_handlers(allowed_dir: Path | None) -> dict[str, _FsActionHandler]:
-    read_tool = ReadFileTool(allowed_dir=allowed_dir)
-    write_tool = WriteFileTool(allowed_dir=allowed_dir)
-    edit_tool = EditFileTool(allowed_dir=allowed_dir)
-    list_tool = ListDirTool(allowed_dir=allowed_dir)
+def _build_fs_action_handlers(
+    allowed_dir: Path | None, base_dir: Path | None
+) -> dict[str, _FsActionHandler]:
+    read_tool = ReadFileTool(allowed_dir=allowed_dir, base_dir=base_dir)
+    write_tool = WriteFileTool(allowed_dir=allowed_dir, base_dir=base_dir)
+    edit_tool = EditFileTool(allowed_dir=allowed_dir, base_dir=base_dir)
+    list_tool = ListDirTool(allowed_dir=allowed_dir, base_dir=base_dir)
 
     async def run_read(path: str, kwargs: dict[str, Any]) -> str:
         offset = kwargs.get("offset", 1)
@@ -391,8 +414,8 @@ def _build_fs_action_handlers(allowed_dir: Path | None) -> dict[str, _FsActionHa
 class FsTool(Tool):
     """Unified file system tool that delegates to read/write/edit/list operations."""
 
-    def __init__(self, allowed_dir: Path | None = None):
-        self._handlers = _build_fs_action_handlers(allowed_dir)
+    def __init__(self, allowed_dir: Path | None = None, base_dir: Path | None = None):
+        self._handlers = _build_fs_action_handlers(allowed_dir, base_dir)
 
     @property
     def name(self) -> str:

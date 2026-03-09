@@ -56,7 +56,7 @@ def create_tools(
     tools = ToolRegistry()
 
     # Core tools (always available)
-    tools.register(FsTool(allowed_dir=allowed_dir))
+    tools.register(FsTool(allowed_dir=allowed_dir, base_dir=workspace))
     tools.register(
         ExecTool(
             working_dir=str(workspace),
