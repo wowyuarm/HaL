@@ -172,7 +172,7 @@ class MemorySearchConfig(_StrictModel):
 class SessionConfig(_StrictModel):
     """Session lifecycle and compaction configuration."""
 
-    idle_timeout_s: float = Field(default=300.0, gt=0)  # Idle timeout before debrief trigger
+    idle_timeout_s: float = Field(default=300.0, gt=0)  # Idle timeout before session cleanup
     compaction_enabled: bool = True  # Enable in-session history compaction when budget exceeded
     compaction_token_budget: int = Field(
         default=150000, ge=1000
@@ -185,22 +185,16 @@ class SessionConfig(_StrictModel):
     )  # Max token budget per generated checkpoint block
 
 
-class DebriefConfig(_StrictModel):
-    """Session debrief configuration."""
+class BriefConfig(_StrictModel):
+    """Session brief worker configuration."""
 
-    enabled: bool = True  # Enable idle-session debrief confirmation + processing
-    confirm_timeout_s: float = Field(
-        default=120.0, gt=0
-    )  # Grace period for user confirmation before auto debrief
-    max_event_tokens: int = Field(
-        default=1500, ge=100
-    )  # Per-event token cap in debrief event stream
-    max_state_tokens: int = Field(
-        default=8000, ge=100
-    )  # Per-thread BRIEF.md token cap for debrief input
+    enabled: bool = True  # Enable /brief command processing
+    max_iterations: int = Field(default=30, ge=1)  # Max tool-loop iterations for brief worker
+    max_event_tokens: int = Field(default=1500, ge=100)  # Per-event token cap in event stream
+    max_brief_tokens: int = Field(default=8000, ge=100)  # Per-thread BRIEF.md token cap for input
     max_prompt_tokens: int = Field(
         default=100_000, ge=1000
-    )  # Overall prompt token budget for episode generation
+    )  # Overall prompt token budget for brief worker
 
 
 class LLMRetryConfig(_StrictModel):
@@ -217,7 +211,7 @@ class EngineConfig(_StrictModel):
     inbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Bus consume poll interval
     context_advisor_enabled: bool = True  # Enable first-tool-call context advisor hints
     session: SessionConfig = Field(default_factory=SessionConfig)
-    debrief: DebriefConfig = Field(default_factory=DebriefConfig)
+    brief: BriefConfig = Field(default_factory=BriefConfig)
     llm_retry: LLMRetryConfig = Field(default_factory=LLMRetryConfig)
 
 

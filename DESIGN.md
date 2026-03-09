@@ -30,7 +30,7 @@ not from conversation history. "Knowing where things stand" over
 ## 4. Human-centric collaboration
 
 The system collaborates with humans, not replaces them. Humans define the
-work world: create threads, confirm debriefs, set direction. The system
+work world: create threads, trigger briefs, set direction. The system
 organizes and acts within that frame.
 
 High autonomy, low overreach.

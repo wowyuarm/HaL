@@ -181,12 +181,12 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.engine.session.compaction_recent_user_turns == 2
     assert cfg.engine.session.compaction_checkpoint_tokens == 1800
 
-    # Engine → debrief
-    assert cfg.engine.debrief.enabled is True
-    assert cfg.engine.debrief.confirm_timeout_s == 120.0
-    assert cfg.engine.debrief.max_event_tokens == 1500
-    assert cfg.engine.debrief.max_state_tokens == 8000
-    assert cfg.engine.debrief.max_prompt_tokens == 100_000
+    # Engine → brief
+    assert cfg.engine.brief.enabled is True
+    assert cfg.engine.brief.max_iterations == 30
+    assert cfg.engine.brief.max_event_tokens == 1500
+    assert cfg.engine.brief.max_brief_tokens == 8000
+    assert cfg.engine.brief.max_prompt_tokens == 100_000
 
     # Engine → llm_retry
     assert cfg.engine.llm_retry.attempts == 3

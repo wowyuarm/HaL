@@ -97,7 +97,7 @@ class ThreadRepository:
         """Write one thread episode file, creating parent directories as needed."""
         return self.episodes.write_episode(thread_slug, episode_file_name, content)
 
-    def record_debrief_episode(
+    def record_episode(
         self,
         *,
         thread_slug: str,
@@ -107,7 +107,7 @@ class ThreadRepository:
         now: datetime,
         state_content: str | None = None,
     ) -> ThreadEpisodeWriteResult | None:
-        """Write one debrief episode and update BRIEF.md."""
+        """Write one episode and update BRIEF.md."""
         base_state = state_content if state_content is not None else self.read_state(thread_slug)
         if base_state is None:
             return None

@@ -1,7 +1,12 @@
-"""Session brief worker — fs-tool-equipped mini-agent for post-session knowledge capture."""
+"""Session brief worker — fs-tool-equipped mini-agent for post-session knowledge capture.
+
+Also contains shared helpers for thread extraction, event rendering, and thread ordering
+used by both the brief worker and other runtime components (e.g. engine hooks).
+"""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,10 +15,178 @@ from loguru import logger
 from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.context.message_building import add_assistant_message, add_tool_result
-from hal.runtime.debrief import format_session_events_for_prompt, resolve_debrief_thread_order
+from hal.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
 from hal.runtime.loop import LoopMetadata, run_tool_loop
+from hal.workspace.events import EventEntry
 
 _BRIEF_MAX_ITERATIONS = 30
+
+# ---------------------------------------------------------------------------
+# Thread slug extraction
+# ---------------------------------------------------------------------------
+
+_THREAD_PATH_RE = re.compile(r"(?:^|/)threads/([^/]+)/")
+
+# Token-based budget defaults (overridable via BriefConfig)
+_DEFAULT_MAX_EVENT_TOKENS = 1500
+_DEFAULT_MAX_PROMPT_TOKENS = 100_000
+_TRUNCATION_SUFFIX = "\n...[truncated]"
+
+
+def extract_thread_slug_from_value(value: Any) -> str | None:
+    """Extract thread slug from arbitrary string value containing a threads/<slug>/ path."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.replace("\\", "/")
+    match = _THREAD_PATH_RE.search(normalized)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def extract_touched_threads(arguments: dict[str, Any]) -> set[str]:
+    """Recursively collect thread slugs from tool call arguments."""
+    found: set[str] = set()
+
+    def _walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for val in obj.values():
+                _walk(val)
+            return
+        if isinstance(obj, list):
+            for val in obj:
+                _walk(val)
+            return
+        slug = extract_thread_slug_from_value(obj)
+        if slug:
+            found.add(slug)
+
+    _walk(arguments)
+    return found
+
+
+# ---------------------------------------------------------------------------
+# Event rendering
+# ---------------------------------------------------------------------------
+
+
+def format_session_events_for_prompt(
+    events: list[EventEntry],
+    *,
+    model: str | None = None,
+    max_tokens: int = _DEFAULT_MAX_PROMPT_TOKENS,
+    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
+) -> str:
+    """Render compact event stream for worker-model input.
+
+    Each event is individually capped at *max_event_tokens*. The full
+    rendered output is then trimmed to *max_tokens* as a safety net.
+    """
+    lines: list[str] = []
+    for event in events:
+        payload = event.payload or {}
+        preview = _event_preview(payload, model=model, max_event_tokens=max_event_tokens)
+        lines.append(f"- [{event.ts}] {event.type}: {preview}")
+    rendered = "\n".join(lines) if lines else "- (no events)"
+    return trim_text_to_token_budget(rendered, max_tokens, model=model, suffix=_TRUNCATION_SUFFIX)
+
+
+def _event_preview(
+    payload: dict[str, Any],
+    *,
+    model: str | None = None,
+    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
+) -> str:
+    """Extract a concise preview from one event payload, token-capped."""
+    if not payload:
+        return "(empty)"
+
+    # Tool-call events: show "tool → result_preview" when available.
+    tool_name = payload.get("tool")
+    if isinstance(tool_name, str) and tool_name.strip():
+        result_preview = payload.get("result_preview", "")
+        if isinstance(result_preview, str) and result_preview.strip():
+            text = f"{tool_name} \u2192 {result_preview.strip()}".replace("\n", " ")
+            return _cap_text(text, model=model, max_event_tokens=max_event_tokens)
+        return tool_name.strip()
+
+    for key in ("content", "label", "status"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            text = value.strip().replace("\n", " ")
+            return _cap_text(text, model=model, max_event_tokens=max_event_tokens)
+    fallback = str(payload)
+    return _cap_text(fallback, model=model, max_event_tokens=max_event_tokens)
+
+
+def _cap_text(
+    text: str,
+    *,
+    model: str | None = None,
+    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
+) -> str:
+    """Trim text to max_event_tokens if it exceeds the budget."""
+    if estimate_text_tokens(text, model=model) <= max_event_tokens:
+        return text
+    return trim_text_to_token_budget(text, max_event_tokens, model=model, suffix="...[truncated]")
+
+
+# ---------------------------------------------------------------------------
+# Thread ordering
+# ---------------------------------------------------------------------------
+
+
+def resolve_brief_thread_order(
+    *,
+    context_registry: object,
+    touched_threads: set[str],
+) -> list[str]:
+    """Resolve thread order using registry priority and one-hop relations."""
+    if not touched_threads:
+        return []
+    slugs = _expand_related_threads(context_registry, touched_threads)
+    priority_map = _build_thread_priority_map(context_registry)
+    return sorted(slugs, key=lambda slug: (-priority_map.get(slug, 0), slug))
+
+
+def _expand_related_threads(context_registry: object, touched_threads: set[str]) -> set[str]:
+    expand = getattr(context_registry, "expand_related_thread_slugs", None)
+    if not callable(expand):
+        return set(touched_threads)
+    try:
+        expanded = expand(set(touched_threads))
+    except Exception:
+        return set(touched_threads)
+    if not isinstance(expanded, set):
+        return set(touched_threads)
+    normalized = {str(slug).strip() for slug in expanded if str(slug).strip()}
+    return normalized or set(touched_threads)
+
+
+def _build_thread_priority_map(context_registry: object) -> dict[str, int]:
+    snapshot_fn = getattr(context_registry, "thread_snapshot", None)
+    if not callable(snapshot_fn):
+        return {}
+    try:
+        snapshot = snapshot_fn()
+    except Exception:
+        return {}
+    if not isinstance(snapshot, list):
+        return {}
+    priorities: dict[str, int] = {}
+    for item in snapshot:
+        if not isinstance(item, dict):
+            continue
+        slug = str(item.get("slug", "")).strip()
+        if not slug:
+            continue
+        priority = item.get("priority", 0)
+        try:
+            priorities[slug] = int(priority)
+        except (TypeError, ValueError):
+            priorities[slug] = 0
+    return priorities
+
 
 # ---------------------------------------------------------------------------
 # Brief worker entry point
@@ -47,7 +220,7 @@ async def run_session_brief(engine: Any, session_key: str, *, user_prompt: str =
     )
 
     # 2. Resolve thread order and metadata
-    thread_order = resolve_debrief_thread_order(
+    thread_order = resolve_brief_thread_order(
         context_registry=engine.context_registry,
         touched_threads=state.touched_threads,
     )
@@ -290,7 +463,7 @@ class _BriefLoopHooks:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 

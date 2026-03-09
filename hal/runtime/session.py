@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
 
-from hal.bus.events import OutboundMessage
 from hal.context.message_building import (
     assemble_message_sequence,
     build_session_baseline_message,
@@ -19,15 +18,6 @@ from hal.context.message_building import (
 from hal.context.token_budget import trim_text_to_token_budget
 
 _MAX_COMPACTION_PASSES = 3
-
-
-def _build_debrief_confirmation(*, threads: list[str], confirm_timeout_s: float) -> str:
-    from hal.runtime.debrief import build_debrief_confirmation_message
-
-    return build_debrief_confirmation_message(
-        threads=threads,
-        confirm_timeout_s=confirm_timeout_s,
-    )
 
 
 def _estimate_history_tokens(history: list[dict[str, object]], *, model: str | None) -> int:
@@ -65,8 +55,8 @@ def ensure_session_state(engine: Any, *, session_key: str, channel: str, chat_id
     """Return active session state, rotating on idle timeout."""
     now = datetime.now()
     state = engine._session_states.get(session_key)
-    if state is not None and state.debrief_task is not None:
-        if state.debrief_task.done():
+    if state is not None and state.brief_task is not None:
+        if state.brief_task.done():
             engine._session_states.pop(session_key, None)
             engine._clear_session_snapshot(session_key)
         state = None
@@ -74,7 +64,7 @@ def ensure_session_state(engine: Any, *, session_key: str, channel: str, chat_id
     timeout_s = max(float(engine._engine_config.session.idle_timeout_s), 1.0)
     idle_timed_out = False
     if state is not None:
-        if not state.awaiting_debrief_confirmation and state.debrief_task is None:
+        if state.brief_task is None:
             idle_timed_out = (now - state.last_activity_at).total_seconds() > timeout_s
 
     if state is None or idle_timed_out:
@@ -149,30 +139,21 @@ def resolve_session_compaction_settings(engine_config: object) -> SessionCompact
 
 
 async def tick_session_lifecycle(engine: Any) -> None:
-    """Handle idle-session confirmation/debrief lifecycle."""
-    if not engine._engine_config.debrief.enabled:
-        return
-
+    """Clean up finished brief tasks and finalize idle sessions."""
     now = datetime.now()
     timeout_s = max(float(engine._engine_config.session.idle_timeout_s), 1.0)
-    confirm_timeout_s = max(float(engine._engine_config.debrief.confirm_timeout_s), 1.0)
 
     for session_key, state in list(engine._session_states.items()):
-        if _cleanup_finished_debrief(engine, session_key, state):
+        # 1. Clean up finished brief tasks
+        if state.brief_task is not None:
+            if state.brief_task.done():
+                engine._session_states.pop(session_key, None)
             continue
-        if await _handle_pending_confirmation(engine, session_key, state, now):
+        # 2. Idle timeout → record session_end, clean up
+        if (now - state.last_activity_at).total_seconds() <= timeout_s:
             continue
-        if not _session_needs_debrief_confirmation(state=state, now=now, timeout_s=timeout_s):
-            continue
-        if not state.touched_threads:
-            _finalize_idle_session_without_threads(engine, session_key, state)
-            continue
-        await _send_debrief_confirmation(
-            engine,
-            state=state,
-            now=now,
-            confirm_timeout_s=confirm_timeout_s,
-        )
+        reason = "idle_timeout" if state.touched_threads else "idle_timeout_no_threads"
+        _finalize_idle_session(engine, session_key, state, reason=reason)
 
 
 async def maybe_compact_session_history(
@@ -211,98 +192,17 @@ async def maybe_compact_session_history(
     return compacted
 
 
-def _cleanup_finished_debrief(engine: Any, session_key: str, state: Any) -> bool:
-    if state.debrief_task is None:
-        return False
-    if state.debrief_task.done():
-        engine._session_states.pop(session_key, None)
-    return True
-
-
-async def _handle_pending_confirmation(
-    engine: Any,
-    session_key: str,
-    state: Any,
-    now: datetime,
-) -> bool:
-    if _debrief_confirmation_expired(state=state, now=now):
-        await engine._start_session_debrief(session_key, reason="confirm_timeout")
-        return True
-    return bool(state.awaiting_debrief_confirmation)
-
-
-def _finalize_idle_session_without_threads(engine: Any, session_key: str, state: Any) -> None:
-    """Close an idle session that never touched thread state."""
+def _finalize_idle_session(engine: Any, session_key: str, state: Any, *, reason: str) -> None:
+    """Close an idle session and clean up."""
     engine.memory.record_event(
         session_id=state.session_id,
         event_type="session_end",
         channel=state.channel,
         chat_id=state.chat_id,
-        payload={"reason": "idle_timeout_no_threads"},
+        payload={"reason": reason},
     )
     engine._clear_session_snapshot(session_key)
     engine._session_states.pop(session_key, None)
-
-
-async def _send_debrief_confirmation(
-    engine: Any,
-    *,
-    state: Any,
-    now: datetime,
-    confirm_timeout_s: float,
-) -> None:
-    """Send one debrief confirmation prompt and open its confirmation window."""
-    from hal.runtime.debrief import DEBRIEF_CANCEL_CB, DEBRIEF_CONFIRM_CB
-
-    msg = _build_debrief_confirmation(
-        threads=sorted(state.touched_threads),
-        confirm_timeout_s=confirm_timeout_s,
-    )
-    await engine.bus.publish_outbound(
-        OutboundMessage(
-            channel=state.channel,
-            chat_id=state.chat_id,
-            content=msg,
-            metadata={
-                "system_meta": True,
-                "kind": "session_debrief_confirmation",
-                "session_id": state.session_id,
-                "inline_buttons": [
-                    [
-                        {"text": "Confirm", "callback_data": DEBRIEF_CONFIRM_CB},
-                        {"text": "Cancel", "callback_data": DEBRIEF_CANCEL_CB},
-                    ],
-                ],
-            },
-        )
-    )
-    state.awaiting_debrief_confirmation = True
-    state.debrief_confirm_deadline = now + timedelta(seconds=confirm_timeout_s)
-    engine.memory.record_event(
-        session_id=state.session_id,
-        event_type="session_debrief_confirmation_sent",
-        channel=state.channel,
-        chat_id=state.chat_id,
-        payload={"threads": sorted(state.touched_threads)},
-    )
-
-
-def _session_needs_debrief_confirmation(
-    *,
-    state: Any,
-    now: datetime,
-    timeout_s: float,
-) -> bool:
-    """Return True when one idle session should enter debrief confirmation flow."""
-    if state.debrief_task is not None or state.awaiting_debrief_confirmation:
-        return False
-    return (now - state.last_activity_at).total_seconds() > timeout_s
-
-
-def _debrief_confirmation_expired(*, state: Any, now: datetime) -> bool:
-    """Return True when one confirmation window has expired."""
-    deadline = state.debrief_confirm_deadline
-    return bool(state.awaiting_debrief_confirmation and deadline and now >= deadline)
 
 
 async def _compact_history_to_budget(
@@ -432,9 +332,7 @@ class SessionState:
     history: list[dict[str, object]] = field(default_factory=list)
     touched_threads: set[str] = field(default_factory=set)
     context_hint_keys: set[str] = field(default_factory=set)
-    awaiting_debrief_confirmation: bool = False
-    debrief_confirm_deadline: datetime | None = None
-    debrief_task: asyncio.Task[None] | None = None
+    brief_task: asyncio.Task[None] | None = None
 
 
 # ---------------------------------------------------------------------------

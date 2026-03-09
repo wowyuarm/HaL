@@ -329,174 +329,42 @@ class TestDispatch:
         ]
         assert len(baseline_messages) == 1
 
-    async def test_debrief_confirm_message_short_circuits_loop(self, engine):
+    async def test_brief_command_starts_background_worker(self, engine):
+        """Sending /brief records events, creates a brief_task, and returns ack."""
         state = engine._ensure_session_state(
             session_key="telegram:c1",
             channel="telegram",
             chat_id="c1",
         )
-        state.awaiting_debrief_confirmation = True
-        engine._start_session_debrief = AsyncMock()  # type: ignore[method-assign]
+        engine._run_session_brief = AsyncMock()  # type: ignore[method-assign]
 
-        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="confirm")
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/brief")
         out = await engine.process(msg)
 
         assert out is not None
-        assert out.metadata.get("kind") == "session_debrief_start"
-        engine._start_session_debrief.assert_awaited_once_with("telegram:c1", reason="user_confirm")
+        assert out.metadata.get("kind") == "session_brief_start"
+        assert "Starting session brief" in out.content
+        assert state.brief_task is not None
 
-    async def test_debrief_callback_confirm_via_metadata(self, engine):
-        state = engine._ensure_session_state(
+    async def test_brief_command_with_prompt(self, engine):
+        """Sending /brief with extra text passes the prompt to the worker."""
+        engine._ensure_session_state(
             session_key="telegram:c1",
             channel="telegram",
             chat_id="c1",
         )
-        state.awaiting_debrief_confirmation = True
-        engine._start_session_debrief = AsyncMock()  # type: ignore[method-assign]
+        engine._run_session_brief = AsyncMock()  # type: ignore[method-assign]
 
         msg = InboundMessage(
             channel="telegram",
             sender_id="u1",
             chat_id="c1",
-            content="/debrief confirm",
-            metadata={"debrief_action": "confirm"},
+            content="/brief focus on architecture decisions",
         )
         out = await engine.process(msg)
 
         assert out is not None
-        assert out.metadata.get("kind") == "session_debrief_start"
-        engine._start_session_debrief.assert_awaited_once_with("telegram:c1", reason="user_confirm")
-
-    async def test_debrief_callback_cancel_via_metadata(self, engine):
-        state = engine._ensure_session_state(
-            session_key="telegram:c1",
-            channel="telegram",
-            chat_id="c1",
-        )
-        state.awaiting_debrief_confirmation = True
-        engine._cancel_debrief_confirmation = MagicMock()  # type: ignore[method-assign]
-
-        msg = InboundMessage(
-            channel="telegram",
-            sender_id="u1",
-            chat_id="c1",
-            content="",
-            metadata={"debrief_action": "cancel"},
-        )
-        out = await engine.process(msg)
-
-        assert out is not None
-        assert out.metadata.get("kind") == "session_debrief_cancelled"
-        assert "cancelled" in out.content.lower()
-        engine._cancel_debrief_confirmation.assert_called_once_with(
-            "telegram:c1", reason="user_cancelled"
-        )
-
-    async def test_session_debrief_indexes_written_episodes(self, engine):
-        session_key = "telegram:c1"
-        state = engine._ensure_session_state(
-            session_key=session_key,
-            channel="telegram",
-            chat_id="c1",
-        )
-        state.touched_threads = {"github-actions"}
-        engine.memory.event_log.read_session.return_value = []
-        engine.provider.chat = AsyncMock(  # type: ignore[method-assign]
-            return_value=LLMResponse(
-                content=(
-                    "---EPISODE---\n"
-                    "# 2026-03-06: Workflow update\n\n"
-                    "Threads: [github-actions]\n"
-                    "Primary: github-actions\n"
-                    "Session: s_test\n\n"
-                    "## What Happened\n- Updated workflow draft.\n\n"
-                    "## Decisions\n- none\n\n"
-                    "## Open\n- [ ] Verify in CI.\n\n"
-                    "## Source Events\n- s_test\n"
-                    "---BRIEF---\n"
-                    "# GitHub Actions\n\nStatus: active\n\n"
-                    "## Purpose\nShip automation workflow.\n"
-                ),
-                tool_calls=[],
-            )
-        )
-        engine._memory_search = MagicMock()  # type: ignore[assignment]
-        engine._memory_search.index_paths = AsyncMock(return_value=2)
-
-        thread_dir = engine.workspace / "work" / "threads" / "github-actions"
-        thread_dir.mkdir(parents=True, exist_ok=True)
-        (thread_dir / "BRIEF.md").write_text(
-            "# GitHub Actions\n\nStatus: active\n\n## Purpose\n- draft\n",
-            encoding="utf-8",
-        )
-
-        await engine._run_session_debrief(session_key)
-
-        engine._memory_search.index_paths.assert_awaited_once()
-        payload = engine.memory.record_event.call_args.kwargs["payload"]
-        assert payload["episode_count"] == 1
-        assert payload["indexed_chunks"] == 2
-        updated_state = (thread_dir / "BRIEF.md").read_text(encoding="utf-8")
-        assert "Ship automation workflow." in updated_state
-        assert "## Recent Episodes" in updated_state
-
-    async def test_session_debrief_expands_related_threads_with_priority_order(self, engine):
-        session_key = "telegram:c1"
-        state = engine._ensure_session_state(
-            session_key=session_key,
-            channel="telegram",
-            chat_id="c1",
-        )
-        state.touched_threads = {"github-actions"}
-        engine.memory.event_log.read_session.return_value = []
-        engine.context_registry.expand_related_thread_slugs.return_value = {  # type: ignore[method-assign]
-            "github-actions",
-            "hal-architecture",
-        }
-        engine.context_registry.thread_snapshot.return_value = [  # type: ignore[method-assign]
-            {"slug": "github-actions", "priority": 200},
-            {"slug": "hal-architecture", "priority": 320},
-        ]
-        engine._memory_search = None  # type: ignore[assignment]
-
-        for slug in ("github-actions", "hal-architecture"):
-            thread_dir = engine.workspace / "work" / "threads" / slug
-            thread_dir.mkdir(parents=True, exist_ok=True)
-            (thread_dir / "BRIEF.md").write_text(
-                f"# {slug}\n\nStatus: active\n\n## Current State\n- draft\n",
-                encoding="utf-8",
-            )
-
-        async def _fake_debrief_output(*_args, **kwargs):
-            from hal.runtime.debrief import DebriefOutput
-
-            slug = kwargs["thread_slug"]
-            episode = (
-                f"# 2026-03-06: Update {slug}\n\n"
-                f"Threads: [{slug}]\n"
-                f"Primary: {slug}\n"
-                "Session: s_test\n\n"
-                "## What Happened\n- Updated draft.\n\n"
-                "## Decisions\n- none\n\n"
-                "## Status\n- unchanged\n\n"
-                "## Artifacts\n- none\n\n"
-                "## Open\n- [ ] Verify in CI.\n\n"
-                "## Source Events\n- s_test\n"
-            )
-            return DebriefOutput(episode_markdown=episode, brief_markdown=None)
-
-        with patch(
-            "hal.runtime.debrief.generate_debrief_output",
-            new=AsyncMock(side_effect=_fake_debrief_output),
-        ) as mock_generate:
-            await engine._run_session_debrief(session_key)
-
-        assert [call.kwargs["thread_slug"] for call in mock_generate.await_args_list] == [
-            "hal-architecture",
-            "github-actions",
-        ]
-        payload = engine.memory.record_event.call_args.kwargs["payload"]
-        assert payload["threads"] == ["hal-architecture", "github-actions"]
+        assert out.metadata.get("kind") == "session_brief_start"
 
 
 class TestSessionCompaction:

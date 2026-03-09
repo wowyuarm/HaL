@@ -16,8 +16,8 @@ from hal.context.metrics import MetricsCollector
 from hal.context.thread_mentions import detect_thread_mentions
 from hal.domain.ports import LLMProviderPort
 from hal.memory.manager import MemoryManager
-from hal.runtime.debrief import (
-    run_session_debrief,
+from hal.runtime.brief import (
+    run_session_brief,
 )
 from hal.runtime.session import (
     SessionState,
@@ -311,48 +311,24 @@ class AgentEngine:
         state.context_hint_keys.update(new_keys)
         return new_keys
 
-    def _cancel_debrief_confirmation(self, session_key: str, reason: str) -> None:
-        """Cancel a pending debrief confirmation window for a session."""
-        state = self._session_states.get(session_key)
-        if state is None or not state.awaiting_debrief_confirmation:
-            return
-        state.awaiting_debrief_confirmation = False
-        state.debrief_confirm_deadline = None
-        self.memory.record_event(
-            session_id=state.session_id,
-            event_type="session_debrief_cancelled",
-            channel=state.channel,
-            chat_id=state.chat_id,
-            payload={"reason": reason},
-        )
-
     async def _tick_session_lifecycle(self) -> None:
-        """Handle idle-session confirmation/debrief lifecycle."""
+        """Clean up finished brief tasks and finalize idle sessions."""
         await tick_session_lifecycle(self)
 
-    async def _start_session_debrief(self, session_key: str, reason: str) -> None:
-        """Start background debrief task for one session."""
+    async def _start_session_brief(self, session_key: str, *, user_prompt: str = "") -> None:
+        """Start background brief worker task for one session."""
         state = self._session_states.get(session_key)
         if state is None:
             return
-        if state.debrief_task is not None:
+        if state.brief_task is not None:
             return
-
-        state.awaiting_debrief_confirmation = False
-        state.debrief_confirm_deadline = None
-        self.memory.record_event(
-            session_id=state.session_id,
-            event_type="session_end",
-            channel=state.channel,
-            chat_id=state.chat_id,
-            payload={"reason": reason},
+        state.brief_task = asyncio.create_task(
+            self._run_session_brief(session_key, user_prompt=user_prompt)
         )
-        state.debrief_task = asyncio.create_task(self._run_session_debrief(session_key))
-        self._clear_session_snapshot(session_key)
 
-    async def _run_session_debrief(self, session_key: str) -> None:
-        """Generate episodes and update briefs for one closed session."""
-        await run_session_debrief(self, session_key)
+    async def _run_session_brief(self, session_key: str, *, user_prompt: str = "") -> None:
+        """Run brief worker agent for one closed session."""
+        await run_session_brief(self, session_key, user_prompt=user_prompt)
 
     async def _maybe_compact_session_history(
         self,

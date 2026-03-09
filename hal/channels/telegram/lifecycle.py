@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 from loguru import logger
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from hal.bus.events import SystemStartupEvent
 
@@ -37,6 +37,7 @@ class TelegramLifecycleMixin:
         self._app.add_handler(CommandHandler("reset", self._on_reset))
         self._app.add_handler(CommandHandler("context", self._on_context))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("brief", self._on_brief))
 
         self._app.add_handler(
             MessageHandler(
@@ -51,8 +52,6 @@ class TelegramLifecycleMixin:
                 self._on_message,
             )
         )
-
-        self._app.add_handler(CallbackQueryHandler(self._on_callback_query, pattern=r"^debrief:"))
 
         logger.info("Starting Telegram bot (polling mode)...")
 
@@ -69,7 +68,7 @@ class TelegramLifecycleMixin:
             logger.warning(f"Failed to register bot commands: {e}")
 
         await self._app.updater.start_polling(
-            allowed_updates=["message", "callback_query"],
+            allowed_updates=["message"],
             drop_pending_updates=True,
         )
 
@@ -94,57 +93,28 @@ class TelegramLifecycleMixin:
             await self._app.shutdown()
             self._app = None
 
-    async def _on_callback_query(self, update, context) -> None:
-        """Handle inline keyboard button presses for debrief confirmation."""
-        from hal.runtime.debrief import (
-            DEBRIEF_ACTION_CANCEL,
-            DEBRIEF_ACTION_CONFIRM,
-            DEBRIEF_ACTION_KEY,
-            DEBRIEF_CANCEL_CB,
-            DEBRIEF_CONFIRM_CB,
-        )
-
-        query = update.callback_query
-        if query is None:
+    async def _on_brief(self, update, context) -> None:
+        """Handle /brief command — forward to engine as a normal message."""
+        if not update.message or not update.effective_user:
             return
 
-        await query.answer()
-
-        data = query.data or ""
+        message = update.message
         user = update.effective_user
-        chat_id = query.message.chat_id if query.message else None
-        if chat_id is None:
-            return
+        chat_id = message.chat_id
 
-        if data == DEBRIEF_CONFIRM_CB:
-            action = DEBRIEF_ACTION_CONFIRM
-            suffix = " (Confirmed)"
-            content = "/debrief confirm"
-        elif data == DEBRIEF_CANCEL_CB:
-            action = DEBRIEF_ACTION_CANCEL
-            suffix = " (Cancelled)"
-            content = ""
-        else:
-            return
-
-        # Edit original message to remove keyboard and show outcome
-        if query.message:
-            try:
-                original_text = query.message.text or ""
-                await query.edit_message_text(text=original_text + suffix)
-            except Exception as e:
-                logger.debug(f"Failed to edit callback message: {e}")
-
-        sender_id = str(user.id) if user else "unknown"
-        if user and user.username:
+        sender_id = str(user.id)
+        if user.username:
             sender_id = f"{sender_id}|{user.username}"
 
+        # Reconstruct full command text (includes /brief + any arguments)
+        content = message.text or "/brief"
+
         str_chat_id = str(chat_id)
+        self._start_typing(str_chat_id)
         await self._handle_message(
             sender_id=sender_id,
             chat_id=str_chat_id,
             content=content,
-            metadata={DEBRIEF_ACTION_KEY: action},
         )
 
     async def _send_startup_notification(self) -> None:

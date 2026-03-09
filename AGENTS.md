@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`hal/` contains runtime code: `runtime/` (engine/subagent/loop/session/debrief/bootstrap), `context/`, `domain/`, `memory/`, `workspace/`, `capabilities/` (tools/skills), `channels/`, `infra/`, and `cli/` (Typer command package).  
+`hal/` contains runtime code: `runtime/` (engine/subagent/loop/session/brief/bootstrap), `context/`, `domain/`, `memory/`, `workspace/`, `capabilities/` (tools/skills), `channels/`, `infra/`, and `cli/` (Typer command package).  
 `tests/` mirrors package layout (`tests/core/`, `tests/capabilities/tools/`, etc.).  
 Keep source and tests in matching paths.
 

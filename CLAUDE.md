@@ -143,7 +143,7 @@ hal/
 │   ├── subagent/     # SubagentManager
 │   ├── loop.py       # Shared tool-calling loop
 │   ├── session.py    # Session lifecycle, state, snapshot, checkpoint
-│   └── debrief.py    # Episode generation + confirmation helpers
+│   └── brief.py      # Session brief worker and thread helpers
 ├── utils/            # Generic helpers
 ├── workspace/        # Persistence (layout, repos)
 └── bridge/

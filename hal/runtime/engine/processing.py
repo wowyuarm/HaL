@@ -17,7 +17,6 @@ from hal.context.metrics import (
 )
 from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
 from hal.domain.message_payloads import estimate_content_chars
-from hal.runtime.debrief import is_debrief_action_message, is_debrief_confirm_message
 from hal.runtime.loop import run_tool_loop
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
@@ -141,43 +140,46 @@ def build_direct_inbound_message(*, channel: str, chat_id: str, content: str) ->
     return InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
 
 
-async def _maybe_handle_debrief_confirmation(
-    *, engine: Any, msg: Any, session_state: Any
-) -> OutboundMessage | None:
-    """Handle pending debrief confirmation before treating the inbound as normal work."""
-    if not session_state.awaiting_debrief_confirmation:
-        return None
+def _parse_brief_command(content: str) -> tuple[bool, str]:
+    """Parse /brief command. Returns (is_brief, user_prompt)."""
+    stripped = content.strip()
+    if stripped == "/brief":
+        return True, ""
+    if stripped.startswith("/brief "):
+        return True, stripped[7:].strip()
+    return False, ""
 
-    # Inline-keyboard path: check metadata first
-    action = is_debrief_action_message(msg.metadata)
-    if action == "confirm":
-        await engine._start_session_debrief(msg.session_key, reason="user_confirm")
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="Confirmed. Starting session debrief now.",
-            metadata={"system_meta": True, "kind": "session_debrief_start"},
-        )
-    if action == "cancel":
-        engine._cancel_debrief_confirmation(msg.session_key, reason="user_cancelled")
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="Session debrief cancelled.",
-            metadata={"system_meta": True, "kind": "session_debrief_cancelled"},
-        )
 
-    # Text-based fallback (non-Telegram channels, /debrief command)
-    if is_debrief_confirm_message(msg.content):
-        await engine._start_session_debrief(msg.session_key, reason="user_confirm")
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="Confirmed. Starting session debrief now.",
-            metadata={"system_meta": True, "kind": "session_debrief_start"},
-        )
-    engine._cancel_debrief_confirmation(msg.session_key, reason="user_continued")
-    return None
+async def _handle_brief_command(
+    *, engine: Any, msg: Any, session_state: Any, user_prompt: str
+) -> OutboundMessage:
+    """Handle /brief: record user turn, end session, start background worker."""
+    import asyncio
+
+    # Record user turn with /brief content in event stream
+    _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
+
+    # End session
+    engine.memory.record_event(
+        session_id=session_state.session_id,
+        event_type="session_end",
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        payload={"reason": "user_brief"},
+    )
+
+    # Start background brief worker
+    session_state.brief_task = asyncio.create_task(
+        engine._run_session_brief(msg.session_key, user_prompt=user_prompt)
+    )
+    engine._clear_session_snapshot(msg.session_key)
+
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content="Starting session brief...",
+        metadata={"system_meta": True, "kind": "session_brief_start"},
+    )
 
 
 def _record_user_turn(*, engine: Any, msg: Any, session_id: str) -> None:
@@ -271,13 +273,13 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         channel=msg.channel,
         chat_id=msg.chat_id,
     )
-    debrief_response = await _maybe_handle_debrief_confirmation(
-        engine=engine,
-        msg=msg,
-        session_state=session_state,
-    )
-    if debrief_response is not None:
-        return debrief_response
+
+    # /brief command — start background brief worker and end session
+    is_brief, brief_prompt = _parse_brief_command(msg.content)
+    if is_brief:
+        return await _handle_brief_command(
+            engine=engine, msg=msg, session_state=session_state, user_prompt=brief_prompt
+        )
 
     _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
 

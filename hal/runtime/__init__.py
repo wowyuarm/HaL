@@ -1,10 +1,10 @@
-"""Runtime components and facades for loop/session/debrief orchestration."""
+"""Runtime components and facades for loop/session/brief orchestration."""
 
-from .debrief import (
-    DebriefOutput,
-    generate_debrief_output,
-    resolve_debrief_thread_order,
-    run_session_debrief,
+from .brief import (
+    extract_touched_threads,
+    format_session_events_for_prompt,
+    resolve_brief_thread_order,
+    run_session_brief,
 )
 from .loop import LoopHooks, LoopMetadata, run_tool_loop
 from .session import (
@@ -19,20 +19,19 @@ from .session import (
 from .tool_factory import create_tools
 
 __all__ = [
-    "DebriefOutput",
-    "LoopMetadata",
     "LoopHooks",
+    "LoopMetadata",
     "build_session_id",
     "build_session_snapshot_messages",
     "create_tools",
     "ensure_session_state",
-    "execute_loop",
-    "generate_debrief_output",
+    "extract_touched_threads",
+    "format_session_events_for_prompt",
     "generate_session_checkpoint",
     "maybe_compact_session_history",
-    "resolve_debrief_thread_order",
+    "resolve_brief_thread_order",
+    "run_session_brief",
     "run_tool_loop",
-    "run_session_debrief",
     "tick_session_lifecycle",
     "touch_session",
 ]

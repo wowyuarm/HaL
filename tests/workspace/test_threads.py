@@ -115,7 +115,7 @@ def test_thread_repository_reads_and_writes_state_and_episode(tmp_path: Path) ->
     assert repo.read_state("hal-architecture") == "# HaL Architecture\nStatus: active\n"
 
 
-def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: Path) -> None:
+def test_thread_repository_records_episode_and_advances_state(tmp_path: Path) -> None:
     repo = ThreadRepository(tmp_path)
     repo.write_state(
         "github-actions",
@@ -140,7 +140,7 @@ def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: 
         "## Key Decisions\n- Use label-based routing.\n"
     )
 
-    result = repo.record_debrief_episode(
+    result = repo.record_episode(
         thread_slug="github-actions",
         session_id="s_1",
         episode_markdown=episode,
@@ -163,7 +163,7 @@ def test_thread_repository_records_debrief_episode_and_advances_state(tmp_path: 
     assert "- Use label-based routing." in repo.read_state("github-actions")
 
 
-def test_thread_repository_records_debrief_episode_updates_state_status(tmp_path: Path) -> None:
+def test_thread_repository_records_episode_updates_state_status(tmp_path: Path) -> None:
     repo = ThreadRepository(tmp_path)
     repo.write_state(
         "github-actions",
@@ -181,7 +181,7 @@ def test_thread_repository_records_debrief_episode_updates_state_status(tmp_path
     )
     brief = "# GitHub Actions\nStatus: paused\n\n## Purpose\nShip automation workflow.\n"
 
-    result = repo.record_debrief_episode(
+    result = repo.record_episode(
         thread_slug="github-actions",
         session_id="s_2",
         episode_markdown=episode,
@@ -261,8 +261,8 @@ def test_empty_dir_without_yaml_or_state_is_ignored(tmp_path: Path) -> None:
     assert len(entries) == 0
 
 
-def test_bootstrapped_thread_can_receive_debrief_episode(tmp_path: Path) -> None:
-    """After bootstrap, debrief should be able to update the thread brief normally."""
+def test_bootstrapped_thread_can_receive_episode(tmp_path: Path) -> None:
+    """After bootstrap, record_episode should be able to update the thread brief normally."""
     thread_dir = tmp_path / "work" / "threads" / "bootstrapped"
     thread_dir.mkdir(parents=True)
     (thread_dir / "THREAD.yaml").write_text(
@@ -285,7 +285,7 @@ def test_bootstrapped_thread_can_receive_debrief_episode(tmp_path: Path) -> None
         "## Purpose\nTest bootstrap.\n\n"
         "## Key Decisions\n- Use bootstrap approach.\n"
     )
-    result = repo.record_debrief_episode(
+    result = repo.record_episode(
         thread_slug="bootstrapped",
         session_id="s_1",
         episode_markdown=episode,
