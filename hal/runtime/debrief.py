@@ -24,7 +24,7 @@ DEBRIEF_ACTION_KEY = "debrief_action"
 DEBRIEF_ACTION_CONFIRM = "confirm"
 DEBRIEF_ACTION_CANCEL = "cancel"
 
-_THREAD_STATE_PATH_RE = re.compile(r"(?:^|/)threads/([^/]+)/BRIEF\.md$")
+_THREAD_PATH_RE = re.compile(r"(?:^|/)threads/([^/]+)/")
 _CONFIRM_TEXTS = {
     "yes",
     "y",
@@ -86,11 +86,11 @@ def is_debrief_action_message(metadata: dict[str, Any]) -> str | None:
 
 
 def extract_thread_slug_from_value(value: Any) -> str | None:
-    """Extract thread slug from arbitrary string value containing threads/.../BRIEF.md."""
+    """Extract thread slug from arbitrary string value containing a threads/<slug>/ path."""
     if not isinstance(value, str):
         return None
     normalized = value.replace("\\", "/")
-    match = _THREAD_STATE_PATH_RE.search(normalized)
+    match = _THREAD_PATH_RE.search(normalized)
     if not match:
         return None
     return match.group(1)
@@ -147,7 +147,17 @@ def _event_preview(
     """Extract a concise preview from one event payload, token-capped."""
     if not payload:
         return "(empty)"
-    for key in ("content", "tool", "label", "status"):
+
+    # Tool-call events: show "tool → result_preview" when available.
+    tool_name = payload.get("tool")
+    if isinstance(tool_name, str) and tool_name.strip():
+        result_preview = payload.get("result_preview", "")
+        if isinstance(result_preview, str) and result_preview.strip():
+            text = f"{tool_name} \u2192 {result_preview.strip()}".replace("\n", " ")
+            return _cap_text(text, model=model, max_event_tokens=max_event_tokens)
+        return tool_name.strip()
+
+    for key in ("content", "label", "status"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             text = value.strip().replace("\n", " ")

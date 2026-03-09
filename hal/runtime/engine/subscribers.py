@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.bus.events import MessageInjectEvent, ReminderEvent, SubagentCompleteEvent, ToolCallEvent
+from hal.context.token_budget import trim_text_to_token_budget
 from hal.runtime.debrief import extract_touched_threads
 
 from .subagent_injection import (
@@ -14,6 +15,8 @@ from .subagent_injection import (
     _build_subagent_injection,
     _split_subagent_tool_result,
 )
+
+_TOOL_RESULT_PREVIEW_TOKENS = 300
 
 if TYPE_CHECKING:
     from hal.bus.events import InboundMessage
@@ -210,6 +213,14 @@ class _ToolCallSubscriber:
         session_id = self._scope.engine._get_session_id(event.session_key)
         if not session_id:
             return
+        result_text = event.result or ""
+        result_preview = (
+            trim_text_to_token_budget(
+                result_text, _TOOL_RESULT_PREVIEW_TOKENS, suffix="...[truncated]"
+            )
+            if result_text
+            else ""
+        )
         self._scope.engine.memory.record_event(
             session_id=session_id,
             event_type="tool_call",
@@ -218,7 +229,8 @@ class _ToolCallSubscriber:
             payload={
                 "tool": event.tool_name,
                 "args": event.arguments,
-                "result_size": len(event.result or ""),
+                "result_size": len(result_text),
+                "result_preview": result_preview,
             },
         )
 

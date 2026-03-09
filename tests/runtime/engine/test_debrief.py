@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from hal.runtime.debrief import (
     DebriefOutput,
     _cap_text,
+    _event_preview,
     _parse_debrief_response,
     build_debrief_confirmation_message,
     extract_touched_threads,
@@ -31,6 +32,17 @@ def test_extract_touched_threads_from_nested_fs_args() -> None:
     }
     touched = extract_touched_threads(args)
     assert touched == {"github-actions", "hal-architecture"}
+
+
+def test_extract_touched_threads_from_non_brief_paths() -> None:
+    """Thread touch detection matches any file under threads/<slug>/."""
+    assert extract_touched_threads({"path": "/home/user/.hal/work/threads/hal-arch/STATE.md"}) == {
+        "hal-arch"
+    }
+    assert extract_touched_threads({"path": "threads/daily-ops/THREAD.yaml"}) == {"daily-ops"}
+    assert extract_touched_threads({"path": "threads/blog/episodes/2026-03-06-blog-s1.md"}) == {
+        "blog"
+    }
 
 
 def test_is_debrief_confirm_message() -> None:
@@ -170,3 +182,27 @@ def test_parse_debrief_response_empty_brief_returns_none() -> None:
     assert isinstance(result, DebriefOutput)
     assert result.episode_markdown == "# Episode"
     assert result.brief_markdown is None
+
+
+def test_event_preview_tool_call_with_result_preview() -> None:
+    """tool_call events with result_preview render as 'tool → preview'."""
+    payload = {
+        "tool": "fs",
+        "args": {"action": "read", "path": "/some/file"},
+        "result_size": 500,
+        "result_preview": "file contents here",
+    }
+    preview = _event_preview(payload)
+    assert "fs" in preview
+    assert "\u2192" in preview
+    assert "file contents here" in preview
+
+
+def test_event_preview_tool_call_without_result_preview() -> None:
+    """tool_call events without result_preview fall back to tool name only."""
+    payload = {
+        "tool": "exec",
+        "args": {"command": "ls"},
+        "result_size": 100,
+    }
+    assert _event_preview(payload) == "exec"
