@@ -15,6 +15,7 @@ from hal.context.metrics import (
     ContextMetrics,
 )
 from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
+from hal.context.token_counter import count_messages_tokens
 from hal.domain.message_payloads import estimate_content_chars
 from hal.runtime.loop import run_tool_loop
 from hal.runtime.session import build_persisted_session_history
@@ -49,6 +50,7 @@ def _build_pre_metrics(
     *,
     msg: Any,
     mode: str,
+    resolved_model: str | None,
     messages: list[dict[str, object]],
     history: list[dict[str, object]],
     search_results: list[object],
@@ -76,7 +78,9 @@ def _build_pre_metrics(
         recall_chars=recall_chars,
         current_message_chars=len(msg.content),
         total_input_chars=total_input_chars,
-        estimated_input_tokens=rough_tokens_from_chars(total_input_chars),
+        estimated_input_tokens=count_messages_tokens(messages, model=resolved_model)
+        if resolved_model
+        else rough_tokens_from_chars(total_input_chars),
     )
 
 
@@ -345,6 +349,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         pre_metrics = _build_pre_metrics(
             msg=msg,
             mode=mode,
+            resolved_model=resolved_model,
             messages=messages,
             history=history,
             search_results=search_results,

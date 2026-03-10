@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from hal.context.token_budget import estimate_content_tokens
+from hal.context.token_counter import count_content_tokens
 from hal.domain.message_payloads import render_message_payload_summary
 
 _SESSION_CHECKPOINT_HEADER = "[Session Checkpoint]"
@@ -27,7 +27,7 @@ def estimate_history_tokens(history: list[dict[str, Any]], *, model: str | None 
             max_reasoning_chars=None,
             max_tool_args_chars=None,
         )
-        total += estimate_content_tokens(rendered, model=model) + 4
+        total += count_content_tokens(rendered, model=model) + 4
     return total
 
 

@@ -2,44 +2,26 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from hal.context.compiler import ContextCompiler, SessionTurnRequest
-from hal.context.token_budget import rough_tokens_from_chars
+from hal.context.token_counter import (
+    count_message_tokens,
+    count_messages_tokens,
+    count_prompt_tokens,
+    rough_tokens_from_chars,
+)
 from hal.domain.message_payloads import estimate_content_chars
 
 
 def _estimate_messages_tokens(model: str, messages: list[dict[str, Any]]) -> int:
     """Estimate token count for a list of messages."""
-    if not messages:
-        return 0
-
-    fallback = rough_tokens_from_chars(
-        sum(estimate_content_chars(m.get("content", "")) for m in messages)
-    )
-    try:
-        import litellm
-
-        return int(litellm.token_counter(model=model, messages=messages))
-    except Exception:
-        return fallback
+    return count_messages_tokens(messages, model=model)
 
 
 def _estimate_per_message_tokens(model: str, messages: list[dict[str, Any]]) -> list[int]:
     """Estimate token count for each message (for context inspector display)."""
-    fallback = [
-        rough_tokens_from_chars(estimate_content_chars(m.get("content", ""))) for m in messages
-    ]
-    if not messages:
-        return fallback
-
-    try:
-        import litellm
-
-        return [int(litellm.token_counter(model=model, messages=[m])) for m in messages]
-    except Exception:
-        return fallback
+    return [count_message_tokens(message, model=model) for message in messages]
 
 
 def _estimate_prompt_tokens(
@@ -48,31 +30,7 @@ def _estimate_prompt_tokens(
     tools: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Estimate input token usage for context inspection output."""
-    msg_chars = sum(estimate_content_chars(m.get("content", "")) for m in messages)
-    tools_chars = len(json.dumps(tools, ensure_ascii=False))
-    fallback = {
-        "method": "chars_div_4",
-        "messages_only": rough_tokens_from_chars(msg_chars),
-        "with_tools": rough_tokens_from_chars(msg_chars + tools_chars),
-        "tools_only": rough_tokens_from_chars(tools_chars),
-        "error": None,
-    }
-
-    try:
-        import litellm
-
-        messages_only = int(litellm.token_counter(model=model, messages=messages))
-        with_tools = int(litellm.token_counter(model=model, messages=messages, tools=tools))
-        return {
-            "method": "litellm.token_counter",
-            "messages_only": messages_only,
-            "with_tools": with_tools,
-            "tools_only": max(with_tools - messages_only, 0),
-            "error": None,
-        }
-    except Exception as e:
-        fallback["error"] = str(e)
-        return fallback
+    return count_prompt_tokens(messages=messages, tools=tools, model=model)
 
 
 async def build_context_inspection(
