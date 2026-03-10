@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.bus.events import OutboundMessage, SubagentCompleteEvent
-from hal.context.history import build_persisted_session_history
+from hal.runtime.session import build_persisted_session_history
 from hal.workspace import SessionRepository
 
 from .processing import (

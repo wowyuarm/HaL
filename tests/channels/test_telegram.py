@@ -161,6 +161,9 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
             "history_tokens": 8,
             "recall_count": 0,
             "recall_items": [],
+            "baseline_created": False,
+            "baseline_thread_slugs": ["hal-architecture", "context-system"],
+            "recalled_thread_slugs": [],
             "system_prompt_chars": 5000,
             "system_prompt_tokens": 950,
             "total_input_chars": 5200,
@@ -172,11 +175,10 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
                 "tools_only": 200,
             },
             "history_config": {
-                "history_days": 1,
-                "max_messages": 50,
-                "max_history_tokens": 0,
+                "memory_budget_tokens": 0,
+                "recall_max_total_tokens": 500,
+                "recall_max_per_item_tokens": 125,
             },
-            "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [
                 {"role": "system", "content": "S" * 4000},
                 {"role": "user", "content": "hello"},
@@ -187,13 +189,17 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
             ],
         },
     )
-    # Compact mode: shows summaries, not full messages
+    # Compact mode: shows diagnostic summary, not per-message previews
     assert "<b>HaL Context Inspector</b>" in report
-    assert "system_prompt   950 tokens" in report
-    assert "total           1,000 tokens" in report
-    assert "tokens (est.)   1,200 total = 1,000 input + 200 tools [chars_div_4]" in report
-    assert "[0] system" in report
-    assert "[1] user" in report
+    assert "<b>Budget</b>" in report
+    assert "input_tokens    1,000" in report
+    assert "system          950" in report
+    assert "baseline        frozen-session" in report
+    assert "<b>Risk</b>" in report
+    assert "using frozen session baseline" in report
+    assert "system prompt dominates current token budget" in report
+    assert "roles           system 1, user 1" in report
+    assert "largest         [0] system 800t" in report
 
 
 def test_format_context_report_compact_tolerates_non_dict_summary_entries() -> None:
@@ -209,6 +215,9 @@ def test_format_context_report_compact_tolerates_non_dict_summary_entries() -> N
             "history_tokens": 0,
             "recall_count": 0,
             "recall_items": [],
+            "baseline_created": True,
+            "baseline_thread_slugs": [],
+            "recalled_thread_slugs": [],
             "system_prompt_chars": 10,
             "system_prompt_tokens": 3,
             "total_input_chars": 10,
@@ -226,10 +235,65 @@ def test_format_context_report_compact_tolerates_non_dict_summary_entries() -> N
             ],
         }
     )
-    assert "[0] ?" in report
-    assert '0t  ""' in report
-    assert "[1] assistant" in report
-    assert '2t  "ok"' in report
+    assert "roles           ? 1, assistant 1" in report
+    assert "largest         [1] assistant 2t" in report
+
+
+def test_format_context_report_full_includes_detailed_sections() -> None:
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    report = ch._format_context_report(
+        {
+            "channel": "telegram",
+            "chat_id": "1",
+            "model": "test-model",
+            "mode": "collab",
+            "session_key": "telegram:1",
+            "history_message_count": 1,
+            "history_chars": 12,
+            "history_tokens": 8,
+            "recall_count": 3,
+            "recall_items": [
+                {"source": "a.md", "heading": "A", "score": 0.90, "source_type": "raw"},
+                {"source": "b.md", "heading": "B", "score": 0.80, "source_type": "raw"},
+                {"source": "c.md", "heading": "C", "score": 0.70, "source_type": "raw"},
+            ],
+            "baseline_created": True,
+            "baseline_thread_slugs": ["alpha"],
+            "recalled_thread_slugs": ["alpha", "beta"],
+            "system_prompt_chars": 5000,
+            "system_prompt_tokens": 950,
+            "total_input_chars": 5200,
+            "total_input_tokens": 1000,
+            "token_estimate": {
+                "method": "chars_div_4",
+                "messages_only": 1000,
+                "with_tools": 1200,
+                "tools_only": 200,
+            },
+            "history_config": {
+                "memory_budget_tokens": 0,
+                "recall_max_total_tokens": 500,
+                "recall_max_per_item_tokens": 125,
+                "session_scoped": True,
+            },
+            "messages": [
+                {"role": "system", "content": "S" * 4000},
+                {"role": "user", "content": "hello"},
+            ],
+            "message_summaries": [
+                {"role": "system", "chars": 4000, "tokens": 800, "preview": "S" * 80 + "…"},
+                {"role": "user", "chars": 5, "tokens": 2, "preview": "hello"},
+            ],
+        },
+        full_messages=True,
+    )
+    assert "(full)" in report
+    assert "<b>Context Size</b>" in report
+    assert 'a.md | "A" | 0.90 raw' in report
+    assert 'c.md | "C" | 0.70 raw' in report
+    assert "[0] system" in report
+    assert "<b>Debug Meta</b>" in report
+    assert "session_key     telegram:1" in report
 
 
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
@@ -695,11 +759,10 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
                 "tools_only": 11,
             },
             "history_config": {
-                "history_days": 1,
-                "max_messages": 50,
-                "max_history_tokens": 0,
+                "memory_budget_tokens": 0,
+                "recall_max_total_tokens": 500,
+                "recall_max_per_item_tokens": 125,
             },
-            "history_window": [{"date": "2026-02-22", "exists": True}],
             "latest_metrics": {
                 "timestamp": "2026-02-22T10:00:00",
                 "first_prompt_tokens": 100,
@@ -740,7 +803,8 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
     first_call = msg.reply_text.await_args_list[0]
     first_chunk = first_call.args[0]
     assert "HaL Context Inspector" in first_chunk
-    assert "Context Size" in first_chunk
+    assert "Budget" in first_chunk
+    assert "Risk" in first_chunk
     # Verify HTML parse_mode is used
     assert first_call.kwargs.get("parse_mode") == "HTML"
 
@@ -769,11 +833,10 @@ async def test_on_context_full_mode_parses_message() -> None:
                 "tools_only": 0,
             },
             "history_config": {
-                "history_days": 1,
-                "max_messages": 50,
-                "max_history_tokens": 0,
+                "memory_budget_tokens": 0,
+                "recall_max_total_tokens": 500,
+                "recall_max_per_item_tokens": 125,
             },
-            "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [{"role": "system", "content": "sys"}],
             "message_summaries": [{"role": "system", "chars": 3, "tokens": 1, "preview": "sys"}],
         }
@@ -823,11 +886,10 @@ async def test_on_context_full_flag_without_message_uses_default_text() -> None:
                 "tools_only": 0,
             },
             "history_config": {
-                "history_days": 1,
-                "max_messages": 50,
-                "max_history_tokens": 0,
+                "memory_budget_tokens": 0,
+                "recall_max_total_tokens": 500,
+                "recall_max_per_item_tokens": 125,
             },
-            "history_window": [{"date": "2026-02-22", "exists": True}],
             "messages": [{"role": "system", "content": "sys"}],
             "message_summaries": [{"role": "system", "chars": 3, "tokens": 1, "preview": "sys"}],
         }

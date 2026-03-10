@@ -14,10 +14,24 @@ from hal.context.message_building import (
     assemble_message_sequence,
     build_session_baseline_message,
     build_system_message,
+    copy_history_without_session_baseline,
 )
 from hal.context.token_budget import trim_text_to_token_budget
 
 _MAX_COMPACTION_PASSES = 3
+
+
+def build_persisted_session_history(
+    *,
+    working_set_messages: list[dict[str, object]],
+    final_content: str,
+    include_final_assistant: bool,
+) -> list[dict[str, object]]:
+    """Build next in-memory session history from working-set messages and final output."""
+    history = copy_history_without_session_baseline(working_set_messages)
+    if include_final_assistant:
+        history.append({"role": "assistant", "content": final_content})
+    return history
 
 
 def _estimate_history_tokens(history: list[dict[str, object]], *, model: str | None) -> int:

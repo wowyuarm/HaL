@@ -490,6 +490,7 @@ class AgentEngine:
             chat_id=chat_id,
             session_key=session_key,
             session_history=self._get_session_history(session_key),
+            existing_baseline=self._get_session_baseline(session_key),
             current_message=current_message,
             mode=PROCESSING_MODE,
         )

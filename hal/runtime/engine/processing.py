@@ -9,7 +9,6 @@ from loguru import logger
 
 from hal.bus.events import OutboundMessage
 from hal.context.compiler import SessionTurnRequest
-from hal.context.history import build_persisted_session_history
 from hal.context.metrics import (
     USAGE_SOURCE_NONE,
     USAGE_SOURCE_PROVIDER,
@@ -18,6 +17,7 @@ from hal.context.metrics import (
 from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
 from hal.domain.message_payloads import estimate_content_chars
 from hal.runtime.loop import run_tool_loop
+from hal.runtime.session import build_persisted_session_history
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
 _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"

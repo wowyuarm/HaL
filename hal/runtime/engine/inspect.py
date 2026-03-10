@@ -6,7 +6,6 @@ import json
 from typing import Any
 
 from hal.context.compiler import ContextCompiler, SessionTurnRequest
-from hal.context.history import load_history_for_context
 from hal.context.token_budget import rough_tokens_from_chars
 from hal.domain.message_payloads import estimate_content_chars
 
@@ -92,23 +91,14 @@ async def build_context_inspection(
     chat_id: str,
     session_key: str | None = None,
     session_history: list[dict[str, object]] | None = None,
+    existing_baseline: str | None = None,
     current_message: str,
     mode: str,
 ) -> dict[str, Any]:
     """Build inspect_context payload without mutating memory state."""
     hc = history_config
     resolved_model = provider.resolve_model(model)
-    loaded_history = load_history_for_context(
-        session_history=session_history,
-        memory=memory,
-        history_config=hc,
-        channel=channel,
-        chat_id=chat_id,
-        token_model=resolved_model,
-    )
-    history = loaded_history.messages
-    using_session_history = loaded_history.using_session_history
-    history_window = loaded_history.history_window
+    history = list(session_history) if session_history is not None else []
 
     compiler = ContextCompiler(
         context_builder=context_builder,
@@ -128,7 +118,7 @@ async def build_context_inspection(
             memory_budget_tokens=(hc.memory_budget_tokens or None),
             recall_max_total_tokens=hc.recall_max_total_tokens,
             recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-            existing_baseline=None,
+            existing_baseline=existing_baseline,
         )
     )
     messages = compiled.messages
@@ -197,18 +187,20 @@ async def build_context_inspection(
         "history_tokens": history_tokens,
         "recall_count": len(recall_items),
         "recall_items": recall_items,
+        "baseline_created": compiled.baseline_created,
+        "baseline_thread_slugs": sorted(compiled.baseline_thread_slugs),
+        "recalled_thread_slugs": sorted(compiled.recalled_thread_slugs),
         "system_prompt_chars": sys_chars,
         "system_prompt_tokens": system_prompt_tokens,
         "total_input_chars": sum(estimate_content_chars(m.get("content", "")) for m in messages),
         "total_input_tokens": token_estimate.get("messages_only", 0),
         "history_config": {
-            "history_days": hc.history_days,
-            "max_messages": hc.max_messages,
-            "max_history_tokens": hc.max_history_tokens,
-            "session_scoped": using_session_history,
+            "memory_budget_tokens": hc.memory_budget_tokens,
+            "recall_max_total_tokens": hc.recall_max_total_tokens,
+            "recall_max_per_item_tokens": hc.recall_max_per_item_tokens,
+            "session_scoped": session_history is not None,
         },
         "session_key": session_key,
-        "history_window": history_window,
         "token_estimate": token_estimate,
     }
 
