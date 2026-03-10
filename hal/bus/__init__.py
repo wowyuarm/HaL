@@ -7,7 +7,6 @@ from hal.bus.events import (
     OutboundMessage,
     ReminderEvent,
     SubagentCompleteEvent,
-    SystemStartupEvent,
     ToolCallEvent,
 )
 from hal.bus.queue import MessageBus
@@ -19,7 +18,6 @@ __all__ = [
     "OutboundMessage",
     "ToolCallEvent",
     "ReminderEvent",
-    "SystemStartupEvent",
     "SubagentCompleteEvent",
     "MessageInjectEvent",
 ]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -259,16 +258,82 @@ class TestDispatch:
         assert out is not None
         assert out.content.startswith("Error calling LLM:")
 
-    def test_session_rotates_after_idle_timeout(self, engine):
-        engine._engine_config.session.idle_timeout_s = 1.0
+    def test_session_reuses_existing_state_without_idle_rotation(self, engine):
         key = "telegram:c1"
         first = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
         first_id = first.session_id
-        first.last_activity_at -= timedelta(seconds=2)
 
         second = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
-        assert second.session_id != first_id
-        assert engine.memory.record_event.call_count >= 3
+        assert second.session_id == first_id
+        assert engine.memory.record_event.call_count == 1
+
+    def test_stop_persists_active_sessions_instead_of_ending_them(self, engine, workspace):
+        key = "telegram:c1"
+        state = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
+
+        engine.stop()
+
+        persisted = (workspace / "runtime" / "sessions" / "active_sessions.json").read_text(
+            encoding="utf-8"
+        )
+        assert state.session_id in persisted
+        assert not any(
+            call.kwargs.get("payload", {}).get("reason") == "engine_stop"
+            for call in engine.memory.record_event.call_args_list
+        )
+
+    def test_restores_active_sessions_from_workspace(self, bus, mock_provider, workspace):
+        sessions_dir = workspace / "runtime" / "sessions"
+        sessions_dir.mkdir(parents=True)
+        (sessions_dir / "active_sessions.json").write_text(
+            """
+{
+  "telegram:c1": {
+    "session_id": "s_existing",
+    "channel": "telegram",
+    "chat_id": "c1",
+    "started_at": "2026-03-10T10:00:00",
+    "last_activity_at": "2026-03-10T10:05:00",
+    "baseline_context": "baseline",
+    "baseline_thread_slugs": ["alpha"],
+    "touched_threads": ["alpha"],
+    "context_hint_keys": ["k1"]
+  }
+}
+""".strip(),
+            encoding="utf-8",
+        )
+
+        with (
+            patch("hal.runtime.engine.ContextBuilder") as mock_ctx,
+            patch("hal.runtime.engine.MemoryManager") as mock_mem,
+            patch("hal.runtime.engine.SubagentManager"),
+        ):
+            builder_instance = mock_ctx.return_value
+            builder_instance.build_messages.return_value = [
+                {"role": "system", "content": "You are a test agent."},
+            ]
+            builder_instance.build_system_prompt.return_value = "You are a test agent."
+            builder_instance.build_dynamic_context_block.return_value = "<context>ctx</context>"
+            builder_instance.build_session_baseline_message.side_effect = lambda baseline: {
+                "role": "user",
+                "content": f"[Session Baseline Context]\n{baseline}",
+            }
+            builder_instance.registry = MagicMock()
+            builder_instance.registry.thread_snapshot.return_value = []
+            builder_instance.registry.skill_snapshot.return_value = []
+
+            restored = AgentEngine(
+                bus=bus,
+                provider=mock_provider,
+                workspace=workspace,
+                memory_manager=mock_mem.return_value,
+            )
+
+        state = restored._ensure_session_state(session_key="telegram:c1", channel="telegram", chat_id="c1")
+        assert state.session_id == "s_existing"
+        assert state.baseline_context == "baseline"
+        assert state.baseline_thread_slugs == {"alpha"}
 
     async def test_process_uses_in_memory_session_history(self, engine):
         engine.context.build_messages.side_effect = (  # type: ignore[method-assign]

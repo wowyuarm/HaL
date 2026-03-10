@@ -182,6 +182,7 @@ async def _handle_brief_command(
         engine._run_session_brief(msg.session_key, user_prompt=user_prompt)
     )
     engine._clear_session_snapshot(msg.session_key)
+    engine._persist_active_sessions()
 
     return OutboundMessage(
         channel=msg.channel,
@@ -206,6 +207,7 @@ async def _handle_drop_command(*, engine: Any, msg: Any, session_state: Any) -> 
     # Remove session state so next message starts fresh
     engine._session_states.pop(msg.session_key, None)
     engine._clear_session_snapshot(msg.session_key)
+    engine._persist_active_sessions()
 
     return OutboundMessage(
         channel=msg.channel,

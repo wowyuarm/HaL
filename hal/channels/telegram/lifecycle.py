@@ -10,8 +10,6 @@ from pathlib import Path
 from loguru import logger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from hal.bus.events import SystemStartupEvent
-
 from .constants import BOT_COMMANDS, BOT_KEEPALIVE_SLEEP_S, GIT_LOG_TIMEOUT_S
 
 
@@ -141,7 +139,7 @@ class TelegramLifecycleMixin:
         )
 
     async def _send_startup_notification(self) -> None:
-        """Send startup notification and emit startup event."""
+        """Send startup notification to the configured owner, if available."""
         owner_id = self._resolve_owner_id()
         if not owner_id or not self._app:
             return
@@ -171,33 +169,6 @@ class TelegramLifecycleMixin:
             logger.info(f"Startup notification sent to {owner_id}")
         except Exception as e:
             logger.warning(f"Failed to send startup notification: {e}")
-
-        if self.memory_manager:
-            if update_info:
-                changes = update_info.get("changes", "")
-                injection = (
-                    f"[System: HaL restarted after self-update. "
-                    f"Now running {commit_info}. Changes: {changes}]"
-                )
-            else:
-                injection = f"[System: HaL service started. Now running {commit_info}.]"
-            self.memory_manager.record_event(
-                session_id=f"startup_{commit_info.split()[0] if commit_info else 'unknown'}",
-                event_type="system_startup",
-                channel="telegram",
-                chat_id=owner_id,
-                payload={"content": injection},
-            )
-            logger.info("Startup context written to event log")
-
-        await self.bus.emit(
-            SystemStartupEvent(
-                channel="telegram",
-                chat_id=owner_id,
-                commit_info=commit_info,
-                update_info=update_info if update_info else None,
-            )
-        )
 
     def _resolve_owner_id(self) -> str | None:
         """Extract numeric Telegram user ID from allowlist."""

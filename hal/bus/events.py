@@ -100,16 +100,6 @@ class SubagentCompleteEvent(Event, SubagentArtifactMetadata[str], SubagentUsageM
     session_key: str | None = None
 
 
-@dataclass
-class SystemStartupEvent(Event):
-    """HaL service startup signal for channels/integrations."""
-
-    channel: str
-    chat_id: str
-    commit_info: str
-    update_info: dict[str, str] | None = None
-
-
 __all__ = [
     "Event",
     "InboundMessage",
@@ -118,5 +108,4 @@ __all__ = [
     "ReminderEvent",
     "MessageInjectEvent",
     "SubagentCompleteEvent",
-    "SystemStartupEvent",
 ]

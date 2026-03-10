@@ -91,7 +91,7 @@ Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider
 
 ### Message Bus (`hal/bus/`)
 
-Typed events: `InboundMessage`, `OutboundMessage`, `ToolCallEvent`, `ReminderEvent`, `MessageInjectEvent`, `SubagentCompleteEvent`, `SystemStartupEvent`.
+Typed events: `InboundMessage`, `OutboundMessage`, `ToolCallEvent`, `ReminderEvent`, `MessageInjectEvent`, `SubagentCompleteEvent`.
 
 ### Configuration (`hal/infra/config/`)
 

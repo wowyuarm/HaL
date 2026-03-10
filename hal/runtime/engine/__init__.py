@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -63,6 +65,7 @@ if TYPE_CHECKING:
 
 
 PROCESSING_MODE = "default"
+ACTIVE_SESSIONS_PATH = Path("runtime/sessions/active_sessions.json")
 
 
 class AgentEngine:
@@ -156,6 +159,7 @@ class AgentEngine:
 
         self._running = False
         self._register_default_tools()
+        self._restore_active_sessions()
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools via the shared factory."""
@@ -204,15 +208,7 @@ class AgentEngine:
 
     def stop(self) -> None:
         """Stop the engine."""
-        for session_key, state in self._session_states.items():
-            self.memory.record_event(
-                session_id=state.session_id,
-                event_type="session_end",
-                channel=state.channel,
-                chat_id=state.chat_id,
-                payload={"reason": "engine_stop"},
-            )
-            self._clear_session_snapshot(session_key)
+        self._persist_active_sessions()
         self._running = False
         self._background_subscribers.close()
         self._background_resume.close()
@@ -253,7 +249,7 @@ class AgentEngine:
     def _ensure_session_state(
         self, *, session_key: str, channel: str, chat_id: str
     ) -> SessionState:
-        """Return active session state, rotating on idle timeout."""
+        """Return the active session state for a channel/chat scope."""
         return ensure_session_state(self, session_key=session_key, channel=channel, chat_id=chat_id)
 
     def _touch_session(self, session_key: str) -> None:
@@ -281,6 +277,7 @@ class AgentEngine:
         state.baseline_context = baseline_context
         if thread_slugs:
             state.baseline_thread_slugs.update(thread_slugs)
+        self._persist_active_sessions()
 
     def _get_session_baseline_threads(self, session_key: str) -> set[str]:
         """Return thread slugs auto-loaded into the session baseline."""
@@ -312,7 +309,7 @@ class AgentEngine:
         return new_keys
 
     async def _tick_session_lifecycle(self) -> None:
-        """Clean up finished brief tasks and finalize idle sessions."""
+        """Clean up finished brief tasks after explicit session closure."""
         await tick_session_lifecycle(self)
 
     async def _start_session_brief(self, session_key: str, *, user_prompt: str = "") -> None:
@@ -376,6 +373,7 @@ class AgentEngine:
         if state is None:
             return
         state.history = list(history)
+        self._persist_active_sessions()
 
     def _build_session_snapshot_messages(
         self,
@@ -461,6 +459,70 @@ class AgentEngine:
     def _clear_session_snapshot(self, session_key: str) -> None:
         """Delete persisted/cached background-resume snapshot for one session key."""
         self._background_resume.clear_session_snapshot(session_key)
+
+    def _active_sessions_path(self) -> Path:
+        """Return the workspace path used to persist active session metadata."""
+        return self.workspace / ACTIVE_SESSIONS_PATH
+
+    def _persist_active_sessions(self) -> None:
+        """Persist resumable session metadata to the workspace filesystem."""
+        payload = {
+            session_key: {
+                "session_id": state.session_id,
+                "channel": state.channel,
+                "chat_id": state.chat_id,
+                "started_at": state.started_at.isoformat(),
+                "last_activity_at": state.last_activity_at.isoformat(),
+                "baseline_context": state.baseline_context,
+                "baseline_thread_slugs": sorted(state.baseline_thread_slugs),
+                "touched_threads": sorted(state.touched_threads),
+                "context_hint_keys": sorted(state.context_hint_keys),
+            }
+            for session_key, state in self._session_states.items()
+            if state.brief_task is None
+        }
+        path = self._active_sessions_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+
+    def _restore_active_sessions(self) -> None:
+        """Restore persisted session metadata from the workspace filesystem."""
+        path = self._active_sessions_path()
+        if not path.exists():
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Failed to restore active sessions: {e}")
+            return
+        if not isinstance(raw, dict):
+            logger.warning("Ignoring malformed active sessions payload")
+            return
+
+        for session_key, item in raw.items():
+            if not isinstance(session_key, str) or not isinstance(item, dict):
+                continue
+            try:
+                self._session_states[session_key] = SessionState(
+                    session_id=str(item["session_id"]),
+                    channel=str(item["channel"]),
+                    chat_id=str(item["chat_id"]),
+                    started_at=self._parse_session_datetime(item.get("started_at")),
+                    last_activity_at=self._parse_session_datetime(item.get("last_activity_at")),
+                    baseline_context=item.get("baseline_context"),
+                    baseline_thread_slugs=set(item.get("baseline_thread_slugs") or []),
+                    touched_threads=set(item.get("touched_threads") or []),
+                    context_hint_keys=set(item.get("context_hint_keys") or []),
+                )
+            except Exception as e:
+                logger.warning(f"Skipping invalid persisted session {session_key}: {e}")
+
+    @staticmethod
+    def _parse_session_datetime(value: object) -> datetime:
+        """Parse persisted ISO timestamps for restored session metadata."""
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        return datetime.now()
 
     async def queue_background_completion(self, event: "SubagentCompleteEvent") -> None:
         """Queue detached subagent completions and continue same-session loop when idle."""

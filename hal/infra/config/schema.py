@@ -172,7 +172,6 @@ class MemorySearchConfig(_StrictModel):
 class SessionConfig(_StrictModel):
     """Session lifecycle and compaction configuration."""
 
-    idle_timeout_s: float = Field(default=300.0, gt=0)  # Idle timeout before session cleanup
     compaction_enabled: bool = True  # Enable in-session history compaction when budget exceeded
     compaction_token_budget: int = Field(
         default=150000, ge=1000

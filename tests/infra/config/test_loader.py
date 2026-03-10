@@ -175,7 +175,6 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.engine.context_advisor_enabled is True
 
     # Engine → session
-    assert cfg.engine.session.idle_timeout_s == 300.0
     assert cfg.engine.session.compaction_enabled is True
     assert cfg.engine.session.compaction_token_budget == 150000
     assert cfg.engine.session.compaction_recent_user_turns == 2

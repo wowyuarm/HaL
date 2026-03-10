@@ -66,32 +66,17 @@ def build_session_id(*, now: datetime | None = None) -> str:
 
 
 def ensure_session_state(engine: Any, *, session_key: str, channel: str, chat_id: str) -> Any:
-    """Return active session state, rotating on idle timeout."""
+    """Return active session state for one channel/chat scope."""
     now = datetime.now()
     state = engine._session_states.get(session_key)
     if state is not None and state.brief_task is not None:
         if state.brief_task.done():
             engine._session_states.pop(session_key, None)
             engine._clear_session_snapshot(session_key)
+            engine._persist_active_sessions()
         state = None
 
-    timeout_s = max(float(engine._engine_config.session.idle_timeout_s), 1.0)
-    idle_timed_out = False
-    if state is not None:
-        if state.brief_task is None:
-            idle_timed_out = (now - state.last_activity_at).total_seconds() > timeout_s
-
-    if state is None or idle_timed_out:
-        if state is not None:
-            engine.memory.record_event(
-                session_id=state.session_id,
-                event_type="session_end",
-                channel=state.channel,
-                chat_id=state.chat_id,
-                payload={"reason": "idle_timeout"},
-            )
-            engine._clear_session_snapshot(session_key)
-
+    if state is None:
         state = engine._SessionStateType(
             session_id=build_session_id(now=now),
             channel=channel,
@@ -106,6 +91,7 @@ def ensure_session_state(engine: Any, *, session_key: str, channel: str, chat_id
             channel=channel,
             chat_id=chat_id,
         )
+        engine._persist_active_sessions()
 
     return state
 
@@ -153,21 +139,12 @@ def resolve_session_compaction_settings(engine_config: object) -> SessionCompact
 
 
 async def tick_session_lifecycle(engine: Any) -> None:
-    """Clean up finished brief tasks and finalize idle sessions."""
-    now = datetime.now()
-    timeout_s = max(float(engine._engine_config.session.idle_timeout_s), 1.0)
-
+    """Clean up finished brief tasks after explicit session closure."""
     for session_key, state in list(engine._session_states.items()):
-        # 1. Clean up finished brief tasks
         if state.brief_task is not None:
             if state.brief_task.done():
                 engine._session_states.pop(session_key, None)
-            continue
-        # 2. Idle timeout → record session_end, clean up
-        if (now - state.last_activity_at).total_seconds() <= timeout_s:
-            continue
-        reason = "idle_timeout" if state.touched_threads else "idle_timeout_no_threads"
-        _finalize_idle_session(engine, session_key, state, reason=reason)
+                engine._persist_active_sessions()
 
 
 async def maybe_compact_session_history(
@@ -206,19 +183,6 @@ async def maybe_compact_session_history(
         passes=passes,
     )
     return compacted
-
-
-def _finalize_idle_session(engine: Any, session_key: str, state: Any, *, reason: str) -> None:
-    """Close an idle session and clean up."""
-    engine.memory.record_event(
-        session_id=state.session_id,
-        event_type="session_end",
-        channel=state.channel,
-        chat_id=state.chat_id,
-        payload={"reason": reason},
-    )
-    engine._clear_session_snapshot(session_key)
-    engine._session_states.pop(session_key, None)
 
 
 async def _compact_history_to_budget(

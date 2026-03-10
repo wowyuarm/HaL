@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hal.bus.events import OutboundMessage, SystemStartupEvent
+from hal.bus.events import OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.channels.telegram import TelegramChannel, _markdown_to_telegram_html
 from hal.infra.config.schema import TelegramConfig
@@ -77,7 +77,6 @@ def _build_startup_notification_channel() -> tuple[TelegramChannel, MagicMock, A
     cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
     memory_manager = MagicMock()
     channel = TelegramChannel(cfg, MessageBus(), memory_manager=memory_manager)
-    channel.bus.emit = AsyncMock()  # type: ignore[method-assign]
     mock_bot = AsyncMock()
     _attach_bot(channel, mock_bot)
     return channel, memory_manager, mock_bot
@@ -88,29 +87,6 @@ def _mock_git_log(monkeypatch: pytest.MonkeyPatch) -> None:
         "subprocess.run",
         lambda *a, **kw: MagicMock(returncode=0, stdout="abc1234 fix: thing"),
     )
-
-
-def _assert_startup_injection(
-    channel: TelegramChannel,
-    memory_manager: MagicMock,
-    *,
-    expected_content_fragment: str,
-    expect_update_info: bool,
-) -> None:
-    """Validate memory/event side effects of startup notification."""
-    memory_manager.record_event.assert_called_once()
-    call_kwargs = memory_manager.record_event.call_args.kwargs
-    assert call_kwargs["event_type"] == "system_startup"
-    assert expected_content_fragment in call_kwargs["payload"]["content"]
-    channel.bus.emit.assert_awaited_once()
-    event = channel.bus.emit.await_args.args[0]  # type: ignore[union-attr]
-    assert isinstance(event, SystemStartupEvent)
-    assert event.channel == "telegram"
-    assert event.chat_id == "42"
-    if expect_update_info:
-        assert event.update_info is not None
-        return
-    assert event.update_info is None
 
 
 def test_split_telegram_message_no_split() -> None:
@@ -1100,12 +1076,7 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
     assert "Changes since" in sent_text
     assert "fix: thing" in sent_text
 
-    _assert_startup_injection(
-        ch,
-        mm,
-        expected_content_fragment="self-update",
-        expect_update_info=True,
-    )
+    mm.record_event.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1126,9 +1097,4 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
     assert "HaL online" in sent_text
     assert "Changes since" not in sent_text
 
-    _assert_startup_injection(
-        ch,
-        mm,
-        expected_content_fragment="service started",
-        expect_update_info=False,
-    )
+    mm.record_event.assert_not_called()
