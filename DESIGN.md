@@ -1,45 +1,37 @@
 # Design
 
-HaL is a stateful collaboration system built around a human partner.
-It maintains persistent working context across projects and sessions,
-participates as an active collaborator, and evolves through use.
+HaL advances collaboration through threads, grounds state in files,
+and keeps humans in control.
 
-These are the project's invariants — they constrain all decisions
-and should not change as the system evolves.
+HaL 以 thread 推进协作，以文件沉淀状态，由人决定方向与边界。
+它不止于服务工作，也可以承载生活、学习与兴趣中的长期协作。
+
+These are the project's invariants. They should stay stable even as
+the system evolves.
 
 ---
 
-## 1. Filesystem is the source of truth
+## 1. Thread is the unit of collaboration
 
-Durable state lives as files and directories. Not in databases, not in
-API state, not in memory. Files are inspectable, versionable, portable.
-If it matters, it's a file.
+HaL advances work through threads, not isolated chats. A thread carries
+the state of an ongoing collaboration across sessions and time.
+Continuity comes from thread state, not history replay.
 
-## 2. Events are append-only evidence
+## 2. Files are state, events are evidence
 
-All runtime actions become events. Upper layers derive from lower layers
-and are rebuildable. The event log is the foundation — immutable, never
-deleted, never rewritten.
+Durable state lives in files and directories. Runtime actions become
+append-only events. If something matters, it should be inspectable,
+portable, and rebuildable from the filesystem and event trail.
 
-## 3. Context is compiled, not recalled
+Context is compiled from current state, not recalled from raw chat logs.
+The goal is not to remember everything, but to keep the right working set.
 
-The working set is assembled from current state — threads, skills, memory —
-not from conversation history. "Knowing where things stand" over
-"remembering what was said."
+## 3. Human defines direction, AI advances the work
 
-## 4. Human-centric collaboration
+Human-in-the-loop is non-negotiable. The human sets goals, boundaries,
+and triggers. The AI executes, organizes, and helps distill progress.
 
-The system collaborates with humans, not replaces them. Humans define the
-work world: create threads, trigger briefs, set direction. The system
-organizes and acts within that frame.
-
-High autonomy, low overreach.
-
-## 5. Long-term progression over episodic chat
-
-The unit of work is a thread, not a conversation. Threads span sessions.
-Continuity comes from state progression — BRIEF.md, episodes, memory —
-not from history retention. Chat is the medium, not the work.
+High autonomy inside clear boundaries. No hidden takeover of direction.
 
 ---
 
@@ -47,8 +39,6 @@ not from history retention. Chat is the medium, not the work.
 
 When evaluating a change:
 
-1. Does it preserve files as the durable state source?
-2. Does it keep events append-only and lower layers rebuildable?
-3. Does it improve the compiled working set, or just expand raw history?
-4. Does it respect the human's ownership of their work world?
-5. Does it advance long-term work state, or just serve a single conversation?
+1. Does it strengthen thread-based continuity?
+2. Does it keep state in files and runtime evidence in append-only events?
+3. Does it preserve human control while letting AI act effectively inside bounds?
