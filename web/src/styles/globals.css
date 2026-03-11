@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────
+   Light Mineral — Design Tokens
+   ────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg: #F7F4EF;
+  --bg-panel: #EFECE6;
+  --bg-elevated: #FFFFFF;
+  --bg-inset: #E8E4DD;
+
+  /* Borders */
+  --border: #D4CFC6;
+  --border-subtle: #E2DED7;
+  --border-accent: #4A7A74;
+
+  /* Text */
+  --text: #24211D;
+  --text-muted: #7A756D;
+  --text-on-accent: #FFFFFF;
+
+  /* Semantic colors */
+  --accent: #4A7A74;
+  --accent-subtle: #E8F0EF;
+  --human: #9A7840;
+  --human-subtle: #F5EDE0;
+  --danger: #A25248;
+  --danger-subtle: #FAEAE8;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Transitions */
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+}
+
+/* ──────────────────────────────────────────────
+   Base layer
+   ────────────────────────────────────────────── */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    min-height: 100%;
+  }
+
+  body {
+    min-height: 100vh;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(74, 122, 116, 0.18);
+    color: var(--text);
+  }
+}
