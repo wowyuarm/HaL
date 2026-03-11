@@ -501,6 +501,8 @@ def test_get_extension_prefers_mime_type_mapping() -> None:
     ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
     assert ch._get_extension("image", "image/png") == ".png"
     assert ch._get_extension("voice", "audio/ogg") == ".ogg"
+    assert ch._get_extension("file", "application/pdf") == ".pdf"
+    assert ch._get_extension("file", None, "中文模板.pdf") == ".pdf"
 
 
 def test_get_extension_falls_back_to_type_map() -> None:
@@ -524,9 +526,15 @@ class _Chat:
 
 
 class _Media:
-    def __init__(self, file_id: str, mime_type: str | None = None):
+    def __init__(
+        self,
+        file_id: str,
+        mime_type: str | None = None,
+        file_name: str | None = None,
+    ):
         self.file_id = file_id
         self.mime_type = mime_type
+        self.file_name = file_name
 
 
 class _Message:
@@ -668,6 +676,99 @@ async def test_on_message_voice_transcribes_when_available(
 
     kwargs = ch._handle_message.await_args.kwargs
     assert "[transcription: hello]" in kwargs["content"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_document_keeps_metadata_without_extracting_content(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DummyFile:
+        async def download_to_drive(self, path: str) -> None:
+            Path(path).write_bytes(b"%PDF-1.5")
+
+    class DummyBot:
+        async def get_file(self, file_id: str):
+            return DummyFile()
+
+    class DummyApp:
+        def __init__(self):
+            self.bot = DummyBot()
+
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    ch._app = DummyApp()  # type: ignore[attr-defined]
+
+    ch._start_typing = MagicMock()  # type: ignore[method-assign]
+    ch._handle_message = AsyncMock()  # type: ignore[method-assign]
+
+    update = _Update(
+        message=_Message(
+            chat_id=123,
+            caption="模板",
+            document=_Media(
+                file_id="doc-file-id-0123456789",
+                mime_type="application/pdf",
+                file_name="report-template.pdf",
+            ),
+        ),
+        user=_User(3),
+    )
+
+    await ch._on_message(update, context=None)  # type: ignore[arg-type]
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert "模板" in kwargs["content"]
+    assert "name=report-template.pdf" in kwargs["content"]
+    assert "mime=application/pdf" in kwargs["content"]
+    assert "ext=.pdf" in kwargs["content"]
+    media_path = Path(kwargs["media"][0])
+    assert media_path.exists()
+    assert media_path.suffix == ".pdf"
+
+
+@pytest.mark.asyncio
+async def test_on_message_document_preserves_chinese_file_name_metadata(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class DummyFile:
+        async def download_to_drive(self, path: str) -> None:
+            Path(path).write_bytes(b"%PDF-1.5")
+
+    class DummyBot:
+        async def get_file(self, file_id: str):
+            return DummyFile()
+
+    class DummyApp:
+        def __init__(self):
+            self.bot = DummyBot()
+
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    ch._app = DummyApp()  # type: ignore[attr-defined]
+
+    ch._start_typing = MagicMock()  # type: ignore[method-assign]
+    ch._handle_message = AsyncMock()  # type: ignore[method-assign]
+
+    update = _Update(
+        message=_Message(
+            chat_id=123,
+            document=_Media(
+                file_id="doc-cn-file-id-0123456789",
+                mime_type="application/pdf",
+                file_name="报告模板.pdf",
+            ),
+        ),
+        user=_User(4),
+    )
+
+    await ch._on_message(update, context=None)  # type: ignore[arg-type]
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert "name=报告模板.pdf" in kwargs["content"]
+    assert "mime=application/pdf" in kwargs["content"]
+    assert "ext=.pdf" in kwargs["content"]
+    media_path = Path(kwargs["media"][0])
+    assert media_path.exists()
+    assert media_path.name.startswith("doc-cn-file-id-0")
+    assert media_path.suffix == ".pdf"
 
 
 @pytest.mark.asyncio

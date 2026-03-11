@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 from pathlib import Path
 
 from loguru import logger
@@ -24,6 +25,16 @@ _APPEND_KEY_META_KEY = "append_key"
 _APPEND_RESET_META_KEY = "append_reset"
 _APPEND_SEPARATOR_META_KEY = "append_separator"
 _EMPTY_MESSAGE_SENTINEL = "[empty message]"
+_MEDIA_MIME_EXTENSION_MAP = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+}
+_MEDIA_TYPE_FALLBACK_EXTENSIONS = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
+_NON_AUDIO_MEDIA_META_SEPARATOR = " | "
 
 
 class TelegramMessagingMixin:
@@ -44,22 +55,27 @@ class TelegramMessagingMixin:
             return "audio"
         return "document"
 
-    def _get_extension(self, media_type: str, mime_type: str | None) -> str:
+    def _get_extension(
+        self,
+        media_type: str,
+        mime_type: str | None,
+        file_name: str | None = None,
+    ) -> str:
         """Get file extension based on media type."""
-        if mime_type:
-            ext_map = {
-                "image/jpeg": ".jpg",
-                "image/png": ".png",
-                "image/gif": ".gif",
-                "audio/ogg": ".ogg",
-                "audio/mpeg": ".mp3",
-                "audio/mp4": ".m4a",
-            }
-            if mime_type in ext_map:
-                return ext_map[mime_type]
+        if file_name:
+            file_suffix = Path(file_name).suffix.lower()
+            if file_suffix:
+                return file_suffix
 
-        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
-        return type_map.get(media_type, "")
+        if mime_type:
+            mapped_extension = _MEDIA_MIME_EXTENSION_MAP.get(mime_type)
+            if mapped_extension:
+                return mapped_extension
+            guessed_extension = mimetypes.guess_extension(mime_type, strict=False) or ""
+            if guessed_extension:
+                return guessed_extension.lower()
+
+        return _MEDIA_TYPE_FALLBACK_EXTENSIONS.get(media_type, "")
 
     async def _send_text_chunk(self, chat_id: int, chunk: str) -> int | None:
         """Send one text chunk and return Telegram message_id when available."""
@@ -345,7 +361,9 @@ class TelegramMessagingMixin:
 
         try:
             file = await self._app.bot.get_file(media_file.file_id)
-            ext = self._get_extension(media_type, getattr(media_file, "mime_type", None))
+            mime_type = getattr(media_file, "mime_type", None)
+            file_name = getattr(media_file, "file_name", None)
+            ext = self._get_extension(media_type, mime_type, file_name)
 
             media_dir = Path.home() / ".hal" / "media" / "received"
             media_dir.mkdir(parents=True, exist_ok=True)
@@ -354,15 +372,36 @@ class TelegramMessagingMixin:
             await file.download_to_drive(str(file_path))
 
             media_paths.append(str(file_path))
-            content_parts.append(await self._build_media_content(media_type, file_path))
+            content_parts.append(
+                await self._build_media_content(
+                    media_type,
+                    file_path,
+                    file_name=file_name,
+                    mime_type=mime_type,
+                )
+            )
             logger.debug(f"Downloaded {media_type} to {file_path}")
         except Exception as e:
             logger.error(f"Failed to download media: {e}")
             content_parts.append(f"[{media_type}: download failed]")
 
-    async def _build_media_content(self, media_type: str, file_path: Path) -> str:
+    async def _build_media_content(
+        self,
+        media_type: str,
+        file_path: Path,
+        *,
+        file_name: str | None = None,
+        mime_type: str | None = None,
+    ) -> str:
         if media_type not in {"voice", "audio"}:
-            return f"[{media_type}: {file_path}]"
+            details = [f"{media_type}: {file_path}"]
+            if file_name:
+                details.append(f"name={file_name}")
+            if mime_type:
+                details.append(f"mime={mime_type}")
+            if file_path.suffix:
+                details.append(f"ext={file_path.suffix.lower()}")
+            return f"[{_NON_AUDIO_MEDIA_META_SEPARATOR.join(details)}]"
 
         from hal.infra.providers.transcription import GroqTranscriptionProvider
 
