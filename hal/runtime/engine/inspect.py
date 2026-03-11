@@ -138,6 +138,7 @@ async def build_context_inspection(
         "chat_id": chat_id,
         "mode": mode,
         "model": model,
+        "tools_count": len(tools),
         "messages": messages,
         "message_summaries": message_summaries,
         "history_message_count": len(history),

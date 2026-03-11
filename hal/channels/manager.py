@@ -78,6 +78,7 @@ class ChannelManager:
                     self.config.channels.web,
                     self.bus,
                     workspace_layout=WorkspaceLayout(self.config.workspace_path),
+                    context_inspector=self.context_inspector,
                 )
                 logger.info("Web channel enabled")
             except ImportError as e:

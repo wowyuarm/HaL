@@ -12,7 +12,7 @@ import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
 import { ContextSummary } from "@/components/context/context-summary";
 import { ThreadList } from "@/components/thread/thread-list";
-import { useHalStore } from "@/lib/store";
+import { useHalStore, type ClientEnvelope } from "@/lib/store";
 import { useWebSocket } from "@/lib/ws";
 
 export default function App() {
@@ -34,19 +34,18 @@ export default function App() {
   };
 
   const handleSend = (content: string) => {
-    let ok: boolean;
-
     if (content.startsWith("/")) {
-      // Slash command
-      const name = content.slice(1).split(/\s+/)[0];
-      if (!name) return;
-      ok = send({ type: "command", name: name as "brief" | "drop" | "context", args: {} });
-    } else {
-      // Regular message
-      ok = send({ type: "message", content });
+      const parsed = parseSlashCommand(content);
+      if (parsed) {
+        const ok = send(parsed);
+        if (ok) {
+          useHalStore.getState().addUserMessage(content);
+        }
+        return;
+      }
     }
 
-    // Only insert optimistic message if the socket accepted the frame.
+    const ok = send({ type: "message", content });
     if (ok) {
       useHalStore.getState().addUserMessage(content);
     }
@@ -117,4 +116,17 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function parseSlashCommand(content: string): ClientEnvelope | null {
+  const trimmed = content.trim();
+  const [, name = "", rawArgs = ""] = trimmed.match(/^\/(\S+)(?:\s+(.*))?$/) ?? [];
+  if (name !== "brief" && name !== "drop" && name !== "context") {
+    return null;
+  }
+  return {
+    type: "command" as const,
+    name,
+    args: rawArgs ? { raw: rawArgs } : {},
+  };
 }

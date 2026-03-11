@@ -59,8 +59,6 @@ class TelegramContextMixin:
     def _format_context_report(
         self,
         data: dict[str, Any],
-        *,
-        full_messages: bool = False,
     ) -> str:
         """Format inspect_context() payload as Telegram HTML."""
-        return format_context_report(data, full_messages=full_messages)
+        return format_context_report(data)

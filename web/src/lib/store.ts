@@ -30,7 +30,7 @@ export type EngineStatus = "idle" | "processing";
 
 export interface SnapshotPayload {
   type: "snapshot";
-  session_id: string;
+  session_id: string | null;
   active_thread: string | null;
   threads: Thread[];
   history: Message[];

@@ -7,8 +7,12 @@ spec (see docs/specs/2026-03-11-web-client-design.md, section "WebSocket protoco
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from hal.bus.events import OutboundMessage
 
@@ -37,7 +41,7 @@ def serialize_outbound(msg: OutboundMessage) -> dict[str, Any]:
     """
     return {
         "type": "message",
-        "id": msg.metadata.get("message_id", ""),
+        "id": _outbound_message_id(msg),
         "role": "assistant",
         "content": msg.content,
         "ts": datetime.now(tz=timezone.utc).isoformat(),
@@ -116,6 +120,16 @@ def build_context_summary(
     }
 
 
+def build_history(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize persisted session snapshot messages into web wire history."""
+    history: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        normalized = _normalize_history_message(message, index=index)
+        if normalized is not None:
+            history.append(normalized)
+    return history
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -136,3 +150,130 @@ def _serialize_thread_entry(entry: object) -> dict[str, Any]:
         "scope": getattr(entry, "scope", ""),
         "last_active": getattr(entry, "updated_at", None),
     }
+
+
+def _outbound_message_id(msg: OutboundMessage) -> str:
+    message_id = str(msg.metadata.get("message_id", "")).strip()
+    if message_id:
+        return message_id
+    return f"msg_{uuid4().hex}"
+
+
+def _normalize_history_message(
+    message: dict[str, Any], *, index: int
+) -> dict[str, Any] | None:
+    role = str(message.get("role", "")).strip()
+    if role not in {"user", "assistant"}:
+        return None
+
+    content = message.get("content", "")
+    if not isinstance(content, str):
+        content = str(content)
+
+    raw_tool_calls = message.get("tool_calls")
+    metadata = _normalize_history_metadata(message)
+    normalized: dict[str, Any] = {
+        "id": _history_message_id(message, index=index),
+        "role": role,
+        "content": content,
+        "ts": _normalize_timestamp(message.get("ts")),
+    }
+    if metadata:
+        normalized["metadata"] = metadata
+    elif role == "assistant" and isinstance(raw_tool_calls, list) and raw_tool_calls:
+        normalized["metadata"] = {
+            "tool_calls": [_serialize_tool_call(tool_call, idx) for idx, tool_call in enumerate(raw_tool_calls)]
+        }
+    return normalized
+
+
+def _normalize_history_metadata(message: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    tool_calls = metadata.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return dict(metadata)
+    normalized_tool_calls = [
+        tc for tc in (_normalize_wire_tool_call(item) for item in tool_calls) if tc is not None
+    ]
+    next_metadata = dict(metadata)
+    next_metadata["tool_calls"] = normalized_tool_calls
+    return next_metadata
+
+
+def _normalize_wire_tool_call(item: Any) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    call_id = str(item.get("id", "")).strip() or f"tc_{uuid4().hex[:8]}"
+    name = str(item.get("name", "")).strip() or "tool"
+    args_summary = str(item.get("args_summary", "")).strip()
+    status = str(item.get("status", "completed")).strip() or "completed"
+    normalized = {
+        "id": call_id,
+        "name": name,
+        "args_summary": args_summary,
+        "status": status,
+    }
+    error = item.get("error")
+    if isinstance(error, str) and error.strip():
+        normalized["error"] = error.strip()
+    return normalized
+
+
+def _serialize_tool_call(tool_call: Any, index: int) -> dict[str, Any]:
+    if not isinstance(tool_call, dict):
+        return {
+            "id": f"tc_{index}",
+            "name": "tool",
+            "args_summary": str(tool_call),
+            "status": "completed",
+        }
+
+    function = tool_call.get("function", {}) if isinstance(tool_call.get("function"), dict) else {}
+    arguments = function.get("arguments", "")
+    args_summary = _summarize_tool_args(arguments)
+    return {
+        "id": str(tool_call.get("id", "")).strip() or f"tc_{index}",
+        "name": str(function.get("name", "")).strip() or f"tool_{index + 1}",
+        "args_summary": args_summary,
+        "status": "completed",
+    }
+
+
+def _summarize_tool_args(arguments: Any) -> str:
+    if isinstance(arguments, str):
+        raw = arguments.strip()
+        if not raw:
+            return ""
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return raw[:80]
+        return _summarize_tool_args(parsed)
+    if isinstance(arguments, dict):
+        if not arguments:
+            return ""
+        key = next(iter(arguments))
+        value = arguments[key]
+        preview = str(value)
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+        return f"{key}={preview}"
+    return str(arguments)
+
+
+def _history_message_id(message: dict[str, Any], *, index: int) -> str:
+    existing = str(message.get("id", "")).strip()
+    if existing:
+        return existing
+    digest = hashlib.sha1(
+        json.dumps(message, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"hist_{index}_{digest}"
+
+
+def _normalize_timestamp(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value
+    return datetime.now(tz=timezone.utc).isoformat()

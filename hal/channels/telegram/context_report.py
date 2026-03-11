@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
 import html as html_mod
 from typing import Any
 
-from .constants import CTX_MESSAGE_PREVIEW_CHARS, CTX_SYSTEM_PREVIEW_CHARS
-from .formatting import compress_context_output, compress_head_tail, stringify_message_content
+from .formatting import compress_context_output
 
 
-def _fmt_ctx_header(data: dict[str, Any], *, full_messages: bool) -> str:
+def _fmt_ctx_header(data: dict[str, Any]) -> str:
     """Session metadata header."""
     e = html_mod.escape
-    view = "full" if full_messages else "compact"
     return (
         f"📋 <b>HaL Context Inspector</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>Session</b>  {e(data.get('channel', ''))}:{e(data.get('chat_id', ''))}\n"
         f"<b>Model</b>   {e(data.get('model', ''))}\n"
-        f"<b>Mode</b>    {e(data.get('mode', 'default'))} ({view})"
+        f"<b>Mode</b>    {e(data.get('mode', 'default'))}"
     )
 
 
@@ -154,22 +151,6 @@ def _fmt_ctx_recall(recall_items: list[dict[str, Any]], *, detailed: bool) -> st
     return "\n".join(lines)
 
 
-def _summary_at(summaries: list[Any], idx: int) -> dict[str, Any] | None:
-    """Return summary dict at index when present, else None."""
-    if idx < len(summaries) and isinstance(summaries[idx], dict):
-        return summaries[idx]
-    return None
-
-
-def _resolve_full_mode_tokens(*, content: str, summary: dict[str, Any] | None) -> int:
-    """Resolve token count for full-mode message rendering."""
-    if summary is not None:
-        s_tokens = summary.get("tokens")
-        if isinstance(s_tokens, int) and s_tokens > 0:
-            return s_tokens
-    return (max(len(content), 0) + 3) // 4
-
-
 def _compact_summary_tokens(summary: Any) -> int:
     """Resolve compact-mode token count from summary metadata."""
     if not isinstance(summary, dict):
@@ -179,26 +160,6 @@ def _compact_summary_tokens(summary: Any) -> int:
         return tokens
     chars = summary.get("chars", 0)
     return ((max(int(chars), 0) + 3) // 4) if isinstance(chars, int) else 0
-
-
-def _format_full_message_lines(
-    *,
-    idx: int,
-    role: str,
-    content: str,
-    tokens: int,
-    escape: Any,
-) -> list[str]:
-    """Format one full-mode message block."""
-    lines = [f"\n[{idx}] {role}  {tokens:,}t"]
-    escaped_content = escape(content)
-    if role == "system":
-        digest = hashlib.sha256(content.encode()).hexdigest()[:16]
-        lines.append(f"(sha256={digest})")
-        lines.append(compress_head_tail(escaped_content, max_chars=CTX_SYSTEM_PREVIEW_CHARS))
-    else:
-        lines.append(compress_head_tail(escaped_content, max_chars=CTX_MESSAGE_PREVIEW_CHARS))
-    return lines
 
 
 def _format_compact_summary_line(*, idx: int, summary: Any, escape: Any) -> str:
@@ -211,86 +172,43 @@ def _format_compact_summary_line(*, idx: int, summary: Any, escape: Any) -> str:
     return f'  [{idx}] {role:<9}  {tokens:>6,}t  "{preview}"'
 
 
-def _fmt_ctx_messages(data: dict[str, Any], *, full_messages: bool) -> str:
+def _fmt_ctx_messages(data: dict[str, Any]) -> str:
     """Message list, summaries by default and full content in full mode."""
-    e = html_mod.escape
-    messages = data.get("messages") or []
     summaries = data.get("message_summaries") or []
     lines = [f"💬 <b>Messages</b> ({len(summaries)})"]
-
-    if full_messages:
-        for idx, msg in enumerate(messages):
-            role = msg.get("role", "?")
-            content = stringify_message_content(msg.get("content", ""))
-            summary = _summary_at(summaries, idx)
-            tokens = _resolve_full_mode_tokens(content=content, summary=summary)
-            lines.extend(
-                _format_full_message_lines(
-                    idx=idx,
-                    role=role,
-                    content=content,
-                    tokens=tokens,
-                    escape=e,
-                )
-            )
-    else:
-        role_counts: dict[str, int] = {}
-        largest_idx = -1
-        largest_tokens = -1
-        largest_role = "?"
-        for idx, summary in enumerate(summaries):
-            if isinstance(summary, dict):
-                role = str(summary.get("role", "?"))
-            else:
-                role = "?"
-            role_counts[role] = role_counts.get(role, 0) + 1
-            tokens = _compact_summary_tokens(summary)
-            if tokens > largest_tokens:
-                largest_tokens = tokens
-                largest_idx = idx
-                largest_role = role
-        distribution = ", ".join(f"{role} {count}" for role, count in role_counts.items())
-        if distribution:
-            lines.append(f"  roles           {distribution}")
-        if largest_idx >= 0:
-            lines.append(
-                f"  largest         [{largest_idx}] {largest_role} {max(largest_tokens, 0):,}t"
-            )
+    role_counts: dict[str, int] = {}
+    largest_idx = -1
+    largest_tokens = -1
+    largest_role = "?"
+    for idx, summary in enumerate(summaries):
+        if isinstance(summary, dict):
+            role = str(summary.get("role", "?"))
+        else:
+            role = "?"
+        role_counts[role] = role_counts.get(role, 0) + 1
+        tokens = _compact_summary_tokens(summary)
+        if tokens > largest_tokens:
+            largest_tokens = tokens
+            largest_idx = idx
+            largest_role = role
+    distribution = ", ".join(f"{role} {count}" for role, count in role_counts.items())
+    if distribution:
+        lines.append(f"  roles           {distribution}")
+    if largest_idx >= 0:
+        lines.append(
+            f"  largest         [{largest_idx}] {largest_role} {max(largest_tokens, 0):,}t"
+        )
     return "\n".join(lines)
 
 
-def _fmt_ctx_debug_meta(data: dict[str, Any]) -> str:
-    """Additional metadata shown only in full mode."""
-    history_config = data.get("history_config") or {}
-    lines = [
-        "🛠️ <b>Debug Meta</b>",
-        f"  session_key     {html_mod.escape(str(data.get('session_key', '')))}",
-        f"  history_scope   {'session' if history_config.get('session_scoped') else 'none'}",
-        f"  memory_budget   {history_config.get('memory_budget_tokens', 0)}",
-        f"  recall_total    {history_config.get('recall_max_total_tokens', 0)}",
-        f"  recall_item     {history_config.get('recall_max_per_item_tokens', 0)}",
-    ]
-    return "\n".join(lines)
-
-
-def format_context_report(data: dict[str, Any], *, full_messages: bool = False) -> str:
+def format_context_report(data: dict[str, Any]) -> str:
     """Format inspect_context payload as Telegram HTML."""
-    if full_messages:
-        sections = [
-            _fmt_ctx_header(data, full_messages=full_messages),
-            _fmt_ctx_snapshot(data),
-            _fmt_ctx_working_set(data),
-            _fmt_ctx_recall(data.get("recall_items") or [], detailed=True),
-            _fmt_ctx_messages(data, full_messages=full_messages),
-            _fmt_ctx_debug_meta(data),
-        ]
-    else:
-        sections = [
-            _fmt_ctx_header(data, full_messages=full_messages),
-            _fmt_ctx_budget(data),
-            _fmt_ctx_working_set(data),
-            _fmt_ctx_risk(data),
-            _fmt_ctx_recall(data.get("recall_items") or [], detailed=False),
-            _fmt_ctx_messages(data, full_messages=full_messages),
-        ]
+    sections = [
+        _fmt_ctx_header(data),
+        _fmt_ctx_budget(data),
+        _fmt_ctx_working_set(data),
+        _fmt_ctx_risk(data),
+        _fmt_ctx_recall(data.get("recall_items") or [], detailed=False),
+        _fmt_ctx_messages(data),
+    ]
     return compress_context_output("\n\n".join(sections))

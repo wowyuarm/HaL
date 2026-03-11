@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { SendHorizonal } from "lucide-react";
+import { SendHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -90,7 +90,7 @@ export function Composer({ onSend, disabled = false, className }: ComposerProps)
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         >
-          <SendHorizonal className="h-4 w-4" />
+          <SendHorizontal className="h-4 w-4" />
           Send
         </button>
       </div>

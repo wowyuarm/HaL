@@ -215,63 +215,6 @@ def test_format_context_report_compact_tolerates_non_dict_summary_entries() -> N
     assert "largest         [1] assistant 2t" in report
 
 
-def test_format_context_report_full_includes_detailed_sections() -> None:
-    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
-    report = ch._format_context_report(
-        {
-            "channel": "telegram",
-            "chat_id": "1",
-            "model": "test-model",
-            "mode": "collab",
-            "session_key": "telegram:1",
-            "history_message_count": 1,
-            "history_chars": 12,
-            "history_tokens": 8,
-            "recall_count": 3,
-            "recall_items": [
-                {"source": "a.md", "heading": "A", "score": 0.90, "source_type": "raw"},
-                {"source": "b.md", "heading": "B", "score": 0.80, "source_type": "raw"},
-                {"source": "c.md", "heading": "C", "score": 0.70, "source_type": "raw"},
-            ],
-            "baseline_created": True,
-            "baseline_thread_slugs": ["alpha"],
-            "recalled_thread_slugs": ["alpha", "beta"],
-            "system_prompt_chars": 5000,
-            "system_prompt_tokens": 950,
-            "total_input_chars": 5200,
-            "total_input_tokens": 1000,
-            "token_estimate": {
-                "method": "chars_div_4",
-                "messages_only": 1000,
-                "with_tools": 1200,
-                "tools_only": 200,
-            },
-            "history_config": {
-                "memory_budget_tokens": 0,
-                "recall_max_total_tokens": 500,
-                "recall_max_per_item_tokens": 125,
-                "session_scoped": True,
-            },
-            "messages": [
-                {"role": "system", "content": "S" * 4000},
-                {"role": "user", "content": "hello"},
-            ],
-            "message_summaries": [
-                {"role": "system", "chars": 4000, "tokens": 800, "preview": "S" * 80 + "…"},
-                {"role": "user", "chars": 5, "tokens": 2, "preview": "hello"},
-            ],
-        },
-        full_messages=True,
-    )
-    assert "(full)" in report
-    assert "<b>Context Size</b>" in report
-    assert 'a.md | "A" | 0.90 raw' in report
-    assert 'c.md | "C" | 0.70 raw' in report
-    assert "[0] system" in report
-    assert "<b>Debug Meta</b>" in report
-    assert "session_key     telegram:1" in report
-
-
 def test_markdown_to_telegram_html_converts_and_escapes() -> None:
     md = (
         "# Title\n"
@@ -887,7 +830,7 @@ async def test_on_context_uses_inspector_and_sends_report() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_context_full_mode_parses_message() -> None:
+async def test_on_context_parses_message_after_command() -> None:
     inspector = AsyncMock(
         return_value={
             "channel": "telegram",
@@ -924,7 +867,7 @@ async def test_on_context_full_mode_parses_message() -> None:
         context_inspector=inspector,
     )
 
-    msg = _Message(chat_id=123, text="/context full ping")
+    msg = _Message(chat_id=123, text="/context ping")
     msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
     update = _Update(message=msg, user=_User(1))
 
@@ -935,61 +878,6 @@ async def test_on_context_full_mode_parses_message() -> None:
         chat_id="123",
         current_message="ping",
     )
-    first_chunk = msg.reply_text.await_args_list[0].args[0]
-    assert "(full)" in first_chunk
-
-
-@pytest.mark.asyncio
-async def test_on_context_full_flag_without_message_uses_default_text() -> None:
-    inspector = AsyncMock(
-        return_value={
-            "channel": "telegram",
-            "chat_id": "123",
-            "model": "test-model",
-            "mode": "collab",
-            "history_message_count": 0,
-            "history_chars": 0,
-            "history_tokens": 0,
-            "recall_count": 0,
-            "recall_items": [],
-            "system_prompt_chars": 3,
-            "system_prompt_tokens": 1,
-            "total_input_chars": 5,
-            "total_input_tokens": 1,
-            "token_estimate": {
-                "method": "chars_div_4",
-                "messages_only": 1,
-                "with_tools": 1,
-                "tools_only": 0,
-            },
-            "history_config": {
-                "memory_budget_tokens": 0,
-                "recall_max_total_tokens": 500,
-                "recall_max_per_item_tokens": 125,
-            },
-            "messages": [{"role": "system", "content": "sys"}],
-            "message_summaries": [{"role": "system", "chars": 3, "tokens": 1, "preview": "sys"}],
-        }
-    )
-    ch = TelegramChannel(
-        TelegramConfig(enabled=True, token="t"),
-        MessageBus(),
-        context_inspector=inspector,
-    )
-
-    msg = _Message(chat_id=123, text="/context --full")
-    msg.reply_text = AsyncMock()  # type: ignore[attr-defined]
-    update = _Update(message=msg, user=_User(1))
-
-    await ch._on_context(update, context=None)  # type: ignore[arg-type]
-
-    inspector.assert_awaited_once_with(
-        channel="telegram",
-        chat_id="123",
-        current_message="[context inspection]",
-    )
-    first_chunk = msg.reply_text.await_args_list[0].args[0]
-    assert "(full)" in first_chunk
 
 
 @pytest.mark.asyncio

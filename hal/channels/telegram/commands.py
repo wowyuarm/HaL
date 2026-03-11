@@ -6,8 +6,7 @@ from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
-_CONTEXT_DEFAULT_MESSAGE = "[context inspection]"
-_CONTEXT_FULL_FLAGS = {"full", "--full"}
+from hal.channels.commands import parse_context_command
 
 
 class TelegramCommandsMixin:
@@ -35,8 +34,7 @@ class TelegramCommandsMixin:
             "/start — Start the bot\n"
             "/brief — Update thread briefs for this session\n"
             "/drop — End session without briefing\n"
-            "/context [message] — Inspect current LLM context (compact)\n"
-            "/context full [message] — Inspect with raw messages\n"
+            "/context [message] — Inspect current LLM context\n"
             "/help — Show this help message\n\n"
             "Just send me a text message to chat!"
         )
@@ -57,7 +55,7 @@ class TelegramCommandsMixin:
             return
 
         chat_id = str(update.message.chat_id)
-        inspect_message, full_messages = self._parse_context_command(update.message.text or "")
+        inspect_message = parse_context_command(update.message.text or "")
 
         try:
             payload = await self._context_inspector(
@@ -65,26 +63,8 @@ class TelegramCommandsMixin:
                 chat_id=chat_id,
                 current_message=inspect_message,
             )
-            report = self._format_context_report(payload, full_messages=full_messages)
+            report = self._format_context_report(payload)
             await self._reply_long_text(update, report, parse_mode="HTML")
         except Exception as e:
             logger.warning(f"/context failed: {e}")
             await update.message.reply_text("⚠️ Failed to build context snapshot.")
-
-    @staticmethod
-    def _parse_context_command(raw_text: str) -> tuple[str, bool]:
-        """Parse /context command text into (inspect_message, full_messages)."""
-        raw = raw_text.strip()
-        if not raw:
-            return _CONTEXT_DEFAULT_MESSAGE, False
-
-        parts = raw.split(maxsplit=1)
-        if len(parts) <= 1:
-            return _CONTEXT_DEFAULT_MESSAGE, False
-
-        tokens = parts[1].strip().split()
-        full_messages = any(token in _CONTEXT_FULL_FLAGS for token in tokens)
-        inspect_tokens = [token for token in tokens if token not in _CONTEXT_FULL_FLAGS]
-        if not inspect_tokens:
-            return _CONTEXT_DEFAULT_MESSAGE, full_messages
-        return " ".join(inspect_tokens), full_messages

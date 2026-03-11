@@ -24,20 +24,29 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any
 
-from aiohttp import web
+from aiohttp import WSCloseCode, web
 from loguru import logger
 
 from hal.bus.events import OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.channels.base import BaseChannel
+from hal.channels.commands import (
+    CONTEXT_DEFAULT_MESSAGE,
+    build_slash_command_text,
+    parse_context_command,
+)
 from hal.infra.config.schema import WebConfig
 from hal.workspace.layout import WorkspaceLayout
+from hal.workspace.sessions import SessionRepository
 from hal.workspace.threads import ThreadRepository
 
 from .protocol import (
     build_context_summary,
+    build_history,
     build_snapshot,
     build_threads,
     parse_inbound,
@@ -52,6 +61,7 @@ from .server import WebSocketServer
 # Default identifiers for the single-user web client.
 _WEB_SENDER_ID = "web-client"
 _WEB_CHAT_ID = "web"
+_WEB_SESSION_KEY = f"{_WEB_CHAT_ID}:{_WEB_CHAT_ID}"
 
 # Max threads returned in the initial snapshot.
 _SNAPSHOT_MAX_THREADS = 50
@@ -70,11 +80,14 @@ class WebChannel(BaseChannel):
         bus: MessageBus,
         *,
         workspace_layout: WorkspaceLayout,
+        context_inspector: Callable[..., Awaitable[dict[str, object]]] | None = None,
     ) -> None:
         super().__init__(config, bus)
         self.config: WebConfig = config
         self._layout = workspace_layout
         self._threads = ThreadRepository(workspace_layout.root)
+        self._session_repository = SessionRepository(workspace_layout.root)
+        self._context_inspector = context_inspector
         self._server = WebSocketServer(
             host=config.host,
             port=config.port,
@@ -130,6 +143,15 @@ class WebChannel(BaseChannel):
 
         try:
             await ws.send_json(serialize_outbound(msg))
+            if not self._is_progress_message(msg):
+                await ws.send_json({"type": "status", "state": "idle"})
+                await ws.send_json({"type": "threads", "list": self._build_thread_list()})
+                await ws.send_json(
+                    {
+                        "type": "context_summary",
+                        **(await self._build_context_summary_payload()),
+                    }
+                )
         except Exception:
             logger.warning("Web client connection lost during send")
             self._ws = None
@@ -141,7 +163,7 @@ class WebChannel(BaseChannel):
         old_ws = self._ws
         if old_ws is not None and not old_ws.closed:
             logger.info("Replacing existing web client connection")
-            await old_ws.close(code=web.WSCloseCode.GOING_AWAY)
+            await old_ws.close(code=WSCloseCode.GOING_AWAY)
 
         self._ws = ws
         logger.info("Web client connected")
@@ -174,7 +196,7 @@ class WebChannel(BaseChannel):
         if msg_type == "message":
             await self._dispatch_message(payload)
         elif msg_type == "command":
-            await self._dispatch_command(payload)
+            await self._dispatch_command(payload, ws)
         elif msg_type == "select_thread":
             await self._dispatch_select_thread(payload, ws)
 
@@ -186,6 +208,7 @@ class WebChannel(BaseChannel):
         if not content:
             return
 
+        await self._push_status("processing")
         await self._handle_message(
             sender_id=_WEB_SENDER_ID,
             chat_id=_WEB_CHAT_ID,
@@ -193,14 +216,24 @@ class WebChannel(BaseChannel):
             metadata=self._inbound_metadata(),
         )
 
-    async def _dispatch_command(self, payload: dict[str, Any]) -> None:
-        """Forward a slash command to the engine as ``/command_name``."""
+    async def _dispatch_command(
+        self, payload: dict[str, Any], ws: web.WebSocketResponse
+    ) -> None:
+        """Handle a slash command from the web client."""
         name = str(payload.get("name", "")).strip()
         if not name:
             return
-        # Ensure the content starts with a slash so the engine recognizes it.
-        content = name if name.startswith("/") else f"/{name}"
 
+        if name == "context":
+            await self._dispatch_context_command(payload, ws)
+            return
+
+        content = build_slash_command_text(
+            name,
+            payload.get("args") if isinstance(payload.get("args"), dict) else None,
+        )
+
+        await self._push_status("processing")
         await self._handle_message(
             sender_id=_WEB_SENDER_ID,
             chat_id=_WEB_CHAT_ID,
@@ -221,19 +254,55 @@ class WebChannel(BaseChannel):
         logger.info(f"Web client selected thread: {slug}")
         await self._push_snapshot(ws)
 
+    async def _dispatch_context_command(
+        self, payload: dict[str, Any], ws: web.WebSocketResponse
+    ) -> None:
+        """Build and send a context inspection report directly to the client."""
+        if self._context_inspector is None:
+            await self._send_error(ws, "context inspector is not configured")
+            return
+
+        args = payload.get("args")
+        raw = str(args.get("raw", "")).strip() if isinstance(args, dict) else ""
+        inspect_message = parse_context_command(
+            build_slash_command_text("context", {"raw": raw}) if raw else "/context"
+        )
+        try:
+            context = await self._context_inspector(
+                channel=self.name,
+                chat_id=_WEB_CHAT_ID,
+                current_message=inspect_message,
+            )
+        except Exception as exc:
+            logger.warning(f"web /context failed: {exc}")
+            await self._send_error(ws, "failed to build context snapshot")
+            return
+
+        await ws.send_json(
+            {
+                "type": "message",
+                "id": f"context_{int(datetime.now(tz=timezone.utc).timestamp() * 1000)}",
+                "role": "assistant",
+                "content": self._format_context_report(context),
+                "ts": datetime.now(tz=timezone.utc).isoformat(),
+                "metadata": {},
+            }
+        )
+        await ws.send_json(
+            {"type": "context_summary", **(await self._build_context_summary_payload())}
+        )
+
     # -- Snapshot construction -----------------------------------------------
 
     async def _push_snapshot(self, ws: web.WebSocketResponse) -> None:
         """Build and send the full state snapshot to one client."""
-        thread_entries = self._threads.collect_registry_entries(
-            max_entries=_SNAPSHOT_MAX_THREADS,
-        )
+        thread_entries = self._build_thread_list()
         snapshot = build_snapshot(
-            threads=build_threads(thread_entries),
-            history=[],  # Phase 1: no history replay
-            context_summary=build_context_summary(),
+            threads=thread_entries,
+            history=self._build_history(),
+            context_summary=await self._build_context_summary_payload(),
             status="idle",
-            active_thread=self._selected_thread,
+            active_thread=self._selected_thread or (thread_entries[0]["slug"] if thread_entries else None),
         )
         try:
             await ws.send_json(snapshot)
@@ -248,6 +317,73 @@ class WebChannel(BaseChannel):
         if self._selected_thread:
             meta["selected_thread"] = self._selected_thread
         return meta
+
+    def _build_thread_list(self) -> list[dict[str, Any]]:
+        thread_entries = self._threads.collect_registry_entries(
+            max_entries=_SNAPSHOT_MAX_THREADS,
+        )
+        return build_threads(thread_entries)
+
+    def _build_history(self) -> list[dict[str, Any]]:
+        snapshot = self._session_repository.read_snapshot(_WEB_SESSION_KEY)
+        if snapshot is None:
+            return []
+        return build_history(snapshot.messages)
+
+    async def _build_context_summary_payload(self) -> dict[str, Any]:
+        if self._context_inspector is None:
+            return build_context_summary(history=len(self._build_history()))
+
+        try:
+            context = await self._context_inspector(
+                channel=self.name,
+                chat_id=_WEB_CHAT_ID,
+                current_message=CONTEXT_DEFAULT_MESSAGE,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to inspect web context summary: {exc}")
+            return build_context_summary(history=len(self._build_history()))
+
+        return build_context_summary(
+            tokens=int(context.get("total_input_tokens", 0) or 0),
+            tools=int(context.get("tools_count", 0) or 0),
+            history=int(context.get("history_message_count", 0) or 0),
+        )
+
+    async def _push_status(self, state: str) -> None:
+        ws = self._ws
+        if ws is None or ws.closed:
+            return
+        try:
+            await ws.send_json({"type": "status", "state": state})
+        except Exception:
+            self._ws = None
+
+    @staticmethod
+    def _is_progress_message(msg: OutboundMessage) -> bool:
+        return bool(msg.metadata.get("progress"))
+
+    @staticmethod
+    def _format_context_report(payload: dict[str, object]) -> str:
+        message_summaries = payload.get("message_summaries")
+        lines = [
+            "## Context Snapshot",
+            "",
+            f"- Total input tokens: {payload.get('total_input_tokens', 0)}",
+            f"- History messages: {payload.get('history_message_count', 0)}",
+            f"- Recall items: {payload.get('recall_count', 0)}",
+            f"- Baseline created: {'yes' if payload.get('baseline_created') else 'no'}",
+        ]
+        if isinstance(message_summaries, list) and message_summaries:
+            lines.extend(["", "### Message Preview"])
+            for item in message_summaries[:8]:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role", "")).strip() or "unknown"
+                tokens = item.get("tokens", 0)
+                preview = str(item.get("preview", "")).strip()
+                lines.append(f"- `{role}` ({tokens} tok): {preview}")
+        return "\n".join(lines)
 
     @staticmethod
     async def _send_error(ws: web.WebSocketResponse, message: str) -> None:
