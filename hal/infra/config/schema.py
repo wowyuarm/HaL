@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -95,6 +95,9 @@ class ProviderConfig(_StrictModel):
     extra_headers: dict[str, str] | None = None  # Custom request headers for provider endpoints
     compat_mode: str = ""  # Protocol hint for proxies: "openai" = OpenAI-compatible endpoint
     request_params: dict[str, Any] | None = None  # Optional per-request LiteLLM params
+    max_request_body_bytes: int = Field(
+        default=950_000, ge=65_536
+    )  # Last-resort ceiling for serialized chat request bodies before provider dispatch trimming
 
 
 class ProvidersConfig(_StrictModel):
@@ -185,12 +188,21 @@ class SessionConfig(_StrictModel):
     compaction_token_budget: int = Field(
         default=150000, ge=1000
     )  # Approx token ceiling for in-memory session history
+    compaction_request_bytes_threshold: int = Field(
+        default=900_000, ge=0
+    )  # Proactively compact/rewrite replayed history when serialized request bodies approach this size (0 = disable)
     compaction_recent_user_turns: int = Field(
         default=2, ge=1
     )  # Keep latest N user turns raw when compacting older history
     compaction_checkpoint_tokens: int = Field(
         default=1800, ge=100
     )  # Max token budget per generated checkpoint block
+    history_image_replay: Literal["full", "low_detail", "summary", "drop"] = (
+        "summary"
+    )  # How replayed historical images should be represented in follow-up requests
+    tool_result_replay_max_bytes: int = Field(
+        default=12_000, ge=0
+    )  # Per-tool-result replay cap before converting long outputs into shorter summaries (0 = unlimited)
 
 
 class BriefConfig(_StrictModel):

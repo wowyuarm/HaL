@@ -18,7 +18,11 @@ from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token
 from hal.context.token_counter import count_messages_tokens
 from hal.domain.message_payloads import estimate_content_chars
 from hal.runtime.loop import run_tool_loop
-from hal.runtime.session import build_persisted_session_history
+from hal.runtime.session import (
+    build_persisted_session_history,
+    estimate_messages_request_bytes,
+    slim_messages_for_replay,
+)
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
 _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
@@ -244,6 +248,85 @@ def _apply_compiled_turn_context(*, engine: Any, msg: Any, compiled: Any) -> Non
         )
 
 
+def _resolve_request_bytes_threshold(engine: Any) -> int:
+    session_cfg = getattr(engine._engine_config, "session", None)
+    if session_cfg is None:
+        return 0
+    try:
+        return max(int(getattr(session_cfg, "compaction_request_bytes_threshold", 0)), 0)
+    except Exception:
+        return 0
+
+
+async def _prepare_messages_for_request(
+    *,
+    engine: Any,
+    msg: Any,
+    compiled: Any,
+    request: SessionTurnRequest,
+    resolved_model: str,
+) -> Any:
+    """Preflight working-set messages against byte budgets before provider fallback trimming."""
+    threshold = _resolve_request_bytes_threshold(engine)
+    session_cfg = getattr(engine._engine_config, "session", None)
+    image_mode = str(getattr(session_cfg, "history_image_replay", "summary") or "summary")
+    tool_result_max_bytes = max(int(getattr(session_cfg, "tool_result_replay_max_bytes", 0)), 0)
+    tools = engine.tools.get_definitions()
+
+    def _request_bytes(messages: list[dict[str, object]]) -> int:
+        return estimate_messages_request_bytes(
+            messages,
+            model=resolved_model,
+            tools=tools,
+        )
+
+    messages = compiled.messages
+    if threshold <= 0 or _request_bytes(messages) <= threshold:
+        return compiled
+
+    slimmed_messages, _ = slim_messages_for_replay(
+        messages,
+        image_replay_mode=image_mode,
+        tool_result_max_bytes=tool_result_max_bytes,
+    )
+    if _request_bytes(slimmed_messages) <= threshold:
+        logger.info("request preflight: slimmed replay payload under byte threshold")
+        compiled.messages = slimmed_messages
+        return compiled
+
+    compacted_history = await engine._maybe_compact_session_history(
+        session_key=msg.session_key,
+        history=request.history,
+        token_model=resolved_model,
+    )
+    if compacted_history == request.history:
+        compiled.messages = slimmed_messages
+        return compiled
+
+    recompacted = await engine.context_compiler.compile_session_turn(
+        SessionTurnRequest(
+            history=compacted_history,
+            current_message=request.current_message,
+            media=request.media,
+            channel=request.channel,
+            chat_id=request.chat_id,
+            token_model=request.token_model,
+            memory_budget_tokens=request.memory_budget_tokens,
+            recall_max_total_tokens=request.recall_max_total_tokens,
+            recall_max_per_item_tokens=request.recall_max_per_item_tokens,
+            existing_baseline=engine._get_session_baseline(msg.session_key),
+        )
+    )
+    _apply_compiled_turn_context(engine=engine, msg=msg, compiled=recompacted)
+    recompacted.messages, _ = slim_messages_for_replay(
+        recompacted.messages,
+        image_replay_mode=image_mode,
+        tool_result_max_bytes=tool_result_max_bytes,
+    )
+    logger.info("request preflight: recompiled turn after byte-aware session compaction")
+    return recompacted
+
+
 async def _persist_completed_turn(
     *,
     engine: Any,
@@ -326,21 +409,29 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         resolved_model = engine.provider.resolve_model(engine.model)
         hc = engine._history_config
         history = engine._get_session_history(msg.session_key)
+        turn_request = SessionTurnRequest(
+            history=history,
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            token_model=resolved_model,
+            memory_budget_tokens=(hc.memory_budget_tokens or None),
+            recall_max_total_tokens=hc.recall_max_total_tokens,
+            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+            existing_baseline=engine._get_session_baseline(msg.session_key),
+        )
         compiled = await engine.context_compiler.compile_session_turn(
-            SessionTurnRequest(
-                history=history,
-                current_message=msg.content,
-                media=msg.media if msg.media else None,
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                token_model=resolved_model,
-                memory_budget_tokens=(hc.memory_budget_tokens or None),
-                recall_max_total_tokens=hc.recall_max_total_tokens,
-                recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-                existing_baseline=engine._get_session_baseline(msg.session_key),
-            )
+            turn_request
         )
         _apply_compiled_turn_context(engine=engine, msg=msg, compiled=compiled)
+        compiled = await _prepare_messages_for_request(
+            engine=engine,
+            msg=msg,
+            compiled=compiled,
+            request=turn_request,
+            resolved_model=resolved_model,
+        )
         messages = compiled.messages
         search_results = compiled.search_results
         recall_chars = _compute_recall_chars(

@@ -352,6 +352,73 @@ async def test_chat_passes_provider_request_params(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_chat_trims_oversized_request_body_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="gpt-4o",
+        max_request_body_bytes=2_600,
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
+
+    oversized_tool = "x" * 9_000
+    await p.chat(
+        messages=[
+            {"role": "system", "content": "sys"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "fs", "arguments": '{"action":"read"}'},
+                    }
+                ],
+                "reasoning_content": "thinking" * 200,
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "fs", "content": oversized_tool},
+            {"role": "user", "content": "Summarize the tool output"},
+        ]
+    )
+
+    serialized = LiteLLMProvider._sanitize_messages(called["messages"])
+    assert len(str(serialized[2]["content"])) < len(oversized_tool)
+    assert "reasoning_content" not in called["messages"][1]
+
+
+@pytest.mark.asyncio
+async def test_chat_raises_clear_error_when_request_cannot_fit_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="gpt-4o",
+        max_request_body_bytes=120,
+    )
+
+    async def fake_acompletion(**kwargs):
+        raise AssertionError("dispatch should not be attempted")
+
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
+
+    result = await p.chat(messages=[{"role": "user", "content": "x" * 2_000}])
+
+    assert result.finish_reason == "error"
+    assert result.error_message is not None
+    assert "configured byte budget" in result.error_message
+
+
+@pytest.mark.asyncio
 async def test_chat_applies_cache_control_on_anthropic_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -177,8 +177,11 @@ def test_defaults_match_original_hardcoded_values() -> None:
     # Engine → session
     assert cfg.engine.session.compaction_enabled is True
     assert cfg.engine.session.compaction_token_budget == 150000
+    assert cfg.engine.session.compaction_request_bytes_threshold == 900_000
     assert cfg.engine.session.compaction_recent_user_turns == 2
     assert cfg.engine.session.compaction_checkpoint_tokens == 1800
+    assert cfg.engine.session.history_image_replay == "summary"
+    assert cfg.engine.session.tool_result_replay_max_bytes == 12_000
 
     # Engine → brief
     assert cfg.engine.brief.enabled is True
@@ -208,6 +211,9 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.memory_search.embed_retry_base_delay_s == 0.5
     assert cfg.memory_search.embed_timeout_s == 60.0
     assert cfg.memory_search.exclude_channels == []
+
+    # Provider safeguards
+    assert cfg.providers.openai.max_request_body_bytes == 950_000
 
     # Channels
     assert cfg.channels.outbound_poll_timeout_s == 1.0

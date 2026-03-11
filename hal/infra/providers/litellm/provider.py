@@ -31,6 +31,7 @@ class LiteLLMProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         compat_mode: str = "",
         request_params: dict[str, Any] | None = None,
+        max_request_body_bytes: int = 950_000,
         provider_name: str = "",
     ):
         super().__init__(api_key, api_base)
@@ -38,6 +39,7 @@ class LiteLLMProvider(LLMProvider):
         self.extra_headers = extra_headers or {}
         self._compat_mode = compat_mode
         self.request_params = request_params or {}
+        self.max_request_body_bytes = max(1, int(max_request_body_bytes))
         self.provider_name = provider_name
 
         # In compat_mode, skip gateway detection — the user explicitly declared
@@ -162,14 +164,14 @@ class LiteLLMProvider(LLMProvider):
                 max_tokens=max_tokens,
             )
         )
-        kwargs = self._build_chat_kwargs(
-            model=resolved_model,
-            messages=prepared_messages,
-            tools=prepared_tools,
-            max_tokens=prepared_max_tokens,
-            temperature=temperature,
-        )
         try:
+            kwargs = self._build_chat_kwargs(
+                model=resolved_model,
+                messages=prepared_messages,
+                tools=prepared_tools,
+                max_tokens=prepared_max_tokens,
+                temperature=temperature,
+            )
             return await self._dispatch_completion(kwargs)
         except Exception as error:
             logger.exception("LLM request failed")
@@ -239,7 +241,35 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        kwargs = self._trim_oversized_request_body(kwargs)
         return kwargs
+
+    def _trim_oversized_request_body(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Trim oversized message bodies before LiteLLM/OpenAI-compatible dispatch."""
+        payload_bytes = message_helpers.estimate_request_payload_bytes(kwargs)
+        if payload_bytes <= self.max_request_body_bytes:
+            return kwargs
+
+        trimmed_messages, changed = message_helpers.trim_messages_to_request_budget(
+            kwargs["messages"],
+            base_payload={key: value for key, value in kwargs.items() if key != "messages"},
+            max_bytes=self.max_request_body_bytes,
+        )
+        if changed:
+            logger.warning(
+                "Trimmed LLM request body from %s to <= %s bytes before dispatch",
+                payload_bytes,
+                self.max_request_body_bytes,
+            )
+        trimmed_kwargs = dict(kwargs)
+        trimmed_kwargs["messages"] = trimmed_messages
+        final_size = message_helpers.estimate_request_payload_bytes(trimmed_kwargs)
+        if final_size > self.max_request_body_bytes:
+            raise ValueError(
+                "LLM request body still exceeds configured byte budget after trimming. "
+                "Reduce history/tool output or increase providers.<name>.max_request_body_bytes."
+            )
+        return trimmed_kwargs
 
     def _apply_request_params(self, kwargs: dict[str, Any]) -> None:
         if not self.request_params:

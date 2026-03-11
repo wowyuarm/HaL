@@ -18,6 +18,7 @@ from hal.runtime.engine import (
     _build_subagent_injection,
     _split_subagent_tool_result,
 )
+from hal.runtime.session import slim_messages_for_replay
 
 # ------------------------------------------------------------------
 # Fixtures
@@ -521,6 +522,99 @@ class TestSessionCompaction:
 
         assert compacted[0]["role"] == "assistant"
         assert "[Session Checkpoint]" in str(compacted[0]["content"])
+
+    async def test_compacts_history_when_request_bytes_threshold_exceeded(self, engine):
+        session_key = "telegram:c1"
+        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.compaction_token_budget = 10000
+        engine._engine_config.session.compaction_request_bytes_threshold = 900
+        engine._engine_config.session.compaction_recent_user_turns = 1
+        engine._engine_config.session.history_image_replay = "full"
+        engine._engine_config.session.tool_result_replay_max_bytes = 0
+
+        history = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64," + ("a" * 2000)},
+                    },
+                    {"type": "text", "text": "first image"},
+                ],
+            },
+            {"role": "assistant", "content": "describe it"},
+            {"role": "user", "content": "latest request"},
+            {"role": "assistant", "content": "latest answer"},
+        ]
+
+        compacted = await engine._maybe_compact_session_history(
+            session_key=session_key,
+            history=history,
+            token_model="test-model",
+        )
+
+        assert compacted[0]["role"] == "assistant"
+        assert "[Session Checkpoint]" in str(compacted[0]["content"])
+
+    async def test_request_preflight_slims_old_image_history_before_execute_loop(self, engine):
+        engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
+            lambda *, history, current_message, **kwargs: [
+                {"role": "system", "content": "sys"},
+                *history,
+                {"role": "user", "content": current_message},
+            ]
+        )
+        engine._engine_config.session.compaction_request_bytes_threshold = 1200
+        engine._engine_config.session.history_image_replay = "summary"
+        engine._engine_config.session.tool_result_replay_max_bytes = 12_000
+        engine._execute_loop = AsyncMock(return_value=("done", LoopMetadata(), []))  # type: ignore[method-assign]
+
+        session_key = "telegram:c1"
+        state = engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        state.history = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64," + ("b" * 2500)},
+                    },
+                    {"type": "text", "text": "old screenshot"},
+                ],
+            },
+            {"role": "assistant", "content": "saw it"},
+        ]
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="continue")
+        await engine.process(msg)
+
+        sent_messages = engine._execute_loop.await_args.args[0]
+        replayed_history_user = sent_messages[1]
+        assert replayed_history_user["role"] == "user"
+        assert isinstance(replayed_history_user["content"], str)
+        assert "prior image omitted" in replayed_history_user["content"]
+
+
+class TestRequestReplaySlimming:
+    def test_slim_messages_for_replay_truncates_long_tool_results(self):
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "tool", "name": "fs", "content": "x" * 5000},
+            {"role": "user", "content": "latest"},
+        ]
+
+        slimmed, changed = slim_messages_for_replay(
+            messages,
+            image_replay_mode="summary",
+            tool_result_max_bytes=500,
+        )
+
+        assert changed is True
+        assert isinstance(slimmed[1]["content"], str)
+        assert len(slimmed[1]["content"].encode("utf-8")) <= 500 + 64
+        assert slimmed[2]["content"] == "latest"
 
 
 class TestThreadTouching:

@@ -70,6 +70,25 @@ def test_make_provider_passes_request_params(monkeypatch) -> None:
     }
 
 
+def test_make_provider_passes_max_request_body_bytes(monkeypatch) -> None:
+    config = Config()
+    config.agents.defaults.model = "gpt-4o"
+    config.providers.openai.api_key = "openai-key"
+    config.providers.openai.max_request_body_bytes = 777_000
+
+    captured = {}
+
+    class DummyProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("hal.infra.providers.litellm.LiteLLMProvider", DummyProvider)
+
+    provider = factory.make_provider(config)
+    assert isinstance(provider, DummyProvider)
+    assert captured["max_request_body_bytes"] == 777_000
+
+
 def test_make_memory_search_returns_none_when_pymilvus_missing(monkeypatch) -> None:
     config = Config()
     calls: list[str] = []
