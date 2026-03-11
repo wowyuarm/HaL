@@ -26,10 +26,19 @@ class TelegramConfig(_StrictModel):
     )
 
 
+class WebConfig(_StrictModel):
+    """Backend web channel configuration (WebSocket server)."""
+
+    enabled: bool = False
+    host: str = "localhost"  # Bind host for the aiohttp WebSocket server
+    port: int = 8765  # Bind port for the aiohttp WebSocket server
+
+
 class ChannelsConfig(_StrictModel):
     """Configuration for chat channels."""
 
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     outbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Outbound dispatch poll interval
 
 
