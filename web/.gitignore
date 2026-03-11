@@ -9,5 +9,12 @@ npm-debug.log*
 .env.local
 .env.*.local
 
+# TypeScript build artifacts
+*.tsbuildinfo
+tailwind.config.d.ts
+tailwind.config.js
+vite.config.d.ts
+vite.config.js
+
 coverage/
 .DS_Store
