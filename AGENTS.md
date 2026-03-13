@@ -50,11 +50,7 @@ No fixed coverage threshold is configured; add regression tests for bug fixes.
 
 ## Commit & Pull Request Guidelines
 Follow observed commit style: `type(scope): imperative summary` (for example `feat(memory): ...`, `fix(exec): ...`, `refactor(cli): ...`).  
-For non-trivial changes, include a short body using concise prose or `-` bullet points (match recent repository history style).
-Example:
-`feat(memory): clarify RRF scoring and harden recall indexing pipeline`  
-`- Label retrieval values as rrf_score in output and context blocks`  
-`- Add chunk_heading_max_level config to reduce over-fragmentation`
+For non-trivial changes, include a short body using `-` bullet points, each on its own real newline (never join bullets with literal `\n` strings — use a heredoc to pass multi-line messages).
 Keep commits focused and runnable. Before opening a PR, run `pytest tests/` and `ruff check hal/ && ruff format hal/`.  
 PRs should include purpose, key files changed, config/migration notes, and verification steps (commands plus short output snippets). Link related issues when applicable.
 

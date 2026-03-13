@@ -207,6 +207,11 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
         logger.warning(f"Brief worker: no session state for {session_id}")
         return
 
+    # Persist the brief prompt on the manifest so restarts can recover it
+    # without scanning the event log.
+    state.manifest.brief_prompt = user_prompt
+    engine._session_store.write_manifest(session_id, state.manifest)
+
     channel = state.manifest.channel
     chat_id = state.manifest.chat_id
     brief_cfg = engine._engine_config.brief

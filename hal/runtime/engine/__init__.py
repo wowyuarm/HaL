@@ -36,6 +36,7 @@ from hal.runtime.session import (
 from hal.runtime.subagent import SubagentManager
 from hal.runtime.tool_factory import create_tools
 from hal.workspace import MetricsRepository, SessionStore, ThreadRepository, WorkspaceLayout
+from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
 
 from .background_resume import _EngineBackgroundResume
 from .inspect import build_context_inspection
@@ -428,6 +429,18 @@ class AgentEngine:
             },
         )
 
+        # Write thread-to-session refs at creation time so sessions appear in
+        # thread indexes even if the later brief step fails.
+        refs_repo = ThreadRefsRepository(self._layout)
+        target_threads: list[str] = []
+        if state.primary_thread:
+            target_threads.append(state.primary_thread)
+        for slug in sorted(state.mounted_threads):
+            if slug not in target_threads:
+                target_threads.append(slug)
+        for slug in target_threads:
+            refs_repo.append_ref(slug, ThreadSessionRef(session_id=session_id, role="created"))
+
     async def update_session_scope(
         self,
         session_id: str,
@@ -670,7 +683,13 @@ class AgentEngine:
             )
 
     def _restore_brief_prompt(self, session_id: str) -> str:
-        """Recover the last explicit /brief prompt from the durable event log."""
+        """Recover the last explicit /brief prompt from the manifest or durable event log."""
+        manifest = self._session_store.read_manifest(session_id)
+        if manifest is not None and manifest.brief_prompt is not None:
+            return manifest.brief_prompt
+
+        # Fall back to event log scan for sessions created before brief_prompt
+        # was persisted on the manifest.
         for event in reversed(self._session_store.read_events(session_id)):
             if event.type != BRIEF_STARTED:
                 continue

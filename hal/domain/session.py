@@ -63,6 +63,7 @@ class SessionManifest(BaseModel):
     touched_threads: list[str] = Field(default_factory=list)
     turn_count: int = 0
     last_event_seq: int = 0
+    brief_prompt: str | None = None
 
 
 # ---------------------------------------------------------------------------

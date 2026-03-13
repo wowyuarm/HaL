@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from loguru import logger
 
 from hal.infra.config.schema import Config
 
@@ -99,6 +100,7 @@ def _lift_legacy_web_config(data: dict[str, Any]) -> None:
     if "web" in data:
         raise ValueError("Config defines both top-level 'web' and legacy 'channels.web'.")
     if isinstance(legacy_web, dict):
+        logger.info("lifting legacy channels.web config to top-level web block")
         data["web"] = legacy_web
         channels.pop("web", None)
 

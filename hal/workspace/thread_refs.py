@@ -26,7 +26,7 @@ class ThreadSessionRef(BaseModel):
 
     session_id: str
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
-    role: Literal["primary", "mounted"]
+    role: Literal["primary", "mounted", "created"]
 
 
 class ThreadRefsRepository:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from hal.domain.event_sink import SessionEventSink
 from hal.domain.events import SessionEvent
@@ -56,7 +56,7 @@ class SessionTurnSubmission:
     """Result of submitting user text into a session."""
 
     manifest: SessionManifest
-    delivery: str
+    delivery: Literal["turn_started", "intervention_queued"]
 
 
 class SessionBridge:
@@ -111,6 +111,9 @@ class SessionBridge:
         manifest = self._require_session(session_id)
         if manifest.status != "active":
             raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
+        # Fast-path: skip lock acquisition when the session already has an
+        # in-flight turn.  The second check inside the lock prevents races
+        # with concurrent writers that may activate between the two checks.
         if self._engine.is_session_active(session_id):
             return await self._queue_intervention(session_id, content)
 
@@ -141,11 +144,15 @@ class SessionBridge:
             if reason == "brief":
                 command = f"/brief {user_prompt}".strip()
                 await self._run_control_message(session_id, command)
-                return command
-            if reason == "drop":
+                result: str | None = command
+            elif reason == "drop":
                 await self._run_control_message(session_id, "/drop")
-                return "/drop"
-            raise ValueError(f"Unsupported session end reason: {reason}")
+                result = "/drop"
+            else:
+                raise ValueError(f"Unsupported session end reason: {reason}")
+        # Lock released — clean up only after a successful end command.
+        self._session_locks.pop(session_id, None)
+        return result
 
     async def update_scope(
         self,
