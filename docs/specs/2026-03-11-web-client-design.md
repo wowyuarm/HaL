@@ -1,8 +1,14 @@
 # HaL Web Client — Design Spec
 
 **Date:** 2026-03-11
-**Status:** Approved
-**Scope:** MVP (Phase 1)
+**Status:** Superseded
+**Scope:** Archived Phase 1 chat-style web client
+
+This spec reflects the earlier `WebChannel`-based browser chat prototype.
+It is retained for history only.
+
+Current direction now lives in:
+`docs/specs/2026-03-13-working-log-runtime.md`
 
 ## 1. Motivation
 
