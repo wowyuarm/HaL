@@ -50,11 +50,15 @@ class _EngineBackgroundResume:
         self._background_resume_tasks.clear()
 
     def set_session_active(self, session_id: str, active: bool) -> None:
-        """Track whether a session currently has an active engine loop."""
+        """Track whether a session currently has an in-flight turn."""
         if active:
             self._active_sessions.add(session_id)
         else:
             self._active_sessions.discard(session_id)
+
+    def is_session_active(self, session_id: str) -> bool:
+        """Return True while a session turn is currently in flight."""
+        return session_id in self._active_sessions
 
     def store_session_snapshot(
         self,
@@ -157,29 +161,33 @@ class _EngineBackgroundResume:
                 if snapshot is None:
                     continue
 
-                turn_id = await self._start_resumed_turn(
-                    session_id=session_id,
-                    queued_events=pending,
-                )
-                messages = await self._append_runtime_injections(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    snapshot=snapshot,
-                    events=pending,
-                )
-                final_content, meta = await self._run_resumed_loop(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    messages=messages,
-                )
-                final_content = _normalize_final_content(final_content)
-                await self._finalize_resumed_turn(
-                    session_id=session_id,
-                    turn_id=turn_id,
-                    messages=messages,
-                    final_content=final_content,
-                    meta=meta,
-                )
+                self.set_session_active(session_id, True)
+                try:
+                    turn_id = await self._start_resumed_turn(
+                        session_id=session_id,
+                        queued_events=pending,
+                    )
+                    messages = await self._append_runtime_injections(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        snapshot=snapshot,
+                        events=pending,
+                    )
+                    final_content, meta = await self._run_resumed_loop(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        messages=messages,
+                    )
+                    final_content = _normalize_final_content(final_content)
+                    await self._finalize_resumed_turn(
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        messages=messages,
+                        final_content=final_content,
+                        meta=meta,
+                    )
+                finally:
+                    self.set_session_active(session_id, False)
         finally:
             self._background_resume_tasks.pop(session_id, None)
 
@@ -308,16 +316,12 @@ class _EngineBackgroundResume:
         transport = self._session_transports.get(session_id)
         if transport:
             self._engine._update_tool_contexts(transport.channel, transport.chat_id)
-        self.set_session_active(session_id, True)
-        try:
-            final_content, meta, _ = await self._engine._execute_loop(
-                messages=messages,
-                max_iterations=self._engine.max_iterations,
-                session_id=session_id,
-                turn_id=turn_id,
-            )
-        finally:
-            self.set_session_active(session_id, False)
+        final_content, meta, _ = await self._engine._execute_loop(
+            messages=messages,
+            max_iterations=self._engine.max_iterations,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
         return final_content, meta
 
     async def _finalize_resumed_turn(

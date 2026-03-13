@@ -1,5 +1,10 @@
 import type { SessionEvent, SessionManifest, ThreadDetail, ThreadSummary } from "@/lib/types";
 
+export interface SessionTurnSubmission {
+  session: SessionManifest;
+  delivery: "turn_started" | "intervention_queued";
+}
+
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -38,15 +43,14 @@ export async function createSession(input: {
 export async function submitSessionTurn(
   sessionId: string,
   input: { content: string },
-): Promise<SessionManifest> {
-  const payload = await requestJson<{ session: SessionManifest }>(
+): Promise<SessionTurnSubmission> {
+  return await requestJson<SessionTurnSubmission>(
     `/sessions/${encodeURIComponent(sessionId)}/turns`,
     {
       method: "POST",
       body: JSON.stringify(input),
     },
   );
-  return payload.session;
 }
 
 export async function getSessionEvents(sessionId: string): Promise<SessionEvent[]> {

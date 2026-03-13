@@ -12,7 +12,7 @@ from loguru import logger
 from hal.domain.session import SessionManifest
 from hal.infra.config.schema import WebConfig
 
-from .bridge import SessionBridge
+from .bridge import SessionBridge, SessionBusyError
 from .protocol import (
     WS_END_SESSION,
     WS_SUBMIT_TURN,
@@ -113,11 +113,16 @@ class WebServer:
         if not content:
             raise web.HTTPBadRequest(text="submit_turn requires non-empty content")
         try:
-            await self._bridge.submit_turn(session_id, content)
+            submission = await self._bridge.submit_turn(session_id, content)
         except ValueError as exc:
             raise web.HTTPBadRequest(text=str(exc)) from exc
-        manifest = self._require_manifest(session_id)
-        return web.json_response({"session": serialize_manifest(manifest)})
+        return web.json_response(
+            {
+                "session": serialize_manifest(submission.manifest),
+                "delivery": submission.delivery,
+            },
+            status=202 if submission.delivery == "intervention_queued" else 200,
+        )
 
     async def _update_scope(self, request: web.Request) -> web.Response:
         session_id = request.match_info["session_id"]
@@ -129,6 +134,8 @@ class WebServer:
                 add_threads=self._string_list(payload.get("add_threads")),
                 remove_threads=self._string_list(payload.get("remove_threads")),
             )
+        except SessionBusyError as exc:
+            raise web.HTTPConflict(text=str(exc)) from exc
         except ValueError as exc:
             raise web.HTTPBadRequest(text=str(exc)) from exc
         return web.json_response({"session": serialize_manifest(manifest)})
@@ -143,6 +150,8 @@ class WebServer:
         user_prompt = self._optional_string(payload.get("user_prompt")) or ""
         try:
             await self._bridge.end_session(session_id, reason=reason, user_prompt=user_prompt)
+        except SessionBusyError as exc:
+            raise web.HTTPConflict(text=str(exc)) from exc
         except ValueError as exc:
             raise web.HTTPBadRequest(text=str(exc)) from exc
         manifest = self._require_manifest(session_id)

@@ -137,9 +137,9 @@ export default function App() {
     }
     setError(null);
     try {
-      const manifest = await submitSessionTurn(selectedSession.session_id, { content });
+      const submission = await submitSessionTurn(selectedSession.session_id, { content });
       if (socketState !== "live") {
-        applySessionManifest(manifest);
+        applySessionManifest(submission.session);
         await loadSessionEvents(selectedSession.session_id);
       }
     } catch (error) {

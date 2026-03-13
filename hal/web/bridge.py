@@ -20,6 +20,10 @@ _WEB_CHANNEL = "web"
 _WEB_SENDER_ID = "web-user"
 
 
+class SessionBusyError(ValueError):
+    """Raised when a session mutation conflicts with an in-flight turn."""
+
+
 class _QueueSink(SessionEventSink):
     """Fan out live session events into an asyncio queue."""
 
@@ -45,6 +49,14 @@ class SessionSubscription:
     async def close(self) -> None:
         """Detach the subscription from the underlying event publisher."""
         await self._close()
+
+
+@dataclass(frozen=True, slots=True)
+class SessionTurnSubmission:
+    """Result of submitting user text into a session."""
+
+    manifest: SessionManifest
+    delivery: str
 
 
 class SessionBridge:
@@ -94,10 +106,21 @@ class SessionBridge:
         """Return durable working-log events for one session."""
         return self._session_store.read_events(session_id, after_seq=after_seq)
 
-    async def submit_turn(self, session_id: str, content: str) -> str | None:
-        """Submit one user turn into an existing active session."""
+    async def submit_turn(self, session_id: str, content: str) -> SessionTurnSubmission:
+        """Submit user text into a session or queue it as an active-turn intervention."""
+        manifest = self._require_session(session_id)
+        if manifest.status != "active":
+            raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
+        if self._engine.is_session_active(session_id):
+            return await self._queue_intervention(session_id, content)
+
         async with self._session_lock(session_id):
-            return await self._submit_turn_unlocked(session_id, content)
+            manifest = self._require_session(session_id)
+            if manifest.status != "active":
+                raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
+            if self._engine.is_session_active(session_id):
+                return await self._queue_intervention(session_id, content)
+            return await self._start_user_turn(session_id, content)
 
     async def end_session(
         self,
@@ -108,11 +131,20 @@ class SessionBridge:
     ) -> str | None:
         """End one session via the existing human-in-the-loop control commands."""
         async with self._session_lock(session_id):
+            manifest = self._require_session(session_id)
+            if manifest.status != "active":
+                raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
+            if self._engine.is_session_active(session_id):
+                raise SessionBusyError(
+                    "Session is currently processing; end it after the current turn."
+                )
             if reason == "brief":
                 command = f"/brief {user_prompt}".strip()
-                return await self._submit_turn_unlocked(session_id, command)
+                await self._run_control_message(session_id, command)
+                return command
             if reason == "drop":
-                return await self._submit_turn_unlocked(session_id, "/drop")
+                await self._run_control_message(session_id, "/drop")
+                return "/drop"
             raise ValueError(f"Unsupported session end reason: {reason}")
 
     async def update_scope(
@@ -124,6 +156,13 @@ class SessionBridge:
     ) -> SessionManifest:
         """Mutate mounted thread scope for one active session."""
         async with self._session_lock(session_id):
+            manifest = self._require_session(session_id)
+            if manifest.status != "active":
+                raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
+            if self._engine.is_session_active(session_id):
+                raise SessionBusyError(
+                    "Session is currently processing; update scope after the turn."
+                )
             add = {slug for slug in (add_threads or []) if slug}
             remove = {slug for slug in (remove_threads or []) if slug}
             self._validate_threads(add | remove)
@@ -200,12 +239,8 @@ class SessionBridge:
             raise ValueError(f"Unknown session_id: {session_id}")
         return manifest
 
-    async def _submit_turn_unlocked(self, session_id: str, content: str) -> str | None:
-        """Run one direct session turn while holding the per-session write lock."""
-        manifest = self._require_session(session_id)
-        if manifest.status != "active":
-            raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
-
+    async def _start_user_turn(self, session_id: str, content: str) -> SessionTurnSubmission:
+        """Start a fresh user turn for an idle active session."""
         msg = build_direct_inbound_message(
             channel=_WEB_CHANNEL,
             chat_id=session_id,
@@ -213,8 +248,40 @@ class SessionBridge:
             session_id=session_id,
         )
         msg.sender_id = _WEB_SENDER_ID
-        response = await self._engine.process(msg)
-        return str(getattr(response, "content", "")) if response else None
+        self._engine._set_session_active(session_id, True)
+        try:
+            await self._engine.process(msg)
+        except Exception:
+            self._engine._set_session_active(session_id, False)
+            raise
+        manifest = self._require_session(session_id)
+        return SessionTurnSubmission(manifest=manifest, delivery="turn_started")
+
+    async def _run_control_message(self, session_id: str, content: str) -> None:
+        """Run one control command without pre-marking the session as turn-active."""
+        msg = build_direct_inbound_message(
+            channel=_WEB_CHANNEL,
+            chat_id=session_id,
+            content=content,
+            session_id=session_id,
+        )
+        msg.sender_id = _WEB_SENDER_ID
+        await self._engine.process(msg)
+
+    async def _queue_intervention(self, session_id: str, content: str) -> SessionTurnSubmission:
+        """Queue one mid-turn user intervention for later loop injection."""
+        msg = build_direct_inbound_message(
+            channel=_WEB_CHANNEL,
+            chat_id=session_id,
+            content=content,
+            session_id=session_id,
+        )
+        msg.sender_id = _WEB_SENDER_ID
+        await self._engine.bus.publish_inbound(msg)
+        return SessionTurnSubmission(
+            manifest=self._require_session(session_id),
+            delivery="intervention_queued",
+        )
 
     def _session_lock(self, session_id: str) -> asyncio.Lock:
         """Return the single-writer lock guarding one session's mutable runtime."""

@@ -627,8 +627,12 @@ class AgentEngine:
             logger.warning(f"Failed to record context metrics: {e}")
 
     def _set_session_active(self, session_id: str, active: bool) -> None:
-        """Track whether a session currently has an active engine loop."""
+        """Track whether a session currently has an in-flight turn."""
         self._background_resume.set_session_active(session_id, active)
+
+    def is_session_active(self, session_id: str) -> bool:
+        """Return True while a session currently has an in-flight turn."""
+        return self._background_resume.is_session_active(session_id)
 
     def _store_session_snapshot(
         self,

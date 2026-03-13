@@ -93,7 +93,9 @@ async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thr
             match_info={"session_id": manifest.session_id},
         )
     )
+    assert turn_response.status == 200
     turn_payload = _decode_response(turn_response)
+    assert turn_payload["delivery"] == "turn_started"
     assert turn_payload["session"]["turn_count"] == 1
 
     with patch.object(bridge._engine, "_run_session_brief", new_callable=AsyncMock):
@@ -105,6 +107,31 @@ async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thr
         )
     end_payload = _decode_response(end_response)
     assert end_payload["session"]["status"] == "briefing"
+
+
+@pytest.mark.asyncio
+async def test_http_scope_update_returns_conflict_while_session_is_processing(
+    bridge,
+    thread_repo,
+) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    _create_thread(thread_repo, "memory", "Memory")
+    manifest = await bridge.create_session(primary_thread="auth")
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+    bridge._engine._set_session_active(manifest.session_id, True)
+
+    try:
+        with pytest.raises(Exception) as exc_info:
+            await server._update_scope(  # type: ignore[attr-defined]
+                _FakeRequest(
+                    payload={"add_threads": ["memory"]},
+                    match_info={"session_id": manifest.session_id},
+                )
+            )
+    finally:
+        bridge._engine._set_session_active(manifest.session_id, False)
+
+    assert getattr(exc_info.value, "status", None) == 409
 
 
 @pytest.mark.asyncio

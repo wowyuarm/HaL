@@ -44,11 +44,12 @@ async def test_submit_turn_uses_explicit_session_id_and_persists_turn_events(
     _create_thread(thread_repo, "auth", "Auth")
     manifest = await bridge.create_session(primary_thread="auth")
 
-    response = await bridge.submit_turn(manifest.session_id, "hello")
+    submission = await bridge.submit_turn(manifest.session_id, "hello")
     events = engine._session_store.read_events(manifest.session_id)
     event_types = [event.type for event in events]
 
-    assert response == "Final answer"
+    assert submission.delivery == "turn_started"
+    assert submission.manifest.session_id == manifest.session_id
     assert manifest.turn_count == 1
     assert event_types == [
         SESSION_CREATED,
@@ -59,6 +60,23 @@ async def test_submit_turn_uses_explicit_session_id_and_persists_turn_events(
         ASSISTANT_MESSAGE_COMPLETED,
         TURN_COMPLETED,
     ]
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_queues_intervention_for_active_session(bridge, engine, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    engine._set_session_active(manifest.session_id, True)
+
+    try:
+        submission = await bridge.submit_turn(manifest.session_id, "also cover edge cases")
+    finally:
+        engine._set_session_active(manifest.session_id, False)
+
+    queued = await asyncio.wait_for(engine.bus.consume_inbound(), timeout=1)
+    assert submission.delivery == "intervention_queued"
+    assert queued.session_id == manifest.session_id
+    assert queued.content == "also cover edge cases"
 
 
 @pytest.mark.asyncio

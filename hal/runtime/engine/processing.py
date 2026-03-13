@@ -491,6 +491,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             engine=engine, msg=msg, session_id=session_id, session_state=session_state
         )
         turn_id = await _start_turn(msg=msg, session_state=session_state)
+        engine._set_session_active(session_id, True)
 
         try:
             resolved_model = engine.provider.resolve_model(engine.model)
@@ -554,16 +555,12 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                 payload={"max_iterations": engine.max_iterations},
             )
 
-            engine._set_session_active(session_id, True)
-            try:
-                final_content, meta, _injected = await engine._execute_loop(
-                    messages,
-                    engine.max_iterations,
-                    session_id=session_id,
-                    turn_id=turn_id,
-                )
-            finally:
-                engine._set_session_active(session_id, False)
+            final_content, meta, _injected = await engine._execute_loop(
+                messages,
+                engine.max_iterations,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
             _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
             engine._record_metrics(pre_metrics)
 
@@ -620,6 +617,8 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                 payload={"error": str(exc)},
             )
             raise
+        finally:
+            engine._set_session_active(session_id, False)
 
 
 # ---------------------------------------------------------------------------
