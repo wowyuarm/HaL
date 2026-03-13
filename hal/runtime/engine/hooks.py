@@ -129,9 +129,11 @@ class _EngineLoopHooks:
         channel: str | None,
         chat_id: str | None,
     ) -> None:
+        session_id = engine._session_routes.get(session_key) if session_key else None
         _init_engine_scope(
             self,
             engine=engine,
+            session_id=session_id,
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
@@ -143,6 +145,7 @@ class _EngineLoopHooks:
         self._advisor_task: asyncio.Task[str | None] | None = None
         self._event_subscribers = _EngineEventSubscribers(
             engine=engine,
+            session_id=session_id,
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
@@ -154,7 +157,9 @@ class _EngineLoopHooks:
 
     def _build_tool_hint_append_key(self) -> str:
         """Build a stable append key for this loop scope."""
-        if self._session_key:
+        if self._session_id:
+            scope = self._session_id
+        elif self._session_key:
             scope = self._session_key
         elif self._channel and self._chat_id:
             scope = f"{self._channel}:{self._chat_id}"
@@ -178,6 +183,7 @@ class _EngineLoopHooks:
                     message=pending,
                     prefixed_content=prefixed,
                     messages=messages,
+                    session_id=self._session_id,
                     channel=self._channel,
                     chat_id=self._chat_id,
                     session_key=self._session_key,
@@ -210,6 +216,7 @@ class _EngineLoopHooks:
                 result=result,
                 total_tool_calls=meta.total_tool_calls,
                 messages=messages,
+                session_id=self._session_id,
                 channel=self._channel,
                 chat_id=self._chat_id,
                 session_key=self._session_key,
@@ -317,7 +324,7 @@ class _EngineLoopHooks:
         assistant_content: str | None,
     ) -> None:
         """Start non-blocking advisor task per loop on substantive tool usage."""
-        if not self._session_key:
+        if not self._session_id:
             return
         if not self._engine._engine_config.context_advisor_enabled:
             return
@@ -369,7 +376,7 @@ class _EngineLoopHooks:
 
         # Deduplicate hints within a session scope.
         keys = build_context_hint_keys(suggestion)
-        new_keys = self._engine._filter_new_context_hint_keys(self._session_key, keys)
+        new_keys = self._engine._filter_new_context_hint_keys(self._session_id, keys)
         if not new_keys:
             return None
 
@@ -377,11 +384,11 @@ class _EngineLoopHooks:
         if filtered is None:
             return None
 
-        if filtered.threads and self._session_key:
+        if filtered.threads and self._session_id:
             touched = self._engine.context_registry.expand_related_thread_slugs(
                 set(filtered.threads)
             )
-            self._engine._mark_threads_touched(self._session_key, touched)
+            self._engine._mark_threads_touched(self._session_id, touched)
 
         return build_context_hint_text(
             filtered,

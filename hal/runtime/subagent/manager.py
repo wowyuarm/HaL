@@ -105,11 +105,12 @@ class SubagentManager:
         channel: str | None = None,
         chat_id: str | None = None,
         session_key: str | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Spawn a subagent in the background and report completion via bus events."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        context = (channel, chat_id, session_key)
+        context = (channel, chat_id, session_key, session_id)
 
         bg_task = asyncio.create_task(
             self._execute_background_subagent(
@@ -301,12 +302,12 @@ class SubagentManager:
         self,
         label: str,
         result: SubagentExecutionResult,
-        context: tuple[str | None, str | None, str | None],
+        context: tuple[str | None, str | None, str | None, str | None],
     ) -> None:
         """Emit SubagentCompleteEvent for background tasks (best-effort)."""
         if not self._bus:
             return
-        channel, chat_id, session_key = context
+        channel, chat_id, session_key, session_id = context
 
         self._bus.emit_nowait(
             SubagentCompleteEvent(
@@ -315,6 +316,7 @@ class SubagentManager:
                 content=result.content,
                 background=True,
                 messages=[],
+                session_id=session_id,
                 channel=channel,
                 chat_id=chat_id,
                 session_key=session_key,

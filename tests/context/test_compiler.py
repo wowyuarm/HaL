@@ -77,7 +77,7 @@ async def test_compile_session_turn_builds_new_baseline(
             memory_budget_tokens=100,
             recall_max_total_tokens=500,
             recall_max_per_item_tokens=125,
-            existing_baseline=None,
+            mounted_threads=None,
         )
     )
 
@@ -90,11 +90,12 @@ async def test_compile_session_turn_builds_new_baseline(
     builder.build_messages.assert_called_once()
 
 
-async def test_compile_session_turn_reuses_existing_baseline(
+async def test_compile_session_turn_constrains_baseline_to_mounted_threads(
     builder: MagicMock,
     context_registry: MagicMock,
 ) -> None:
     memory_search = AsyncMock()
+    memory_search.search.return_value = []
     compiler = ContextCompiler(
         context_builder=builder,
         context_registry=context_registry,
@@ -114,16 +115,16 @@ async def test_compile_session_turn_reuses_existing_baseline(
             memory_budget_tokens=100,
             recall_max_total_tokens=500,
             recall_max_per_item_tokens=125,
-            existing_baseline="<context>frozen</context>",
+            mounted_threads={"github-actions"},
         )
     )
 
-    assert compiled.baseline_created is False
-    assert compiled.session_baseline == "<context>frozen</context>"
-    assert compiled.search_results == []
-    assert compiled.recalled_thread_slugs == set()
-    memory_search.search.assert_not_called()
-    builder.build_dynamic_context_block.assert_not_called()
+    # Baseline is always freshly compiled; mounted_threads constrains thread selection
+    assert compiled.baseline_created is True
+    assert compiled.session_baseline == "<context>ctx</context>"
+    assert compiled.baseline_thread_slugs == {"github-actions"}
+    memory_search.search.assert_awaited_once()
+    builder.build_dynamic_context_block.assert_called_once()
     builder.build_messages.assert_called_once()
 
 
@@ -213,7 +214,7 @@ async def test_compile_session_turn_selects_related_active_threads_for_baseline(
             memory_budget_tokens=100,
             recall_max_total_tokens=500,
             recall_max_per_item_tokens=125,
-            existing_baseline=None,
+            mounted_threads=None,
         )
     )
 
@@ -312,7 +313,7 @@ async def test_compile_session_turn_caps_baseline_active_threads_by_priority(
             memory_budget_tokens=100,
             recall_max_total_tokens=500,
             recall_max_per_item_tokens=125,
-            existing_baseline=None,
+            mounted_threads=None,
         )
     )
 

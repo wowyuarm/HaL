@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from hal.domain.event_sink import SessionEventPublisher, SessionEventSink
@@ -24,7 +22,6 @@ from hal.domain.session import (
     build_turn_id,
 )
 
-
 # ---------------------------------------------------------------------------
 # SessionEvent
 # ---------------------------------------------------------------------------
@@ -32,9 +29,7 @@ from hal.domain.session import (
 
 class TestSessionEvent:
     def test_schema_version_default(self) -> None:
-        event = SessionEvent(
-            seq=1, session_id="s_test", type=SESSION_CREATED, actor="engine"
-        )
+        event = SessionEvent(seq=1, session_id="s_test", type=SESSION_CREATED, actor="engine")
         assert event.v == EVENT_SCHEMA_VERSION
 
     def test_json_roundtrip(self) -> None:

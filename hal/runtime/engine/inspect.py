@@ -47,9 +47,9 @@ async def build_context_inspection(
     history_config: Any,
     channel: str,
     chat_id: str,
-    session_key: str | None = None,
+    session_id: str | None = None,
     session_history: list[dict[str, object]] | None = None,
-    existing_baseline: str | None = None,
+    mounted_threads: set[str] | None = None,
     current_message: str,
     mode: str,
 ) -> dict[str, Any]:
@@ -76,7 +76,7 @@ async def build_context_inspection(
             memory_budget_tokens=(hc.memory_budget_tokens or None),
             recall_max_total_tokens=hc.recall_max_total_tokens,
             recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-            existing_baseline=existing_baseline,
+            mounted_threads=mounted_threads,
         )
     )
     messages = compiled.messages
@@ -159,7 +159,7 @@ async def build_context_inspection(
             "recall_max_per_item_tokens": hc.recall_max_per_item_tokens,
             "session_scoped": session_history is not None,
         },
-        "session_key": session_key,
+        "session_id": session_id,
         "token_estimate": token_estimate,
     }
 

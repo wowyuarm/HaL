@@ -40,17 +40,17 @@ class _EngineBackgroundResume:
             task.cancel()
         self._background_resume_tasks.clear()
 
-    def set_session_active(self, session_key: str, active: bool) -> None:
+    def set_session_active(self, session_id: str, active: bool) -> None:
         """Track whether a session currently has an active engine loop."""
         if active:
-            self._active_sessions.add(session_key)
+            self._active_sessions.add(session_id)
         else:
-            self._active_sessions.discard(session_key)
+            self._active_sessions.discard(session_id)
 
     def store_session_snapshot(
         self,
         *,
-        session_key: str,
+        session_id: str,
         channel: str,
         chat_id: str,
         messages: list[dict[str, Any]],
@@ -60,11 +60,11 @@ class _EngineBackgroundResume:
         snapshot = copy.deepcopy(messages)
         if final_content:
             snapshot.append({"role": "assistant", "content": final_content})
-        self._session_snapshots[session_key] = snapshot
-        self._session_routes[session_key] = (channel, chat_id)
+        self._session_snapshots[session_id] = snapshot
+        self._session_routes[session_id] = (channel, chat_id)
         try:
             self._session_repository.write_snapshot(
-                session_key=session_key,
+                session_key=session_id,
                 channel=channel,
                 chat_id=chat_id,
                 messages=snapshot,
@@ -72,12 +72,12 @@ class _EngineBackgroundResume:
         except Exception as error:
             logger.warning(f"Failed to write session snapshot: {error}")
 
-    def clear_session_snapshot(self, session_key: str) -> None:
-        """Drop cached and persisted snapshot state for one session key."""
-        self._session_snapshots.pop(session_key, None)
-        self._session_routes.pop(session_key, None)
+    def clear_session_snapshot(self, session_id: str) -> None:
+        """Drop cached and persisted snapshot state for one session."""
+        self._session_snapshots.pop(session_id, None)
+        self._session_routes.pop(session_id, None)
         try:
-            self._session_repository.delete_snapshot(session_key)
+            self._session_repository.delete_snapshot(session_id)
         except Exception as error:
             logger.warning(f"Failed to delete session snapshot: {error}")
 
@@ -86,82 +86,71 @@ class _EngineBackgroundResume:
         if not event.background:
             return
 
-        session_key = event.session_key
-        if not session_key and event.channel and event.chat_id:
-            session_key = f"{event.channel}:{event.chat_id}"
-        if not session_key:
+        session_id = event.session_id
+        if not session_id:
             return
 
         # Active loops consume runtime injections directly via per-loop subscribers.
-        if session_key in self._active_sessions:
+        if session_id in self._active_sessions:
             return
 
-        self._pending_background_events.setdefault(session_key, []).append(event)
-        task = self._background_resume_tasks.get(session_key)
+        self._pending_background_events.setdefault(session_id, []).append(event)
+        task = self._background_resume_tasks.get(session_id)
         if task and not task.done():
             return
 
-        self._background_resume_tasks[session_key] = asyncio.create_task(
-            self._resume_from_background(session_key)
+        self._background_resume_tasks[session_id] = asyncio.create_task(
+            self._resume_from_background(session_id)
         )
 
-    async def _resume_from_background(self, session_key: str) -> None:
+    async def _resume_from_background(self, session_id: str) -> None:
         """Resume a session loop from the last snapshot when detached results arrive."""
         try:
-            while self._pending_background_events.get(session_key):
-                if session_key in self._active_sessions:
+            while self._pending_background_events.get(session_id):
+                if session_id in self._active_sessions:
                     await asyncio.sleep(0.1)
                     continue
 
-                pending = self._dequeue_pending(session_key)
+                pending = self._dequeue_pending(session_id)
                 if not pending:
                     break
 
-                context = self._load_resume_context(session_key)
-                if context is None:
+                snapshot = self._load_resume_snapshot(session_id)
+                if snapshot is None:
                     continue
-                channel, chat_id, snapshot = context
 
                 messages = self._append_runtime_injections(snapshot=snapshot, events=pending)
                 final_content, meta = await self._run_resumed_loop(
-                    session_key=session_key,
-                    channel=channel,
-                    chat_id=chat_id,
+                    session_id=session_id,
                     messages=messages,
                 )
                 final_content = _normalize_final_content(final_content)
                 await self._finalize_resumed_turn(
-                    session_key=session_key,
-                    channel=channel,
-                    chat_id=chat_id,
+                    session_id=session_id,
                     messages=messages,
                     final_content=final_content,
                     meta=meta,
                 )
         finally:
-            self._background_resume_tasks.pop(session_key, None)
+            self._background_resume_tasks.pop(session_id, None)
 
-    def _dequeue_pending(self, session_key: str) -> list[SubagentCompleteEvent]:
+    def _dequeue_pending(self, session_id: str) -> list[SubagentCompleteEvent]:
         """Pop the current queued background completion batch for a session."""
-        return self._pending_background_events.pop(session_key, [])
+        return self._pending_background_events.pop(session_id, [])
 
-    def _load_resume_context(
-        self, session_key: str
-    ) -> tuple[str, str, list[dict[str, Any]]] | None:
-        """Load route and snapshot needed to resume the detached loop."""
-        snapshot = self._session_snapshots.get(session_key)
-        route = self._session_routes.get(session_key)
-        if snapshot and route:
-            channel, chat_id = route
-            return channel, chat_id, copy.deepcopy(snapshot)
+    def _load_resume_snapshot(self, session_id: str) -> list[dict[str, Any]] | None:
+        """Load snapshot needed to resume the detached loop."""
+        snapshot = self._session_snapshots.get(session_id)
+        if snapshot:
+            return copy.deepcopy(snapshot)
 
-        persisted = self._session_repository.read_snapshot(session_key)
+        persisted = self._session_repository.read_snapshot(session_id)
         if persisted is None:
             return None
         recovered = copy.deepcopy(persisted.messages)
-        self._session_snapshots[session_key] = recovered
-        self._session_routes[session_key] = (persisted.channel, persisted.chat_id)
-        return persisted.channel, persisted.chat_id, copy.deepcopy(recovered)
+        self._session_snapshots[session_id] = recovered
+        self._session_routes[session_id] = (persisted.channel, persisted.chat_id)
+        return copy.deepcopy(recovered)
 
     def _append_runtime_injections(
         self,
@@ -195,37 +184,37 @@ class _EngineBackgroundResume:
     async def _run_resumed_loop(
         self,
         *,
-        session_key: str,
-        channel: str,
-        chat_id: str,
+        session_id: str,
         messages: list[dict[str, Any]],
     ) -> tuple[str, Any]:
         """Resume the engine loop once with injected background completions."""
-        self._engine._update_tool_contexts(channel, chat_id)
-        self.set_session_active(session_key, True)
+        route = self._session_routes.get(session_id)
+        if route:
+            channel, chat_id = route
+            self._engine._update_tool_contexts(channel, chat_id)
+        self.set_session_active(session_id, True)
         try:
             final_content, meta, _ = await self._engine._execute_loop(
                 messages=messages,
                 max_iterations=self._engine.max_iterations,
-                session_key=session_key,
-                channel=channel,
-                chat_id=chat_id,
+                session_id=session_id,
             )
         finally:
-            self.set_session_active(session_key, False)
+            self.set_session_active(session_id, False)
         return final_content, meta
 
     async def _finalize_resumed_turn(
         self,
         *,
-        session_key: str,
-        channel: str,
-        chat_id: str,
+        session_id: str,
         messages: list[dict[str, Any]],
         final_content: str,
         meta: Any,
     ) -> None:
         """Persist resumed output and emit outbound response."""
+        route = self._session_routes.get(session_id)
+        channel, chat_id = route if route else ("unknown", "unknown")
+
         record_assistant_history = _should_record_assistant_history(final_content)
         session_history = build_persisted_session_history(
             working_set_messages=messages,
@@ -233,31 +222,19 @@ class _EngineBackgroundResume:
             include_final_assistant=record_assistant_history,
         )
         session_history = await self._engine._maybe_compact_session_history(
-            session_key=session_key,
+            session_id=session_id,
             history=session_history,
             token_model=self._engine.provider.resolve_model(self._engine.model),
         )
-        self._engine._set_session_history(session_key, session_history)
-        self._engine._touch_session(session_key)
-        if record_assistant_history:
-            session_id = self._engine._get_session_id(session_key)
-            if session_id:
-                self._engine.memory.record_event(
-                    session_id=session_id,
-                    event_type="assistant",
-                    channel=channel,
-                    chat_id=chat_id,
-                    payload={"content": final_content},
-                )
+        self._engine._set_session_history(session_id, session_history)
+        self._engine._touch_session(session_id)
 
         snapshot_messages = self._engine._build_session_snapshot_messages(
-            session_key=session_key,
-            channel=channel,
-            chat_id=chat_id,
+            session_id=session_id,
             token_model=self._engine.provider.resolve_model(self._engine.model),
         )
         self.store_session_snapshot(
-            session_key=session_key,
+            session_id=session_id,
             channel=channel,
             chat_id=chat_id,
             messages=snapshot_messages,

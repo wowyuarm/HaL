@@ -21,10 +21,11 @@ class InboundMessage:
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     origin: Literal["user"] = "user"  # Message source
+    session_id: str | None = None  # Session-first identity (set by transport adapter)
 
     @property
     def session_key(self) -> str:
-        """Unique key for session identification."""
+        """Unique key for session identification (transport-level)."""
         return f"{self.channel}:{self.chat_id}"
 
 
@@ -57,6 +58,7 @@ class ToolCallEvent(Event):
     result: str
     total_tool_calls: int
     messages: list[dict[str, Any]]
+    session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
     session_key: str | None = None
@@ -69,6 +71,7 @@ class ReminderEvent(Event):
     content: str
     total_tool_calls: int
     messages: list[dict[str, Any]]
+    session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
     session_key: str | None = None
@@ -81,6 +84,7 @@ class MessageInjectEvent(Event):
     message: InboundMessage
     prefixed_content: str
     messages: list[dict[str, Any]]
+    session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
     session_key: str | None = None
@@ -95,6 +99,7 @@ class SubagentCompleteEvent(Event, SubagentArtifactMetadata[str], SubagentUsageM
     content: str
     background: bool
     messages: list[dict[str, Any]]
+    session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
     session_key: str | None = None

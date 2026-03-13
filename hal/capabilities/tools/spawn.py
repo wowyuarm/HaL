@@ -33,11 +33,16 @@ class SpawnTool(Tool):
         self._send_callback = send_callback
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"
+        self._origin_session_id: str | None = None
 
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the origin context for background subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
+
+    def set_session_id(self, session_id: str | None) -> None:
+        """Set the session_id for background subagent event routing."""
+        self._origin_session_id = session_id
 
     @property
     def name(self) -> str:
@@ -92,6 +97,7 @@ class SpawnTool(Tool):
                 channel=self._origin_channel,
                 chat_id=self._origin_chat_id,
                 session_key=f"{self._origin_channel}:{self._origin_chat_id}",
+                session_id=self._origin_session_id,
             )
 
         display_label = label or task[:40]

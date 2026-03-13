@@ -5,20 +5,20 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
 
 from hal.context.message_building import (
     assemble_message_sequence,
-    build_session_baseline_message,
     build_system_message,
     copy_history_without_session_baseline,
 )
 from hal.context.token_budget import trim_text_to_token_budget
+
+# Re-export domain types for backward compatibility
+from hal.domain.session import SessionRuntimeState, build_session_id  # noqa: F401
 
 _MAX_COMPACTION_PASSES = 3
 _TOOL_RESULT_SUMMARY_SUFFIX = "\n...[tool result truncated for replay]"
@@ -62,51 +62,6 @@ def _normalize_checkpoint(text: str) -> str:
     from hal.runtime.engine.session_compaction import normalize_checkpoint
 
     return normalize_checkpoint(text)
-
-
-def build_session_id(*, now: datetime | None = None) -> str:
-    """Build a compact, sortable session identifier."""
-    current = now or datetime.now()
-    return f"s_{current.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-
-
-def ensure_session_state(engine: Any, *, session_key: str, channel: str, chat_id: str) -> Any:
-    """Return active session state for one channel/chat scope."""
-    now = datetime.now()
-    state = engine._session_states.get(session_key)
-    if state is not None and state.brief_task is not None:
-        if state.brief_task.done():
-            engine._session_states.pop(session_key, None)
-            engine._clear_session_snapshot(session_key)
-            engine._persist_active_sessions()
-        state = None
-
-    if state is None:
-        state = engine._SessionStateType(
-            session_id=build_session_id(now=now),
-            channel=channel,
-            chat_id=chat_id,
-            started_at=now,
-            last_activity_at=now,
-        )
-        engine._session_states[session_key] = state
-        engine.memory.record_event(
-            session_id=state.session_id,
-            event_type="session_start",
-            channel=channel,
-            chat_id=chat_id,
-        )
-        engine._persist_active_sessions()
-
-    return state
-
-
-def touch_session(engine: Any, session_key: str) -> None:
-    """Refresh last-activity timestamp for an existing session state."""
-    state = engine._session_states.get(session_key)
-    if state is None:
-        return
-    state.last_activity_at = datetime.now()
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,17 +110,17 @@ def resolve_session_compaction_settings(engine_config: object) -> SessionCompact
 
 async def tick_session_lifecycle(engine: Any) -> None:
     """Clean up finished brief tasks after explicit session closure."""
-    for session_key, state in list(engine._session_states.items()):
+    for session_id, state in list(engine._sessions.items()):
         if state.brief_task is not None:
             if state.brief_task.done():
-                engine._session_states.pop(session_key, None)
-                engine._persist_active_sessions()
+                engine._sessions.pop(session_id, None)
+                await state.event_publisher.close()
 
 
 async def maybe_compact_session_history(
     engine: Any,
     *,
-    session_key: str,
+    session_id: str,
     history: list[dict[str, object]],
     token_model: str | None,
 ) -> list[dict[str, object]]:
@@ -217,7 +172,7 @@ async def maybe_compact_session_history(
 
     _record_session_compaction(
         engine,
-        session_key=session_key,
+        session_id=session_id,
         before_tokens=before_tokens,
         after_tokens=after_tokens,
         before_request_bytes=before_request_bytes,
@@ -313,7 +268,9 @@ def _history_within_budget(
 ) -> bool:
     within_tokens = True
     if settings.token_budget > 0:
-        within_tokens = _estimate_history_tokens(history, model=token_model) <= settings.token_budget
+        within_tokens = (
+            _estimate_history_tokens(history, model=token_model) <= settings.token_budget
+        )
 
     within_bytes = True
     if settings.request_bytes_threshold > 0:
@@ -332,27 +289,29 @@ def _history_within_budget(
 def _record_session_compaction(
     engine: Any,
     *,
-    session_key: str,
+    session_id: str,
     before_tokens: int,
     after_tokens: int,
     before_request_bytes: int,
     after_request_bytes: int,
     passes: int,
 ) -> None:
-    """Persist one session compaction event when a session id is available."""
-    session_id = engine._get_session_id(session_key)
-    if not session_id:
+    """Emit a session.compacted event via the session event publisher."""
+    state = engine._sessions.get(session_id)
+    if state is None:
         return
-    engine.memory.record_event(
-        session_id=session_id,
-        event_type="session_compacted",
-        payload={
-            "before_tokens": before_tokens,
-            "after_tokens": after_tokens,
-            "before_request_bytes": before_request_bytes,
-            "after_request_bytes": after_request_bytes,
-            "passes": passes,
-        },
+    asyncio.get_event_loop().create_task(
+        state.event_publisher.emit(
+            "session.compacted",
+            actor="engine",
+            payload={
+                "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "before_request_bytes": before_request_bytes,
+                "after_request_bytes": after_request_bytes,
+                "passes": passes,
+            },
+        )
     )
 
 
@@ -525,28 +484,6 @@ def _fit_prefix_to_byte_budget(text: str, max_bytes: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# SessionState dataclass
-# ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class SessionState:
-    """Runtime session state for one channel/chat scope."""
-
-    session_id: str
-    channel: str
-    chat_id: str
-    started_at: datetime
-    last_activity_at: datetime
-    baseline_context: str | None = None
-    baseline_thread_slugs: set[str] = field(default_factory=set)
-    history: list[dict[str, object]] = field(default_factory=list)
-    touched_threads: set[str] = field(default_factory=set)
-    context_hint_keys: set[str] = field(default_factory=set)
-    brief_task: asyncio.Task[None] | None = None
-
-
-# ---------------------------------------------------------------------------
 # Session snapshot message assembly
 # ---------------------------------------------------------------------------
 
@@ -554,11 +491,11 @@ class SessionState:
 def build_session_snapshot_messages(
     engine: Any,
     *,
-    session_key: str,
+    session_id: str,
     token_model: str | None = None,
 ) -> list[dict[str, object]]:
-    """Build clean snapshot messages from system prompt, baseline, and in-memory history."""
-    state = engine._session_states.get(session_key)
+    """Build clean snapshot messages from system prompt and replay history."""
+    state = engine._sessions.get(session_id)
     history_config = engine._history_config
     return assemble_message_sequence(
         system_message=build_system_message(
@@ -567,12 +504,8 @@ def build_session_snapshot_messages(
                 token_model=token_model,
             )
         ),
-        history=list(state.history) if state else None,
-        session_baseline=(
-            build_session_baseline_message(state.baseline_context)
-            if state and state.baseline_context
-            else None
-        ),
+        history=list(state.replay_history) if state else None,
+        session_baseline=None,
     )
 
 

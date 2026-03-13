@@ -12,7 +12,6 @@ from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.session_store import SessionStore
 from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
 
-
 # ---------------------------------------------------------------------------
 # SessionStore
 # ---------------------------------------------------------------------------
@@ -45,9 +44,7 @@ class TestSessionStore:
         sid = "s_test_002"
         store.create(sid)
 
-        e1 = SessionEvent(
-            seq=1, session_id=sid, type=SESSION_CREATED, actor="engine"
-        )
+        e1 = SessionEvent(seq=1, session_id=sid, type=SESSION_CREATED, actor="engine")
         e2 = SessionEvent(
             seq=2, session_id=sid, type=TURN_STARTED, actor="engine", turn_id="t_0001"
         )

@@ -32,7 +32,7 @@ async def compile_baseline_plan(
     token_model: str | None,
     recall_max_total_tokens: int,
     recall_max_per_item_tokens: int,
-    existing_baseline: str | None,
+    mounted_threads: set[str] | None,
     memory_search: Any,
     auto_inject_top_k: int,
     recall_min_score: float,
@@ -42,58 +42,68 @@ async def compile_baseline_plan(
     related_hops: int = 1,
     max_active_threads: int = 0,
 ) -> BaselinePlan:
-    """Resolve baseline content, recall prefetch, and baseline thread membership."""
-    baseline_created = existing_baseline is None
-    search_results: list[object] = []
-    recalled_thread_slugs: set[str] = set()
+    """Resolve baseline content, recall prefetch, and baseline thread membership.
+
+    Always compiles fresh: memory recall and thread expansion run every turn.
+    When ``mounted_threads`` is provided, thread selection is constrained to
+    those explicitly mounted by the user.
+    """
     baseline_active_threads = normalize_active_thread_entries(
         active_thread_entries=active_thread_entries,
         thread_snapshot=thread_snapshot,
     )
 
-    if baseline_created:
-        search_results = await prefetch_memory_results(
-            memory_search=memory_search,
-            current_message=current_message,
-            top_k=auto_inject_top_k,
-            min_score=recall_min_score,
-        )
-        recalled_thread_slugs = collect_recalled_thread_slugs(search_results)
-        mentioned_thread_slugs = detect_thread_mentions(current_message, thread_snapshot)
-        preferred_thread_slugs = expand_related_thread_slugs(
-            seed_slugs=recalled_thread_slugs | mentioned_thread_slugs,
-            related_lookup=related_lookup,
-            max_hops=related_hops,
-        )
-        baseline_active_threads = select_active_thread_entries(
-            active_thread_entries=baseline_active_threads,
-            preferred_slugs=preferred_thread_slugs,
-            max_entries=max_active_threads,
-        )
-        logger.debug(
-            "baseline: recall={} mentioned={} active={}",
-            recalled_thread_slugs,
-            mentioned_thread_slugs,
-            [str(e.get("slug", "")) for e in baseline_active_threads],
-        )
-        session_baseline = context_builder.build_dynamic_context_block(
-            channel=channel,
-            chat_id=chat_id,
-            active_threads=baseline_active_threads,
-            memory_search_results=search_results or None,
-            recall_max_total_tokens=recall_max_total_tokens,
-            recall_max_per_item_tokens=recall_max_per_item_tokens,
-            token_model=token_model,
-        )
-    else:
-        session_baseline = existing_baseline or ""
+    search_results = await prefetch_memory_results(
+        memory_search=memory_search,
+        current_message=current_message,
+        top_k=auto_inject_top_k,
+        min_score=recall_min_score,
+    )
+    recalled_thread_slugs = collect_recalled_thread_slugs(search_results)
+    mentioned_thread_slugs = detect_thread_mentions(current_message, thread_snapshot)
+    preferred_thread_slugs = expand_related_thread_slugs(
+        seed_slugs=recalled_thread_slugs | mentioned_thread_slugs,
+        related_lookup=related_lookup,
+        max_hops=related_hops,
+    )
+
+    # When mounted_threads is specified, constrain thread selection to that set.
+    if mounted_threads is not None:
+        mounted_set = {slug for slug in mounted_threads if slug}
+        baseline_active_threads = [
+            entry
+            for entry in baseline_active_threads
+            if str(entry.get("slug", "")).strip() in mounted_set
+        ]
+
+    baseline_active_threads = select_active_thread_entries(
+        active_thread_entries=baseline_active_threads,
+        preferred_slugs=preferred_thread_slugs,
+        max_entries=max_active_threads,
+    )
+    logger.debug(
+        "baseline: mounted={} recall={} mentioned={} active={}",
+        mounted_threads or set(),
+        recalled_thread_slugs,
+        mentioned_thread_slugs,
+        [str(e.get("slug", "")) for e in baseline_active_threads],
+    )
+    session_baseline = context_builder.build_dynamic_context_block(
+        channel=channel,
+        chat_id=chat_id,
+        active_threads=baseline_active_threads,
+        memory_search_results=search_results or None,
+        recall_max_total_tokens=recall_max_total_tokens,
+        recall_max_per_item_tokens=recall_max_per_item_tokens,
+        token_model=token_model,
+    )
 
     return BaselinePlan(
         session_baseline=session_baseline,
         search_results=search_results,
         recalled_thread_slugs=recalled_thread_slugs,
         baseline_thread_slugs=collect_active_thread_slugs(baseline_active_threads),
-        baseline_created=baseline_created,
+        baseline_created=True,
     )
 
 

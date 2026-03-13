@@ -38,7 +38,7 @@ class SessionTurnRequest:
     memory_budget_tokens: int | None
     recall_max_total_tokens: int
     recall_max_per_item_tokens: int
-    existing_baseline: str | None
+    mounted_threads: set[str] | None = None
 
 
 class ContextCompiler:
@@ -76,7 +76,7 @@ class ContextCompiler:
             token_model=request.token_model,
             recall_max_total_tokens=request.recall_max_total_tokens,
             recall_max_per_item_tokens=request.recall_max_per_item_tokens,
-            existing_baseline=request.existing_baseline,
+            mounted_threads=request.mounted_threads,
             memory_search=self._memory_search,
             auto_inject_top_k=self._auto_inject_top_k,
             recall_min_score=self._recall_min_score,

@@ -28,12 +28,14 @@ def _init_engine_scope(
     target: object,
     *,
     engine: "AgentEngine",
+    session_id: str | None,
     session_key: str | None,
     channel: str | None,
     chat_id: str | None,
 ) -> None:
     """Initialize common scope attributes shared by loop helpers/subscribers."""
     target._engine = engine  # type: ignore[attr-defined]
+    target._session_id = session_id  # type: ignore[attr-defined]
     target._session_key = session_key  # type: ignore[attr-defined]
     target._channel = channel  # type: ignore[attr-defined]
     target._chat_id = chat_id  # type: ignore[attr-defined]
@@ -46,6 +48,7 @@ class _EngineEventSubscribers:
         self,
         *,
         engine: "AgentEngine",
+        session_id: str | None,
         session_key: str | None,
         channel: str | None,
         chat_id: str | None,
@@ -55,6 +58,7 @@ class _EngineEventSubscribers:
     ) -> None:
         scope = _SubscriberScope(
             engine=engine,
+            session_id=session_id,
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
@@ -88,20 +92,25 @@ class _SubscriberScope:
         self,
         *,
         engine: "AgentEngine",
+        session_id: str | None,
         session_key: str | None,
         channel: str | None,
         chat_id: str | None,
     ) -> None:
         self.engine = engine
+        self.session_id = session_id
         self.session_key = session_key
         self.channel = channel
         self.chat_id = chat_id
 
     def _matches_scope(self, event: object) -> bool:
+        event_session_id = getattr(event, "session_id", None)
         event_session = getattr(event, "session_key", None)
         event_channel = getattr(event, "channel", None)
         event_chat_id = getattr(event, "chat_id", None)
 
+        if self.session_id and event_session_id:
+            return event_session_id == self.session_id
         if self.session_key and event_session:
             return event_session == self.session_key
         if self.channel and self.chat_id and event_channel and event_chat_id:
@@ -196,22 +205,22 @@ class _ToolCallSubscriber:
             return
 
         self._mark_touched_threads(event)
-        self._record_tool_call_event(event)
+        await self._record_tool_call_event(event)
         await self._maybe_emit_reminder(event)
         await self._maybe_emit_inline_subagent_completion(event)
 
     def _mark_touched_threads(self, event: ToolCallEvent) -> None:
-        if not event.session_key or event.tool_name != "fs":
+        if not event.session_id or event.tool_name != "fs":
             return
         touched = extract_touched_threads(event.arguments)
         if touched:
-            self._scope.engine._mark_threads_touched(event.session_key, touched)
+            self._scope.engine._mark_threads_touched(event.session_id, touched)
 
-    def _record_tool_call_event(self, event: ToolCallEvent) -> None:
-        if not event.session_key:
+    async def _record_tool_call_event(self, event: ToolCallEvent) -> None:
+        if not event.session_id:
             return
-        session_id = self._scope.engine._get_session_id(event.session_key)
-        if not session_id:
+        state = self._scope.engine._sessions.get(event.session_id)
+        if state is None:
             return
         result_text = event.result or ""
         result_preview = (
@@ -221,11 +230,9 @@ class _ToolCallSubscriber:
             if result_text
             else ""
         )
-        self._scope.engine.memory.record_event(
-            session_id=session_id,
-            event_type="tool_call",
-            channel=event.channel,
-            chat_id=event.chat_id,
+        await state.event_publisher.emit(
+            "tool.call_completed",
+            actor="tool",
             payload={
                 "tool": event.tool_name,
                 "args": event.arguments,
@@ -244,6 +251,7 @@ class _ToolCallSubscriber:
                 content=self._reminder_text,
                 total_tool_calls=total_tool_calls,
                 messages=event.messages,
+                session_id=event.session_id,
                 channel=event.channel,
                 chat_id=event.chat_id,
                 session_key=event.session_key,
@@ -270,6 +278,7 @@ class _ToolCallSubscriber:
                 content=parsed.content,
                 background=False,
                 messages=event.messages,
+                session_id=event.session_id,
                 channel=event.channel,
                 chat_id=event.chat_id,
                 session_key=event.session_key,
@@ -335,17 +344,12 @@ class _EngineBackgroundSubscribers:
         self._engine.bus.unsubscribe(SubagentCompleteEvent, self._on_subagent_complete)
 
     async def _on_subagent_complete(self, event: SubagentCompleteEvent) -> None:
-        if not (event.channel and event.chat_id):
-            return
-
-        if event.session_key:
-            session_id = self._engine._get_session_id(event.session_key)
-            if session_id:
-                self._engine.memory.record_event(
-                    session_id=session_id,
-                    event_type="subagent_complete",
-                    channel=event.channel,
-                    chat_id=event.chat_id,
+        if event.session_id:
+            state = self._engine._sessions.get(event.session_id)
+            if state is not None:
+                await state.event_publisher.emit(
+                    "subagent.completed",
+                    actor="worker",
                     payload={
                         "record_id": event.record_id,
                         "label": event.label,

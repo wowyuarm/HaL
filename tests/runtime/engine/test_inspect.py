@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from hal.runtime.engine.inspect import build_context_inspection
 
 
-async def test_build_context_inspection_reuses_existing_session_baseline() -> None:
+async def test_build_context_inspection_uses_mounted_threads() -> None:
     provider = MagicMock()
     provider.resolve_model.return_value = "test-model"
 
@@ -43,15 +43,15 @@ async def test_build_context_inspection_reuses_existing_session_baseline() -> No
             history_config=history_config,
             channel="telegram",
             chat_id="42",
-            session_key="telegram:42",
+            session_id="s_telegram_42",
             session_history=[{"role": "assistant", "content": "older"}],
-            existing_baseline="<context>frozen</context>",
+            mounted_threads={"alpha-thread"},
             current_message="inspect",
             mode="default",
         )
 
     request = compiler.compile_session_turn.await_args.args[0]
-    assert request.existing_baseline == "<context>frozen</context>"
+    assert request.mounted_threads == {"alpha-thread"}
     assert payload["baseline_created"] is False
     assert payload["baseline_thread_slugs"] == ["alpha-thread"]
     assert payload["recalled_thread_slugs"] == []

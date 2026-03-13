@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,24 +15,21 @@ from hal.context.compiler import ContextCompiler
 from hal.context.message_building import add_assistant_message, add_tool_result
 from hal.context.metrics import MetricsCollector
 from hal.context.thread_mentions import detect_thread_mentions
+from hal.domain.event_sink import SessionEventPublisher, SessionEventSink
+from hal.domain.events import SESSION_ENDED, is_durable
 from hal.domain.ports import LLMProviderPort
+from hal.domain.session import SessionManifest, SessionRuntimeState, build_session_id
 from hal.memory.manager import MemoryManager
-from hal.runtime.brief import (
-    run_session_brief,
-)
+from hal.runtime.brief import run_session_brief
 from hal.runtime.session import (
-    SessionState,
-    build_session_id,
     build_session_snapshot_messages,
-    ensure_session_state,
     generate_session_checkpoint,
     maybe_compact_session_history,
     tick_session_lifecycle,
-    touch_session,
 )
 from hal.runtime.subagent import SubagentManager
 from hal.runtime.tool_factory import create_tools
-from hal.workspace import MetricsRepository, ThreadRepository
+from hal.workspace import MetricsRepository, SessionStore, ThreadRepository, WorkspaceLayout
 
 from .background_resume import _EngineBackgroundResume
 from .inspect import build_context_inspection
@@ -65,7 +61,30 @@ if TYPE_CHECKING:
 
 
 PROCESSING_MODE = "default"
-ACTIVE_SESSIONS_PATH = Path("runtime/sessions/active_sessions.json")
+
+
+# ---------------------------------------------------------------------------
+# Durable event sink — writes to per-session working-log.jsonl
+# ---------------------------------------------------------------------------
+
+
+class _WorkingLogSink(SessionEventSink):
+    """Sink that persists durable events to the session store."""
+
+    def __init__(self, store: SessionStore, manifest: SessionManifest) -> None:
+        self._store = store
+        self._manifest = manifest
+
+    async def on_event(self, event: object) -> None:
+        from hal.domain.events import SessionEvent
+
+        if not isinstance(event, SessionEvent):
+            return
+        if not is_durable(event.type):
+            return
+        self._store.append_event(self._manifest.session_id, event)
+        self._manifest.last_event_seq = event.seq
+        self._store.write_manifest(self._manifest.session_id, self._manifest)
 
 
 class AgentEngine:
@@ -115,8 +134,13 @@ class AgentEngine:
         self._metrics_repository = MetricsRepository(workspace)
         self._metrics_collector = MetricsCollector(self._metrics_repository.context_metrics_path())
         self._background_resume = _EngineBackgroundResume(engine=self)
-        self._session_states: dict[str, SessionState] = {}
-        self._SessionStateType = SessionState
+        self._layout = WorkspaceLayout(workspace)
+        self._session_store = SessionStore(self._layout)
+        self._sessions: dict[str, SessionRuntimeState] = {}
+        # Transport route mapping: session_key (channel:chat_id) → session_id
+        self._session_routes: dict[str, str] = {}
+        # Reverse mapping: session_id → (channel, chat_id)
+        self._session_channels: dict[str, tuple[str, str]] = {}
 
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(
@@ -208,7 +232,6 @@ class AgentEngine:
 
     def stop(self) -> None:
         """Stop the engine."""
-        self._persist_active_sessions()
         self._running = False
         self._background_subscribers.close()
         self._background_resume.close()
@@ -242,66 +265,133 @@ class AgentEngine:
 
         return matching
 
-    def _new_session_id(self) -> str:
-        """Build a compact, sortable session identifier."""
-        return build_session_id()
+    # -- session lifecycle (session_id-first) --------------------------------
 
-    def _ensure_session_state(
-        self, *, session_key: str, channel: str, chat_id: str
-    ) -> SessionState:
-        """Return the active session state for a channel/chat scope."""
-        return ensure_session_state(self, session_key=session_key, channel=channel, chat_id=chat_id)
-
-    def _touch_session(self, session_key: str) -> None:
-        """Refresh last-activity timestamp for an existing session state."""
-        touch_session(self, session_key)
-
-    def _get_session_baseline(self, session_key: str) -> str | None:
-        """Return the frozen baseline context for a session, if present."""
-        state = self._session_states.get(session_key)
-        if state is None:
-            return None
-        return state.baseline_context
-
-    def _set_session_baseline(
+    def create_session(
         self,
-        session_key: str,
         *,
-        baseline_context: str,
-        thread_slugs: set[str] | None = None,
+        channel: str,
+        chat_id: str,
+        primary_thread: str | None = None,
+        mounted_threads: set[str] | None = None,
+    ) -> SessionRuntimeState:
+        """Create a new session and register it with the engine."""
+        sid = build_session_id()
+        effective_mounted = sorted(mounted_threads or ([primary_thread] if primary_thread else []))
+        manifest = SessionManifest(
+            session_id=sid,
+            primary_thread=primary_thread,
+            mounted_threads=effective_mounted,
+        )
+        publisher = SessionEventPublisher(sid)
+        publisher.add_sink(_WorkingLogSink(self._session_store, manifest))
+        state = SessionRuntimeState(
+            manifest=manifest,
+            last_activity_at=datetime.now(),
+            event_publisher=publisher,
+        )
+        self._session_store.create(sid)
+        self._session_store.write_manifest(sid, manifest)
+        self._sessions[sid] = state
+        self._register_session_route(session_id=sid, channel=channel, chat_id=chat_id)
+        return state
+
+    def resume_session(self, session_id: str) -> SessionRuntimeState | None:
+        """Resume a session from in-memory cache or durable manifest."""
+        state = self._sessions.get(session_id)
+        if state is not None:
+            return state
+        manifest = self._session_store.read_manifest(session_id)
+        if manifest is None:
+            return None
+        publisher = SessionEventPublisher(session_id, initial_seq=manifest.last_event_seq)
+        publisher.add_sink(_WorkingLogSink(self._session_store, manifest))
+        state = SessionRuntimeState(
+            manifest=manifest,
+            last_activity_at=datetime.now(),
+            event_publisher=publisher,
+        )
+        self._sessions[session_id] = state
+        return state
+
+    async def end_session(
+        self,
+        session_id: str,
+        *,
+        status: str = "ended",
+        reason: str | None = None,
     ) -> None:
-        """Persist the frozen baseline context compiled for a session."""
-        state = self._session_states.get(session_key)
+        """End a session, emit closing event, and clean up."""
+        state = self._sessions.get(session_id)
         if state is None:
             return
-        state.baseline_context = baseline_context
-        if thread_slugs:
-            state.baseline_thread_slugs.update(thread_slugs)
-        self._persist_active_sessions()
+        state.manifest.status = status
+        state.manifest.ended_at = datetime.now().isoformat()
+        await state.event_publisher.emit(
+            SESSION_ENDED,
+            actor="engine",
+            payload={"reason": reason or status},
+        )
+        self._session_store.write_manifest(session_id, state.manifest)
+        await state.event_publisher.close()
+        self._sessions.pop(session_id, None)
+        self._session_channels.pop(session_id, None)
+        for key, value in list(self._session_routes.items()):
+            if value == session_id:
+                self._session_routes.pop(key, None)
 
-    def _get_session_baseline_threads(self, session_key: str) -> set[str]:
-        """Return thread slugs auto-loaded into the session baseline."""
-        state = self._session_states.get(session_key)
-        if state is None:
-            return set()
-        return set(state.baseline_thread_slugs)
+    def _register_session_route(self, *, session_id: str, channel: str, chat_id: str) -> None:
+        """Map a transport session_key to an engine session_id."""
+        session_key = f"{channel}:{chat_id}"
+        self._session_routes[session_key] = session_id
+        self._session_channels[session_id] = (channel, chat_id)
 
-    def _mark_threads_touched(self, session_key: str, thread_slugs: set[str]) -> None:
+    def _get_session_route(self, session_id: str) -> tuple[str, str] | None:
+        """Return (channel, chat_id) for a session, or None."""
+        return self._session_channels.get(session_id)
+
+    def _ensure_session_for_inbound(self, msg: object) -> SessionRuntimeState:
+        """Get or create a session for an inbound message (transport adapter path)."""
+        session_key = msg.session_key
+        session_id = self._session_routes.get(session_key)
+        if session_id:
+            state = self._sessions.get(session_id)
+            if state is not None:
+                # Clean up completed brief tasks
+                if state.brief_task is not None and state.brief_task.done():
+                    self._sessions.pop(session_id, None)
+                    self._session_routes.pop(session_key, None)
+                else:
+                    return state
+
+        state = self.create_session(channel=msg.channel, chat_id=msg.chat_id)
+        return state
+
+    # -- session state accessors (session_id-based) --------------------------
+
+    def _touch_session(self, session_id: str) -> None:
+        """Refresh last-activity timestamp."""
+        state = self._sessions.get(session_id)
+        if state is not None:
+            state.last_activity_at = datetime.now()
+
+    def _mark_threads_touched(self, session_id: str, thread_slugs: set[str]) -> None:
         """Mark threads touched in the runtime session."""
         if not thread_slugs:
             return
-        state = self._session_states.get(session_key)
+        state = self._sessions.get(session_id)
         if state is None:
             return
-        state.touched_threads.update(thread_slugs)
+        for slug in thread_slugs:
+            state.touch_thread(slug)
 
     def _detect_thread_mentions(self, text: str) -> set[str]:
         """Best-effort thread mention detection from user-visible text."""
         return detect_thread_mentions(text, self.context_registry.thread_snapshot())
 
-    def _filter_new_context_hint_keys(self, session_key: str, keys: list[str]) -> set[str]:
+    def _filter_new_context_hint_keys(self, session_id: str, keys: list[str]) -> set[str]:
         """Return keys not yet suggested in the session and mark them as seen."""
-        state = self._session_states.get(session_key)
+        state = self._sessions.get(session_id)
         if state is None:
             return set()
         new_keys = {key for key in keys if key not in state.context_hint_keys}
@@ -312,32 +402,32 @@ class AgentEngine:
         """Clean up finished brief tasks after explicit session closure."""
         await tick_session_lifecycle(self)
 
-    async def _start_session_brief(self, session_key: str, *, user_prompt: str = "") -> None:
+    async def _start_session_brief(self, session_id: str, *, user_prompt: str = "") -> None:
         """Start background brief worker task for one session."""
-        state = self._session_states.get(session_key)
+        state = self._sessions.get(session_id)
         if state is None:
             return
         if state.brief_task is not None:
             return
         state.brief_task = asyncio.create_task(
-            self._run_session_brief(session_key, user_prompt=user_prompt)
+            self._run_session_brief(session_id, user_prompt=user_prompt)
         )
 
-    async def _run_session_brief(self, session_key: str, *, user_prompt: str = "") -> None:
+    async def _run_session_brief(self, session_id: str, *, user_prompt: str = "") -> None:
         """Run brief worker agent for one closed session."""
-        await run_session_brief(self, session_key, user_prompt=user_prompt)
+        await run_session_brief(self, session_id, user_prompt=user_prompt)
 
     async def _maybe_compact_session_history(
         self,
         *,
-        session_key: str,
+        session_id: str,
         history: list[dict[str, object]],
         token_model: str | None,
     ) -> list[dict[str, object]]:
         """Compact older session turns when in-memory history exceeds token budget."""
         return await maybe_compact_session_history(
             self,
-            session_key=session_key,
+            session_id=session_id,
             history=history,
             token_model=token_model,
         )
@@ -355,38 +445,30 @@ class AgentEngine:
             token_model=token_model,
         )
 
-    def _get_session_id(self, session_key: str) -> str | None:
-        """Return active session_id for a channel/chat scope."""
-        state = self._session_states.get(session_key)
-        return state.session_id if state else None
-
-    def _get_session_history(self, session_key: str) -> list[dict[str, object]]:
+    def _get_session_history(self, session_id: str) -> list[dict[str, object]]:
         """Return full in-memory history for the active runtime session."""
-        state = self._session_states.get(session_key)
+        state = self._sessions.get(session_id)
         if state is None:
             return []
-        return list(state.history)
+        return list(state.replay_history)
 
-    def _set_session_history(self, session_key: str, history: list[dict[str, object]]) -> None:
+    def _set_session_history(self, session_id: str, history: list[dict[str, object]]) -> None:
         """Replace in-memory history snapshot for the active session."""
-        state = self._session_states.get(session_key)
+        state = self._sessions.get(session_id)
         if state is None:
             return
-        state.history = list(history)
-        self._persist_active_sessions()
+        state.replay_history = list(history)
 
     def _build_session_snapshot_messages(
         self,
         *,
-        session_key: str,
-        channel: str,
-        chat_id: str,
+        session_id: str,
         token_model: str | None = None,
     ) -> list[dict[str, object]]:
-        """Build a clean session snapshot from system prompt, baseline, and in-memory history."""
+        """Build a clean session snapshot from system prompt and in-memory history."""
         return build_session_snapshot_messages(
             self,
-            session_key=session_key,
+            session_id=session_id,
             token_model=token_model,
         )
 
@@ -394,11 +476,18 @@ class AgentEngine:
         self,
         messages: list[dict[str, object]],
         max_iterations: int,
-        session_key: str | None = None,
-        channel: str | None = None,
-        chat_id: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[str | None, object, list[object]]:
         """Run the LLM tool-calling loop via the shared runtime."""
+        # Resolve channel/chat_id from session route for hook compat
+        channel: str | None = None
+        chat_id: str | None = None
+        session_key: str | None = None
+        if session_id:
+            route = self._get_session_route(session_id)
+            if route:
+                channel, chat_id = route
+                session_key = f"{channel}:{chat_id}"
         return await execute_loop(
             self,
             messages=messages,
@@ -434,95 +523,36 @@ class AgentEngine:
         except Exception as e:
             logger.warning(f"Failed to record context metrics: {e}")
 
-    def _set_session_active(self, session_key: str, active: bool) -> None:
+    def _set_session_active(self, session_id: str, active: bool) -> None:
         """Track whether a session currently has an active engine loop."""
-        self._background_resume.set_session_active(session_key, active)
+        self._background_resume.set_session_active(session_id, active)
 
     def _store_session_snapshot(
         self,
         *,
-        session_key: str,
-        channel: str,
-        chat_id: str,
+        session_id: str,
         messages: list[dict[str, object]],
         final_content: str | None,
     ) -> None:
         """Store full loop context snapshot for potential background continuation."""
+        route = self._get_session_route(session_id)
+        channel, chat_id = route if route else ("unknown", "unknown")
         self._background_resume.store_session_snapshot(
-            session_key=session_key,
+            session_id=session_id,
             channel=channel,
             chat_id=chat_id,
             messages=messages,
             final_content=final_content,
         )
 
-    def _clear_session_snapshot(self, session_key: str) -> None:
-        """Delete persisted/cached background-resume snapshot for one session key."""
-        self._background_resume.clear_session_snapshot(session_key)
-
-    def _active_sessions_path(self) -> Path:
-        """Return the workspace path used to persist active session metadata."""
-        return self.workspace / ACTIVE_SESSIONS_PATH
-
-    def _persist_active_sessions(self) -> None:
-        """Persist resumable session metadata to the workspace filesystem."""
-        payload = {
-            session_key: {
-                "session_id": state.session_id,
-                "channel": state.channel,
-                "chat_id": state.chat_id,
-                "started_at": state.started_at.isoformat(),
-                "last_activity_at": state.last_activity_at.isoformat(),
-                "baseline_context": state.baseline_context,
-                "baseline_thread_slugs": sorted(state.baseline_thread_slugs),
-                "touched_threads": sorted(state.touched_threads),
-                "context_hint_keys": sorted(state.context_hint_keys),
-            }
-            for session_key, state in self._session_states.items()
-            if state.brief_task is None
-        }
-        path = self._active_sessions_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    def _clear_session_snapshot(self, session_id: str) -> None:
+        """Delete persisted/cached background-resume snapshot."""
+        self._background_resume.clear_session_snapshot(session_id)
 
     def _restore_active_sessions(self) -> None:
-        """Restore persisted session metadata from the workspace filesystem."""
-        path = self._active_sessions_path()
-        if not path.exists():
-            return
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning(f"Failed to restore active sessions: {e}")
-            return
-        if not isinstance(raw, dict):
-            logger.warning("Ignoring malformed active sessions payload")
-            return
-
-        for session_key, item in raw.items():
-            if not isinstance(session_key, str) or not isinstance(item, dict):
-                continue
-            try:
-                self._session_states[session_key] = SessionState(
-                    session_id=str(item["session_id"]),
-                    channel=str(item["channel"]),
-                    chat_id=str(item["chat_id"]),
-                    started_at=self._parse_session_datetime(item.get("started_at")),
-                    last_activity_at=self._parse_session_datetime(item.get("last_activity_at")),
-                    baseline_context=item.get("baseline_context"),
-                    baseline_thread_slugs=set(item.get("baseline_thread_slugs") or []),
-                    touched_threads=set(item.get("touched_threads") or []),
-                    context_hint_keys=set(item.get("context_hint_keys") or []),
-                )
-            except Exception as e:
-                logger.warning(f"Skipping invalid persisted session {session_key}: {e}")
-
-    @staticmethod
-    def _parse_session_datetime(value: object) -> datetime:
-        """Parse persisted ISO timestamps for restored session metadata."""
-        if isinstance(value, str):
-            return datetime.fromisoformat(value)
-        return datetime.now()
+        """Restore active/briefing sessions from durable manifests."""
+        for manifest in self._session_store.list_sessions(status="active"):
+            self.resume_session(manifest.session_id)
 
     async def queue_background_completion(self, event: "SubagentCompleteEvent") -> None:
         """Queue detached subagent completions and continue same-session loop when idle."""
@@ -531,12 +561,23 @@ class AgentEngine:
     async def inspect_context(
         self,
         *,
-        channel: str,
-        chat_id: str,
+        session_id: str | None = None,
+        channel: str = "unknown",
+        chat_id: str = "unknown",
         current_message: str,
     ) -> dict[str, object]:
         """Build the current context and return debug-friendly metadata."""
-        session_key = f"{channel}:{chat_id}"
+        mounted: set[str] | None = None
+        history: list[dict[str, object]] = []
+        if session_id:
+            state = self._sessions.get(session_id)
+            if state:
+                mounted = state.mounted_threads
+                history = list(state.replay_history)
+                route = self._get_session_route(session_id)
+                if route:
+                    channel, chat_id = route
+
         return await build_context_inspection(
             provider=self.provider,
             model=self.model,
@@ -550,9 +591,9 @@ class AgentEngine:
             history_config=self._history_config,
             channel=channel,
             chat_id=chat_id,
-            session_key=session_key,
-            session_history=self._get_session_history(session_key),
-            existing_baseline=self._get_session_baseline(session_key),
+            session_id=session_id,
+            session_history=history,
+            mounted_threads=mounted,
             current_message=current_message,
             mode=PROCESSING_MODE,
         )
@@ -565,7 +606,14 @@ class AgentEngine:
         chat_id: str = "direct",
     ) -> str:
         """Process a message directly for CLI usage."""
-        msg = build_direct_inbound_message(channel=channel, chat_id=chat_id, content=content)
+        # Auto-create/reuse session for CLI path
+        session_id = self._session_routes.get(session_key)
+        if not session_id:
+            state = self.create_session(channel=channel, chat_id=chat_id)
+            session_id = state.session_id
+        msg = build_direct_inbound_message(
+            channel=channel, chat_id=chat_id, content=content, session_id=session_id
+        )
         response = await self.process(msg)
         return str(getattr(response, "content", "")) if response else ""
 

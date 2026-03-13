@@ -193,19 +193,23 @@ def _build_thread_priority_map(context_registry: object) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
-async def run_session_brief(engine: Any, session_key: str, *, user_prompt: str = "") -> None:
+async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = "") -> None:
     """Run brief worker agent for one closed session.
 
     Reads session events, builds a restricted tool environment, and executes
     a tool-calling loop so the worker can autonomously read/write thread files
     under the ``work/`` directory.
     """
-    state = engine._session_states.get(session_key)
+    state = engine._sessions.get(session_id)
     if state is None:
-        logger.warning(f"Brief worker: no session state for {session_key}")
+        logger.warning(f"Brief worker: no session state for {session_id}")
         return
 
-    session_id = state.session_id
+    route = engine._session_channels.get(session_id)
+    if route is None:
+        logger.warning(f"Brief worker: no session route for {session_id}")
+        return
+    channel, chat_id = route
     brief_cfg = engine._engine_config.brief
     worker_model = engine._worker_model
     worker_provider = engine._worker_provider
@@ -270,8 +274,8 @@ async def run_session_brief(engine: Any, session_key: str, *, user_prompt: str =
 
     await engine.bus.publish_outbound(
         OutboundMessage(
-            channel=state.channel,
-            chat_id=state.chat_id,
+            channel=channel,
+            chat_id=chat_id,
             content=summary,
             metadata={"system_meta": True, "kind": "session_brief_complete"},
         )
@@ -281,8 +285,8 @@ async def run_session_brief(engine: Any, session_key: str, *, user_prompt: str =
     engine.memory.record_event(
         session_id=session_id,
         event_type="session_brief_complete",
-        channel=state.channel,
-        chat_id=state.chat_id,
+        channel=channel,
+        chat_id=chat_id,
         payload={
             "iterations": meta.iterations,
             "files_modified": meta.files_modified,

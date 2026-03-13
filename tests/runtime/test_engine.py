@@ -103,6 +103,16 @@ _TELEGRAM_TEST_CHANNEL = "telegram"
 _TELEGRAM_TEST_CHAT_ID = "c1"
 
 
+def _create_session(
+    engine: AgentEngine,
+    *,
+    channel: str = _TELEGRAM_TEST_CHANNEL,
+    chat_id: str = _TELEGRAM_TEST_CHAT_ID,
+) -> str:
+    """Create a session and return its session_id."""
+    return engine.create_session(channel=channel, chat_id=chat_id).session_id
+
+
 def _capture_outbound_messages(engine: AgentEngine) -> list[OutboundMessage]:
     """Patch bus.publish_outbound to collect messages for assertions."""
     outbound_messages: list[OutboundMessage] = []
@@ -124,12 +134,14 @@ async def _run_telegram_loop_with_outbound_capture(
     """Execute one telegram loop and return all outbound messages."""
     engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
     outbound_messages = _capture_outbound_messages(engine)
+    session_id = _create_session(
+        engine, channel=_TELEGRAM_TEST_CHANNEL, chat_id=_TELEGRAM_TEST_CHAT_ID
+    )
     mock_provider.chat.side_effect = responses
     await engine._execute_loop(
         messages=list(_LOOP_TEST_MESSAGES),
         max_iterations=max_iterations,
-        channel=_TELEGRAM_TEST_CHANNEL,
-        chat_id=_TELEGRAM_TEST_CHAT_ID,
+        session_id=session_id,
     )
     return outbound_messages
 
@@ -259,49 +271,39 @@ class TestDispatch:
         assert out is not None
         assert out.content.startswith("Error calling LLM:")
 
-    def test_session_reuses_existing_state_without_idle_rotation(self, engine):
-        key = "telegram:c1"
-        first = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
-        first_id = first.session_id
+    def test_session_reuses_existing_state_for_same_inbound_route(self, engine):
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        first = engine._ensure_session_for_inbound(msg)
+        second = engine._ensure_session_for_inbound(msg)
 
-        second = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
-        assert second.session_id == first_id
-        assert engine.memory.record_event.call_count == 1
+        assert second.session_id == first.session_id
+        assert engine._session_routes[msg.session_key] == first.session_id
 
-    def test_stop_persists_active_sessions_instead_of_ending_them(self, engine, workspace):
-        key = "telegram:c1"
-        state = engine._ensure_session_state(session_key=key, channel="telegram", chat_id="c1")
+    def test_stop_keeps_active_sessions_without_ending_them(self, engine):
+        state = engine.create_session(channel="telegram", chat_id="c1")
 
         engine.stop()
 
-        persisted = (workspace / "runtime" / "sessions" / "active_sessions.json").read_text(
-            encoding="utf-8"
-        )
-        assert state.session_id in persisted
-        assert not any(
-            call.kwargs.get("payload", {}).get("reason") == "engine_stop"
-            for call in engine.memory.record_event.call_args_list
-        )
+        # Sessions remain in memory as active; no ended_at set
+        assert state.session_id in engine._sessions
+        assert state.manifest.status == "active"
+        assert state.manifest.ended_at is None
 
     def test_restores_active_sessions_from_workspace(self, bus, mock_provider, workspace):
-        sessions_dir = workspace / "runtime" / "sessions"
-        sessions_dir.mkdir(parents=True)
-        (sessions_dir / "active_sessions.json").write_text(
-            """
+        session_dir = workspace / "work" / "sessions" / "s_existing"
+        session_dir.mkdir(parents=True)
+        (session_dir / "manifest.json").write_text(
+            """\
 {
-  "telegram:c1": {
-    "session_id": "s_existing",
-    "channel": "telegram",
-    "chat_id": "c1",
-    "started_at": "2026-03-10T10:00:00",
-    "last_activity_at": "2026-03-10T10:05:00",
-    "baseline_context": "baseline",
-    "baseline_thread_slugs": ["alpha"],
-    "touched_threads": ["alpha"],
-    "context_hint_keys": ["k1"]
-  }
-}
-""".strip(),
+  "session_id": "s_existing",
+  "status": "active",
+  "created_at": "2026-03-10T10:00:00",
+  "primary_thread": "alpha",
+  "mounted_threads": ["alpha"],
+  "touched_threads": ["alpha"],
+  "turn_count": 0,
+  "last_event_seq": 0
+}""",
             encoding="utf-8",
         )
 
@@ -331,10 +333,13 @@ class TestDispatch:
                 memory_manager=mock_mem.return_value,
             )
 
-        state = restored._ensure_session_state(session_key="telegram:c1", channel="telegram", chat_id="c1")
+        # Session should be eagerly restored by __init__ (via _restore_active_sessions)
+        assert "s_existing" in restored._sessions
+        state = restored._sessions["s_existing"]
         assert state.session_id == "s_existing"
-        assert state.baseline_context == "baseline"
-        assert state.baseline_thread_slugs == {"alpha"}
+        assert state.primary_thread == "alpha"
+        assert state.mounted_threads == {"alpha"}
+        assert state.touched_threads == {"alpha"}
 
     async def test_process_uses_in_memory_session_history(self, engine):
         engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
@@ -362,7 +367,7 @@ class TestDispatch:
         )
         engine.memory.get_conversation_history.assert_not_called()
 
-    async def test_session_baseline_compiled_once_and_reused(self, engine):
+    async def test_session_baseline_recompiled_each_turn(self, engine):
         engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
             lambda *, history, current_message, session_baseline=None, **kwargs: [
                 {"role": "system", "content": "sys"},
@@ -386,7 +391,7 @@ class TestDispatch:
         await engine.process(msg)
         await engine.process(msg)
 
-        assert engine.context.build_dynamic_context_block.call_count == 1
+        assert engine.context.build_dynamic_context_block.call_count == 2
         second_turn_messages = engine._execute_loop.await_args_list[1].args[0]
         baseline_messages = [
             m
@@ -397,11 +402,7 @@ class TestDispatch:
 
     async def test_brief_command_starts_background_worker(self, engine):
         """Sending /brief records events, creates a brief_task, and returns ack."""
-        state = engine._ensure_session_state(
-            session_key="telegram:c1",
-            channel="telegram",
-            chat_id="c1",
-        )
+        state = engine.create_session(channel="telegram", chat_id="c1")
         engine._run_session_brief = AsyncMock()  # type: ignore[method-assign]
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/brief")
@@ -414,11 +415,7 @@ class TestDispatch:
 
     async def test_brief_command_with_prompt(self, engine):
         """Sending /brief with extra text passes the prompt to the worker."""
-        engine._ensure_session_state(
-            session_key="telegram:c1",
-            channel="telegram",
-            chat_id="c1",
-        )
+        engine.create_session(channel="telegram", chat_id="c1")
         engine._run_session_brief = AsyncMock()  # type: ignore[method-assign]
 
         msg = InboundMessage(
@@ -435,8 +432,7 @@ class TestDispatch:
 
 class TestSessionCompaction:
     async def test_compacts_history_when_token_budget_exceeded(self, engine):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        session_id = _create_session(engine)
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 80
         engine._engine_config.session.compaction_recent_user_turns = 1
@@ -451,23 +447,21 @@ class TestSessionCompaction:
             {"role": "assistant", "content": "latest answer"},
         ]
 
-        before_calls = engine.memory.record_event.call_count
         compacted = await engine._maybe_compact_session_history(
-            session_key=session_key,
+            session_id=session_id,
             history=history,
             token_model="test-model",
         )
+        # Allow event publisher tasks to flush
+        await asyncio.sleep(0)
 
         assert len(compacted) < len(history)
         assert compacted[0]["role"] == "assistant"
         assert "[Session Checkpoint]" in str(compacted[0]["content"])
         assert any(m.get("content") == "latest request" for m in compacted)
-        new_calls = engine.memory.record_event.call_args_list[before_calls:]
-        assert any(c.kwargs.get("event_type") == "session_compacted" for c in new_calls)
 
     async def test_skips_compaction_when_under_budget(self, engine):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        session_id = _create_session(engine)
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 10000
 
@@ -476,20 +470,16 @@ class TestSessionCompaction:
             {"role": "assistant", "content": "ok"},
         ]
 
-        before_calls = engine.memory.record_event.call_count
         compacted = await engine._maybe_compact_session_history(
-            session_key=session_key,
+            session_id=session_id,
             history=history,
             token_model="test-model",
         )
 
         assert compacted == history
-        new_calls = engine.memory.record_event.call_args_list[before_calls:]
-        assert not any(c.kwargs.get("event_type") == "session_compacted" for c in new_calls)
 
     async def test_compaction_counts_tool_call_payloads_in_budget(self, engine):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        session_id = _create_session(engine)
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 120
         engine._engine_config.session.compaction_recent_user_turns = 1
@@ -515,7 +505,7 @@ class TestSessionCompaction:
         ]
 
         compacted = await engine._maybe_compact_session_history(
-            session_key=session_key,
+            session_id=session_id,
             history=history,
             token_model="test-model",
         )
@@ -524,8 +514,7 @@ class TestSessionCompaction:
         assert "[Session Checkpoint]" in str(compacted[0]["content"])
 
     async def test_compacts_history_when_request_bytes_threshold_exceeded(self, engine):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        session_id = _create_session(engine)
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 10000
         engine._engine_config.session.compaction_request_bytes_threshold = 900
@@ -550,7 +539,7 @@ class TestSessionCompaction:
         ]
 
         compacted = await engine._maybe_compact_session_history(
-            session_key=session_key,
+            session_id=session_id,
             history=history,
             token_model="test-model",
         )
@@ -571,9 +560,8 @@ class TestSessionCompaction:
         engine._engine_config.session.tool_result_replay_max_bytes = 12_000
         engine._execute_loop = AsyncMock(return_value=("done", LoopMetadata(), []))  # type: ignore[method-assign]
 
-        session_key = "telegram:c1"
-        state = engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
-        state.history = [
+        state = engine.create_session(channel="telegram", chat_id="c1")
+        state.replay_history = [
             {
                 "role": "user",
                 "content": [
@@ -650,14 +638,16 @@ class TestThreadTouching:
         )
         await engine.process(msg)
 
-        state = engine._session_states[msg.session_key]
+        state = engine._sessions[engine._session_routes[msg.session_key]]
         assert "github-actions" in state.touched_threads
 
 
 class TestBackgroundResume:
-    async def test_finalize_resumed_turn_updates_session_history_and_event(self, engine):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+    async def test_finalize_resumed_turn_updates_session_history_and_publishes_outbound(
+        self, engine
+    ):
+        session_id = _create_session(engine)
+        engine.bus.publish_outbound = AsyncMock()  # type: ignore[method-assign]
 
         messages = [
             {"role": "system", "content": "sys"},
@@ -667,28 +657,23 @@ class TestBackgroundResume:
         ]
 
         await engine._background_resume._finalize_resumed_turn(
-            session_key=session_key,
-            channel="telegram",
-            chat_id="c1",
+            session_id=session_id,
             messages=messages,
             final_content="background reply",
             meta=LoopMetadata(),
         )
 
-        history = engine._get_session_history(session_key)
+        history = engine._get_session_history(session_id)
         assert all(
             "[Session Baseline Context]" not in str(item.get("content", "")) for item in history
         )
         assert history[-1]["content"] == "background reply"
-        event_types = [
-            call.kwargs.get("event_type") for call in engine.memory.record_event.call_args_list
-        ]
-        assert "assistant" in event_types
+        engine.bus.publish_outbound.assert_awaited_once()
 
-    def test_load_resume_context_falls_back_to_session_repository(self, engine):
-        session_key = "telegram:c1"
+    def test_load_resume_snapshot_falls_back_to_session_repository(self, engine):
+        session_id = _create_session(engine)
         engine._background_resume.store_session_snapshot(
-            session_key=session_key,
+            session_id=session_id,
             channel="telegram",
             chat_id="c1",
             messages=[{"role": "system", "content": "sys"}],
@@ -697,27 +682,25 @@ class TestBackgroundResume:
         engine._background_resume._session_snapshots.clear()
         engine._background_resume._session_routes.clear()
 
-        loaded = engine._background_resume._load_resume_context(session_key)
+        loaded = engine._background_resume._load_resume_snapshot(session_id)
 
         assert loaded is not None
-        channel, chat_id, snapshot = loaded
-        assert channel == "telegram"
-        assert chat_id == "c1"
-        assert snapshot[-1]["content"] == "assistant reply"
+        assert loaded[-1]["content"] == "assistant reply"
+        assert engine._background_resume._session_routes[session_id] == ("telegram", "c1")
 
     def test_clear_session_snapshot_removes_cache_and_repository_copy(self, engine):
-        session_key = "telegram:c2"
+        session_id = _create_session(engine, channel="telegram", chat_id="c2")
         engine._background_resume.store_session_snapshot(
-            session_key=session_key,
+            session_id=session_id,
             channel="telegram",
             chat_id="c2",
             messages=[{"role": "user", "content": "hello"}],
             final_content=None,
         )
 
-        assert engine._background_resume._load_resume_context(session_key) is not None
-        engine._background_resume.clear_session_snapshot(session_key)
-        assert engine._background_resume._load_resume_context(session_key) is None
+        assert engine._background_resume._load_resume_snapshot(session_id) is not None
+        engine._background_resume.clear_session_snapshot(session_id)
+        assert engine._background_resume._load_resume_snapshot(session_id) is None
 
 
 class TestExecuteLoop:
@@ -827,8 +810,7 @@ class TestExecuteLoop:
         assert mock_provider.chat.await_count == 2
 
     async def test_context_advisor_injects_hint_on_next_round(self, engine, mock_provider):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        session_id = _create_session(engine)
         engine.context_registry.skill_snapshot.return_value = [
             {
                 "kind": "skill",
@@ -871,9 +853,7 @@ class TestExecuteLoop:
         final, meta, _ = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}, {"role": "user", "content": "do task"}],
             max_iterations=5,
-            session_key=session_key,
-            channel="telegram",
-            chat_id="c1",
+            session_id=session_id,
         )
 
         assert final == "final answer"
@@ -886,8 +866,7 @@ class TestExecuteLoop:
         assert worker_provider.chat.await_count == 1
 
     async def test_context_advisor_runs_per_loop(self, engine, mock_provider):
-        session_key = "telegram:c1"
-        engine._ensure_session_state(session_key=session_key, channel="telegram", chat_id="c1")
+        session_id = _create_session(engine)
         engine.context_registry.skill_snapshot.return_value = [
             {
                 "kind": "skill",
@@ -927,16 +906,12 @@ class TestExecuteLoop:
         await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}, {"role": "user", "content": "first"}],
             max_iterations=5,
-            session_key=session_key,
-            channel="telegram",
-            chat_id="c1",
+            session_id=session_id,
         )
         await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}, {"role": "user", "content": "second"}],
             max_iterations=5,
-            session_key=session_key,
-            channel="telegram",
-            chat_id="c1",
+            session_id=session_id,
         )
 
         # Context advisor now runs once per loop invocation, not once per session
@@ -1050,10 +1025,11 @@ class TestMidLoopInjection:
 
         mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
 
+        session_id = _create_session(engine)
         final, meta, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=5,
-            session_key="telegram:c1",
+            session_id=session_id,
         )
 
         assert final == "final"
@@ -1075,10 +1051,11 @@ class TestMidLoopInjection:
         )
         await bus.publish_inbound(other_msg)
 
+        session_id = _create_session(engine)
         final, _, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=1,
-            session_key="telegram:c1",
+            session_id=session_id,
         )
 
         assert injected == []
@@ -1120,10 +1097,11 @@ class TestMidLoopInjection:
 
         mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
 
+        session_id = _create_session(engine)
         final, meta, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=5,
-            session_key="telegram:c1",
+            session_id=session_id,
         )
 
         assert final == "adjusted direction"
@@ -1162,10 +1140,11 @@ class TestMidLoopInjection:
 
         mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
 
+        session_id = _create_session(engine)
         final, meta, injected = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=5,
-            session_key="telegram:c1",
+            session_id=session_id,
         )
 
         assert final == "final"
@@ -1203,10 +1182,11 @@ class TestMidLoopInjection:
 
         mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
 
+        session_id = _create_session(engine)
         await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=5,
-            session_key="telegram:c1",
+            session_id=session_id,
         )
 
         # No progress messages should have been sent
@@ -1234,6 +1214,7 @@ class TestMidLoopInjection:
         self, engine, bus, mock_provider
     ):
         """Background completion should be injected via events, not await_pending polling."""
+        session_id = _create_session(engine)
 
         async def chat_side_effect(messages, tools, model):
             if mock_provider.chat.await_count == 1:
@@ -1243,10 +1224,10 @@ class TestMidLoopInjection:
                         status="completed",
                         content="background done",
                         background=True,
+                        session_id=session_id,
                         messages=[],
                         channel="telegram",
                         chat_id="c1",
-                        session_key="telegram:c1",
                     )
                 )
                 return LLMResponse(content="intermediate", tool_calls=[])
@@ -1257,9 +1238,7 @@ class TestMidLoopInjection:
         final, _, _ = await engine._execute_loop(
             messages=[{"role": "system", "content": "x"}],
             max_iterations=5,
-            session_key="telegram:c1",
-            channel="telegram",
-            chat_id="c1",
+            session_id=session_id,
         )
 
         assert final == "final"
@@ -1275,6 +1254,7 @@ class TestMidLoopInjection:
     async def test_background_completion_event_queued_by_global_subscriber(self, engine, bus):
         original = engine.queue_background_completion
         engine.queue_background_completion = AsyncMock(side_effect=original)  # type: ignore[method-assign]
+        session_id = _create_session(engine)
 
         await bus.emit(
             SubagentCompleteEvent(
@@ -1282,10 +1262,10 @@ class TestMidLoopInjection:
                 status="completed",
                 content="background done",
                 background=True,
+                session_id=session_id,
                 messages=[],
                 channel="telegram",
                 chat_id="c1",
-                session_key="telegram:c1",
             )
         )
 
@@ -1307,16 +1287,17 @@ class TestMidLoopInjection:
         assert out is not None
         assert out.content == "started"
 
+        session_id = engine._session_routes[msg.session_key]
         await bus.emit(
             SubagentCompleteEvent(
                 label="bg-task",
                 status="completed",
                 content="background done",
                 background=True,
+                session_id=session_id,
                 messages=[],
                 channel="telegram",
                 chat_id="c1",
-                session_key="telegram:c1",
             )
         )
         await asyncio.sleep(0)

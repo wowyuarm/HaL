@@ -141,11 +141,19 @@ def build_engine_error_response(*, msg: Any, error: Exception) -> OutboundMessag
     )
 
 
-def build_direct_inbound_message(*, channel: str, chat_id: str, content: str) -> object:
+def build_direct_inbound_message(
+    *, channel: str, chat_id: str, content: str, session_id: str | None = None
+) -> object:
     """Build an inbound message object for direct CLI processing."""
     from hal.bus.events import InboundMessage
 
-    return InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+    return InboundMessage(
+        channel=channel,
+        sender_id="user",
+        chat_id=chat_id,
+        content=content,
+        session_id=session_id,
+    )
 
 
 def _parse_brief_command(content: str) -> tuple[bool, str]:
@@ -164,88 +172,66 @@ def _is_drop_command(content: str) -> bool:
 
 
 async def _handle_brief_command(
-    *, engine: Any, msg: Any, session_state: Any, user_prompt: str
+    *,
+    engine: Any,
+    session_state: Any,
+    channel: str,
+    chat_id: str,
+    user_prompt: str,
 ) -> OutboundMessage:
-    """Handle /brief: record user turn, end session, start background worker."""
+    """Handle /brief: mark session as briefing, start background worker."""
     import asyncio
 
-    # Record user turn with /brief content in event stream
-    _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
-
-    # End session
-    engine.memory.record_event(
-        session_id=session_state.session_id,
-        event_type="session_end",
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        payload={"reason": "user_brief"},
-    )
-
-    # Start background brief worker
+    session_state.manifest.status = "briefing"
     session_state.brief_task = asyncio.create_task(
-        engine._run_session_brief(msg.session_key, user_prompt=user_prompt)
+        engine._run_session_brief(session_state.session_id, user_prompt=user_prompt)
     )
-    engine._clear_session_snapshot(msg.session_key)
-    engine._persist_active_sessions()
+    engine._clear_session_snapshot(session_state.session_id)
 
     return OutboundMessage(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
+        channel=channel,
+        chat_id=chat_id,
         content="Starting session brief...",
         metadata={"system_meta": True, "kind": "session_brief_start"},
     )
 
 
-async def _handle_drop_command(*, engine: Any, msg: Any, session_state: Any) -> OutboundMessage:
+async def _handle_drop_command(
+    *,
+    engine: Any,
+    session_state: Any,
+    channel: str,
+    chat_id: str,
+) -> OutboundMessage:
     """Handle /drop: end session immediately without running brief worker."""
-    _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
-
-    engine.memory.record_event(
-        session_id=session_state.session_id,
-        event_type="session_end",
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        payload={"reason": "user_drop"},
-    )
-
-    # Remove session state so next message starts fresh
-    engine._session_states.pop(msg.session_key, None)
-    engine._clear_session_snapshot(msg.session_key)
-    engine._persist_active_sessions()
+    await engine.end_session(session_state.session_id, status="dropped", reason="user_drop")
 
     return OutboundMessage(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
+        channel=channel,
+        chat_id=chat_id,
         content="Session dropped. Next message starts a fresh session.",
         metadata={"system_meta": True, "kind": "session_drop"},
     )
 
 
-def _record_user_turn(*, engine: Any, msg: Any, session_id: str) -> None:
+def _record_user_turn(*, engine: Any, msg: Any, session_id: str, session_state: Any) -> None:
     """Persist the inbound user turn and refresh tool context bindings."""
     preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
     logger.info(f"[engine] {msg.channel}:{msg.sender_id}: {preview}")
-    engine.memory.record_event(
-        session_id=session_id,
-        event_type="user_message",
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        payload={"content": msg.content, "media": list(msg.media or [])},
-    )
-    engine._mark_threads_touched(msg.session_key, engine._detect_thread_mentions(msg.content))
+    engine._mark_threads_touched(session_id, engine._detect_thread_mentions(msg.content))
     engine._update_tool_contexts(msg.channel, msg.chat_id)
+    # Propagate session_id to spawn tool for background subagent event routing
+    spawn_tool = engine.tools.get("spawn")
+    if spawn_tool is not None and hasattr(spawn_tool, "set_session_id"):
+        spawn_tool.set_session_id(session_id)
 
 
-def _apply_compiled_turn_context(*, engine: Any, msg: Any, compiled: Any) -> None:
-    """Apply recalled/baseline thread state discovered during session-turn compilation."""
+def _apply_compiled_turn_context(*, engine: Any, session_id: str, compiled: Any) -> None:
+    """Track threads discovered during context compilation."""
     if compiled.recalled_thread_slugs:
-        engine._mark_threads_touched(msg.session_key, compiled.recalled_thread_slugs)
-    if compiled.baseline_created:
-        engine._set_session_baseline(
-            msg.session_key,
-            baseline_context=compiled.session_baseline,
-            thread_slugs=compiled.baseline_thread_slugs,
-        )
+        engine._mark_threads_touched(session_id, compiled.recalled_thread_slugs)
+    if compiled.baseline_thread_slugs:
+        engine._mark_threads_touched(session_id, compiled.baseline_thread_slugs)
 
 
 def _resolve_request_bytes_threshold(engine: Any) -> int:
@@ -262,6 +248,8 @@ async def _prepare_messages_for_request(
     *,
     engine: Any,
     msg: Any,
+    session_id: str,
+    session_state: Any,
     compiled: Any,
     request: SessionTurnRequest,
     resolved_model: str,
@@ -295,7 +283,7 @@ async def _prepare_messages_for_request(
         return compiled
 
     compacted_history = await engine._maybe_compact_session_history(
-        session_key=msg.session_key,
+        session_id=session_id,
         history=request.history,
         token_model=resolved_model,
     )
@@ -314,10 +302,10 @@ async def _prepare_messages_for_request(
             memory_budget_tokens=request.memory_budget_tokens,
             recall_max_total_tokens=request.recall_max_total_tokens,
             recall_max_per_item_tokens=request.recall_max_per_item_tokens,
-            existing_baseline=engine._get_session_baseline(msg.session_key),
+            mounted_threads=request.mounted_threads,
         )
     )
-    _apply_compiled_turn_context(engine=engine, msg=msg, compiled=recompacted)
+    _apply_compiled_turn_context(engine=engine, session_id=session_id, compiled=recompacted)
     recompacted.messages, _ = slim_messages_for_replay(
         recompacted.messages,
         image_replay_mode=image_mode,
@@ -330,8 +318,10 @@ async def _prepare_messages_for_request(
 async def _persist_completed_turn(
     *,
     engine: Any,
-    msg: Any,
+    session_id: str,
     session_state: Any,
+    channel: str,
+    chat_id: str,
     messages: list[dict[str, object]],
     final_content: str,
     meta: Any,
@@ -341,8 +331,8 @@ async def _persist_completed_turn(
     record_assistant_history = _should_record_assistant_history(final_content)
     if meta.tools_used:
         engine._mark_threads_touched(
-            msg.session_key,
-            engine._get_session_baseline_threads(msg.session_key),
+            session_id,
+            session_state.mounted_threads,
         )
 
     session_history = build_persisted_session_history(
@@ -351,32 +341,19 @@ async def _persist_completed_turn(
         include_final_assistant=record_assistant_history,
     )
     session_history = await engine._maybe_compact_session_history(
-        session_key=msg.session_key,
+        session_id=session_id,
         history=session_history,
         token_model=resolved_model,
     )
-    engine._set_session_history(msg.session_key, session_history)
-    engine._touch_session(msg.session_key)
-
-    if record_assistant_history:
-        engine.memory.record_event(
-            session_id=session_state.session_id,
-            event_type="assistant",
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            payload={"content": final_content},
-        )
+    engine._set_session_history(session_id, session_history)
+    engine._touch_session(session_id)
 
     snapshot_messages = engine._build_session_snapshot_messages(
-        session_key=msg.session_key,
-        channel=msg.channel,
-        chat_id=msg.chat_id,
+        session_id=session_id,
         token_model=resolved_model,
     )
     engine._store_session_snapshot(
-        session_key=msg.session_key,
-        channel=msg.channel,
-        chat_id=msg.chat_id,
+        session_id=session_id,
         messages=snapshot_messages,
         final_content=None,
     )
@@ -386,48 +363,67 @@ async def _persist_completed_turn(
 
 async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage | None:
     """Process a user message end-to-end."""
-    session_state = engine._ensure_session_state(
-        session_key=msg.session_key,
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-    )
+    session_state = engine._ensure_session_for_inbound(msg)
+    session_id = session_state.session_id
+    route = engine._get_session_route(session_id)
+    channel = route[0] if route else msg.channel
+    chat_id = route[1] if route else msg.chat_id
 
-    with logger.contextualize(session=session_state.session_id):
+    with logger.contextualize(session=session_id):
         # /brief command — start background brief worker and end session
         is_brief, brief_prompt = _parse_brief_command(msg.content)
         if is_brief:
+            _record_user_turn(
+                engine=engine, msg=msg, session_id=session_id, session_state=session_state
+            )
             return await _handle_brief_command(
-                engine=engine, msg=msg, session_state=session_state, user_prompt=brief_prompt
+                engine=engine,
+                session_state=session_state,
+                channel=channel,
+                chat_id=chat_id,
+                user_prompt=brief_prompt,
             )
 
         # /drop command — end session immediately without briefing
         if _is_drop_command(msg.content):
-            return await _handle_drop_command(engine=engine, msg=msg, session_state=session_state)
+            _record_user_turn(
+                engine=engine, msg=msg, session_id=session_id, session_state=session_state
+            )
+            return await _handle_drop_command(
+                engine=engine, session_state=session_state, channel=channel, chat_id=chat_id
+            )
 
-        _record_user_turn(engine=engine, msg=msg, session_id=session_state.session_id)
+        _record_user_turn(
+            engine=engine, msg=msg, session_id=session_id, session_state=session_state
+        )
 
         resolved_model = engine.provider.resolve_model(engine.model)
         hc = engine._history_config
-        history = engine._get_session_history(msg.session_key)
+        history = engine._get_session_history(session_id)
         turn_request = SessionTurnRequest(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
+            channel=channel,
+            chat_id=chat_id,
             token_model=resolved_model,
             memory_budget_tokens=(hc.memory_budget_tokens or None),
             recall_max_total_tokens=hc.recall_max_total_tokens,
             recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-            existing_baseline=engine._get_session_baseline(msg.session_key),
+            mounted_threads=session_state.mounted_threads or None,
         )
-        compiled = await engine.context_compiler.compile_session_turn(
-            turn_request
-        )
-        _apply_compiled_turn_context(engine=engine, msg=msg, compiled=compiled)
+        compiled = await engine.context_compiler.compile_session_turn(turn_request)
+        # Track discovered threads
+        if compiled.recalled_thread_slugs:
+            engine._mark_threads_touched(session_id, compiled.recalled_thread_slugs)
+        if compiled.baseline_thread_slugs:
+            engine._mark_threads_touched(session_id, compiled.baseline_thread_slugs)
+
         compiled = await _prepare_messages_for_request(
             engine=engine,
             msg=msg,
+            session_id=session_id,
+            session_state=session_state,
             compiled=compiled,
             request=turn_request,
             resolved_model=resolved_model,
@@ -449,25 +445,25 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             recall_chars=recall_chars,
         )
 
-        engine._set_session_active(msg.session_key, True)
+        engine._set_session_active(session_id, True)
         try:
             final_content, meta, _injected = await engine._execute_loop(
                 messages,
                 engine.max_iterations,
-                session_key=msg.session_key,
-                channel=msg.channel,
-                chat_id=msg.chat_id,
+                session_id=session_id,
             )
         finally:
-            engine._set_session_active(msg.session_key, False)
+            engine._set_session_active(session_id, False)
         _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
         engine._record_metrics(pre_metrics)
 
         final_content = _normalize_final_content(final_content)
         await _persist_completed_turn(
             engine=engine,
-            msg=msg,
+            session_id=session_id,
             session_state=session_state,
+            channel=channel,
+            chat_id=chat_id,
             messages=messages,
             final_content=final_content,
             meta=meta,
@@ -483,7 +479,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             )
             return None
 
-        return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=final_content)
+        return OutboundMessage(channel=channel, chat_id=chat_id, content=final_content)
 
 
 # ---------------------------------------------------------------------------
