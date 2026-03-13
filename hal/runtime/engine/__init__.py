@@ -16,7 +16,7 @@ from hal.context.message_building import add_assistant_message, add_tool_result
 from hal.context.metrics import MetricsCollector
 from hal.context.thread_mentions import detect_thread_mentions
 from hal.domain.event_sink import SessionEventPublisher, SessionEventSink
-from hal.domain.events import SESSION_ENDED, is_durable
+from hal.domain.events import SESSION_CREATED, SESSION_ENDED, SESSION_SCOPE_UPDATED, is_durable
 from hal.domain.ports import LLMProviderPort
 from hal.domain.session import SessionManifest, SessionRuntimeState, build_session_id
 from hal.memory.manager import MemoryManager
@@ -270,8 +270,8 @@ class AgentEngine:
     def create_session(
         self,
         *,
-        channel: str,
-        chat_id: str,
+        channel: str | None = None,
+        chat_id: str | None = None,
         primary_thread: str | None = None,
         mounted_threads: set[str] | None = None,
     ) -> SessionRuntimeState:
@@ -295,7 +295,8 @@ class AgentEngine:
         self._session_store.create(sid)
         self._session_store.write_manifest(sid, manifest)
         self._sessions[sid] = state
-        self._register_session_route(session_id=sid, channel=channel, chat_id=chat_id)
+        if channel and chat_id:
+            self._register_session_route(session_id=sid, channel=channel, chat_id=chat_id)
         return state
 
     def resume_session(self, session_id: str) -> SessionRuntimeState | None:
@@ -354,6 +355,17 @@ class AgentEngine:
 
     def _ensure_session_for_inbound(self, msg: object) -> SessionRuntimeState:
         """Get or create a session for an inbound message (transport adapter path)."""
+        explicit_session_id = getattr(msg, "session_id", None)
+        if explicit_session_id:
+            state = self.resume_session(explicit_session_id)
+            if state is None:
+                raise ValueError(f"Unknown session_id: {explicit_session_id}")
+            if state.manifest.status != "active":
+                raise ValueError(
+                    f"Session {explicit_session_id} is not active (status={state.manifest.status})"
+                )
+            return state
+
         session_key = msg.session_key
         session_id = self._session_routes.get(session_key)
         if session_id:
@@ -368,6 +380,64 @@ class AgentEngine:
 
         state = self.create_session(channel=msg.channel, chat_id=msg.chat_id)
         return state
+
+    async def emit_session_created(self, session_id: str) -> None:
+        """Emit one durable session.created event for a newly created session."""
+        state = self._sessions.get(session_id)
+        if state is None:
+            return
+        await state.event_publisher.emit(
+            SESSION_CREATED,
+            actor="engine",
+            refs={
+                "primary_thread": state.primary_thread,
+                "mounted_threads": sorted(state.mounted_threads),
+            },
+            payload={
+                "status": state.manifest.status,
+                "channel": state.manifest.channel,
+                "chat_id": state.manifest.chat_id,
+            },
+        )
+
+    async def update_session_scope(
+        self,
+        session_id: str,
+        *,
+        add_threads: set[str] | None = None,
+        remove_threads: set[str] | None = None,
+    ) -> SessionManifest:
+        """Mutate mounted thread scope for one active session and emit a scope event."""
+        state = self.resume_session(session_id)
+        if state is None:
+            raise ValueError(f"Unknown session_id: {session_id}")
+        if state.manifest.status != "active":
+            raise ValueError(f"Session {session_id} is not active (status={state.manifest.status})")
+
+        added = sorted(set(add_threads or set()))
+        removed = sorted(set(remove_threads or set()))
+        primary = state.primary_thread
+        if primary and primary in removed:
+            raise ValueError("Cannot remove the primary_thread from mounted scope")
+
+        for slug in added:
+            state.mount_thread(slug)
+        for slug in removed:
+            state.unmount_thread(slug)
+
+        await state.event_publisher.emit(
+            SESSION_SCOPE_UPDATED,
+            actor="user",
+            refs={
+                "primary_thread": state.primary_thread,
+                "mounted_threads": sorted(state.mounted_threads),
+            },
+            payload={
+                "added_threads": added,
+                "removed_threads": removed,
+            },
+        )
+        return state.manifest
 
     # -- session state accessors (session_id-based) --------------------------
 

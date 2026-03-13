@@ -8,6 +8,7 @@ from loguru import logger
 
 from hal.bus.events import MessageInjectEvent, ReminderEvent, SubagentCompleteEvent, ToolCallEvent
 from hal.context.token_budget import trim_text_to_token_budget
+from hal.domain.events import MESSAGE_INJECTED, SUBAGENT_COMPLETED, TOOL_CALL_COMPLETED
 from hal.runtime.brief import extract_touched_threads
 
 from .subagent_injection import (
@@ -178,6 +179,19 @@ class _MessageInjectSubscriber:
             return
 
         self._injected_sink.append(event.message)
+        if self._scope.session_id:
+            state = self._scope.engine._sessions.get(self._scope.session_id)
+            if state is not None:
+                await state.event_publisher.emit(
+                    MESSAGE_INJECTED,
+                    actor="user",
+                    payload={
+                        "sender_id": event.message.sender_id,
+                        "content": event.message.content,
+                        "prefixed_content": event.prefixed_content,
+                        "origin": event.message.origin,
+                    },
+                )
         logger.info(f"[inject] mid-loop message from {event.message.sender_id}")
 
 
@@ -231,7 +245,7 @@ class _ToolCallSubscriber:
             else ""
         )
         await state.event_publisher.emit(
-            "tool.call_completed",
+            TOOL_CALL_COMPLETED,
             actor="tool",
             payload={
                 "tool": event.tool_name,
@@ -348,7 +362,7 @@ class _EngineBackgroundSubscribers:
             state = self._engine._sessions.get(event.session_id)
             if state is not None:
                 await state.event_publisher.emit(
-                    "subagent.completed",
+                    SUBAGENT_COMPLETED,
                     actor="worker",
                     payload={
                         "record_id": event.record_id,

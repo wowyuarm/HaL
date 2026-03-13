@@ -16,7 +16,17 @@ from hal.context.metrics import (
 )
 from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token_budget
 from hal.context.token_counter import count_messages_tokens
+from hal.domain.events import (
+    ASSISTANT_MESSAGE_COMPLETED,
+    CONTEXT_COMPILED,
+    LOOP_STARTED,
+    TURN_COMPLETED,
+    TURN_FAILED,
+    TURN_STARTED,
+    USER_MESSAGE,
+)
 from hal.domain.message_payloads import estimate_content_chars
+from hal.domain.session import build_turn_id
 from hal.runtime.loop import run_tool_loop
 from hal.runtime.session import (
     build_persisted_session_history,
@@ -226,6 +236,62 @@ def _record_user_turn(*, engine: Any, msg: Any, session_id: str, session_state: 
         spawn_tool.set_session_id(session_id)
 
 
+async def _start_turn(*, msg: Any, session_state: Any) -> str:
+    """Increment turn counter and emit turn/user events."""
+    session_state.manifest.turn_count += 1
+    turn_id = build_turn_id(session_state.manifest.turn_count)
+    mounted_threads = sorted(session_state.mounted_threads)
+    await session_state.event_publisher.emit(
+        TURN_STARTED,
+        turn_id=turn_id,
+        actor="user",
+        refs={
+            "primary_thread": session_state.primary_thread,
+            "mounted_threads": mounted_threads,
+        },
+        payload={"status": session_state.manifest.status},
+    )
+    await session_state.event_publisher.emit(
+        USER_MESSAGE,
+        turn_id=turn_id,
+        actor="user",
+        payload={
+            "content": msg.content,
+            "media_count": len(getattr(msg, "media", []) or []),
+            "origin": getattr(msg, "origin", "user"),
+        },
+    )
+    return turn_id
+
+
+async def _record_compiled_context_event(
+    *,
+    session_state: Any,
+    turn_id: str,
+    compiled: Any,
+    history: list[dict[str, object]],
+    estimated_input_tokens: int | None,
+) -> None:
+    """Persist one context.compiled event for working-log reconstruction."""
+    await session_state.event_publisher.emit(
+        CONTEXT_COMPILED,
+        turn_id=turn_id,
+        actor="engine",
+        refs={
+            "primary_thread": session_state.primary_thread,
+            "mounted_threads": sorted(session_state.mounted_threads),
+            "recalled_threads": sorted(compiled.recalled_thread_slugs or []),
+            "baseline_threads": sorted(compiled.baseline_thread_slugs or []),
+        },
+        payload={
+            "history_messages": len(history),
+            "search_results": len(compiled.search_results or []),
+            "working_set_messages": len(compiled.messages or []),
+            "estimated_input_tokens": estimated_input_tokens,
+        },
+    )
+
+
 def _apply_compiled_turn_context(*, engine: Any, session_id: str, compiled: Any) -> None:
     """Track threads discovered during context compilation."""
     if compiled.recalled_thread_slugs:
@@ -376,6 +442,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             _record_user_turn(
                 engine=engine, msg=msg, session_id=session_id, session_state=session_state
             )
+            await _start_turn(msg=msg, session_state=session_state)
             return await _handle_brief_command(
                 engine=engine,
                 session_state=session_state,
@@ -389,6 +456,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             _record_user_turn(
                 engine=engine, msg=msg, session_id=session_id, session_state=session_state
             )
+            await _start_turn(msg=msg, session_state=session_state)
             return await _handle_drop_command(
                 engine=engine, session_state=session_state, channel=channel, chat_id=chat_id
             )
@@ -396,90 +464,135 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         _record_user_turn(
             engine=engine, msg=msg, session_id=session_id, session_state=session_state
         )
+        turn_id = await _start_turn(msg=msg, session_state=session_state)
 
-        resolved_model = engine.provider.resolve_model(engine.model)
-        hc = engine._history_config
-        history = engine._get_session_history(session_id)
-        turn_request = SessionTurnRequest(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=channel,
-            chat_id=chat_id,
-            token_model=resolved_model,
-            memory_budget_tokens=(hc.memory_budget_tokens or None),
-            recall_max_total_tokens=hc.recall_max_total_tokens,
-            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-            mounted_threads=session_state.mounted_threads or None,
-        )
-        compiled = await engine.context_compiler.compile_session_turn(turn_request)
-        # Track discovered threads
-        if compiled.recalled_thread_slugs:
-            engine._mark_threads_touched(session_id, compiled.recalled_thread_slugs)
-        if compiled.baseline_thread_slugs:
-            engine._mark_threads_touched(session_id, compiled.baseline_thread_slugs)
-
-        compiled = await _prepare_messages_for_request(
-            engine=engine,
-            msg=msg,
-            session_id=session_id,
-            session_state=session_state,
-            compiled=compiled,
-            request=turn_request,
-            resolved_model=resolved_model,
-        )
-        messages = compiled.messages
-        search_results = compiled.search_results
-        recall_chars = _compute_recall_chars(
-            search_results=search_results,
-            recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
-            resolved_model=resolved_model,
-        )
-        pre_metrics = _build_pre_metrics(
-            msg=msg,
-            mode=mode,
-            resolved_model=resolved_model,
-            messages=messages,
-            history=history,
-            search_results=search_results,
-            recall_chars=recall_chars,
-        )
-
-        engine._set_session_active(session_id, True)
         try:
-            final_content, meta, _injected = await engine._execute_loop(
-                messages,
-                engine.max_iterations,
+            resolved_model = engine.provider.resolve_model(engine.model)
+            hc = engine._history_config
+            history = engine._get_session_history(session_id)
+            turn_request = SessionTurnRequest(
+                history=history,
+                current_message=msg.content,
+                media=msg.media if msg.media else None,
+                channel=channel,
+                chat_id=chat_id,
+                token_model=resolved_model,
+                memory_budget_tokens=(hc.memory_budget_tokens or None),
+                recall_max_total_tokens=hc.recall_max_total_tokens,
+                recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+                mounted_threads=session_state.mounted_threads or None,
+            )
+            compiled = await engine.context_compiler.compile_session_turn(turn_request)
+            # Track discovered threads
+            if compiled.recalled_thread_slugs:
+                engine._mark_threads_touched(session_id, compiled.recalled_thread_slugs)
+            if compiled.baseline_thread_slugs:
+                engine._mark_threads_touched(session_id, compiled.baseline_thread_slugs)
+
+            compiled = await _prepare_messages_for_request(
+                engine=engine,
+                msg=msg,
                 session_id=session_id,
+                session_state=session_state,
+                compiled=compiled,
+                request=turn_request,
+                resolved_model=resolved_model,
             )
-        finally:
-            engine._set_session_active(session_id, False)
-        _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
-        engine._record_metrics(pre_metrics)
-
-        final_content = _normalize_final_content(final_content)
-        await _persist_completed_turn(
-            engine=engine,
-            session_id=session_id,
-            session_state=session_state,
-            channel=channel,
-            chat_id=chat_id,
-            messages=messages,
-            final_content=final_content,
-            meta=meta,
-            resolved_model=resolved_model,
-        )
-
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info(f"[engine] response: {preview}")
-
-        if _message_sent_in_turn(engine.tools.get("message")):
-            logger.info(
-                "[engine] message already sent via message tool, suppressing final outbound"
+            messages = compiled.messages
+            search_results = compiled.search_results
+            recall_chars = _compute_recall_chars(
+                search_results=search_results,
+                recall_max_per_item_tokens=hc.recall_max_per_item_tokens,
+                resolved_model=resolved_model,
             )
-            return None
+            pre_metrics = _build_pre_metrics(
+                msg=msg,
+                mode=mode,
+                resolved_model=resolved_model,
+                messages=messages,
+                history=history,
+                search_results=search_results,
+                recall_chars=recall_chars,
+            )
+            await _record_compiled_context_event(
+                session_state=session_state,
+                turn_id=turn_id,
+                compiled=compiled,
+                history=history,
+                estimated_input_tokens=pre_metrics.estimated_input_tokens,
+            )
+            await session_state.event_publisher.emit(
+                LOOP_STARTED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={"max_iterations": engine.max_iterations},
+            )
 
-        return OutboundMessage(channel=channel, chat_id=chat_id, content=final_content)
+            engine._set_session_active(session_id, True)
+            try:
+                final_content, meta, _injected = await engine._execute_loop(
+                    messages,
+                    engine.max_iterations,
+                    session_id=session_id,
+                )
+            finally:
+                engine._set_session_active(session_id, False)
+            _apply_loop_usage_metrics(metrics=pre_metrics, meta=meta)
+            engine._record_metrics(pre_metrics)
+
+            final_content = _normalize_final_content(final_content)
+            await _persist_completed_turn(
+                engine=engine,
+                session_id=session_id,
+                session_state=session_state,
+                channel=channel,
+                chat_id=chat_id,
+                messages=messages,
+                final_content=final_content,
+                meta=meta,
+                resolved_model=resolved_model,
+            )
+            await session_state.event_publisher.emit(
+                ASSISTANT_MESSAGE_COMPLETED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={
+                    "content": final_content,
+                    "iterations": meta.iterations,
+                    "tools_used": list(meta.tools_used),
+                    "usage": dict(meta.total_usage),
+                },
+            )
+            await session_state.event_publisher.emit(
+                TURN_COMPLETED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={
+                    "iterations": meta.iterations,
+                    "tools_used": list(meta.tools_used),
+                    "usage": dict(meta.total_usage),
+                    "output_chars": len(final_content),
+                },
+            )
+
+            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+            logger.info(f"[engine] response: {preview}")
+
+            if _message_sent_in_turn(engine.tools.get("message")):
+                logger.info(
+                    "[engine] message already sent via message tool, suppressing final outbound"
+                )
+                return None
+
+            return OutboundMessage(channel=channel, chat_id=chat_id, content=final_content)
+        except Exception as exc:
+            await session_state.event_publisher.emit(
+                TURN_FAILED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={"error": str(exc)},
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------

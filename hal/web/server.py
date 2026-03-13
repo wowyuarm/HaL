@@ -1,0 +1,216 @@
+"""Native aiohttp server for the session-first HaL web runtime."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+from typing import Any
+
+from aiohttp import WSMsgType, web
+from loguru import logger
+
+from hal.domain.session import SessionManifest
+from hal.infra.config.schema import WebConfig
+
+from .bridge import SessionBridge
+from .protocol import (
+    WS_END_SESSION,
+    WS_SUBMIT_TURN,
+    WS_UPDATE_SCOPE,
+    parse_ws_message,
+    serialize_event,
+    serialize_event_frame,
+    serialize_manifest,
+    serialize_snapshot,
+)
+
+_WS_ROUTE = "/sessions/{session_id}/ws"
+
+
+class WebServer:
+    """A thin aiohttp server exposing session/thread APIs plus live event WebSockets."""
+
+    def __init__(self, config: WebConfig, bridge: SessionBridge) -> None:
+        self._config = config
+        self._bridge = bridge
+        self._app = web.Application()
+        self._app.router.add_get("/health", self._health)
+        self._app.router.add_post("/sessions", self._create_session)
+        self._app.router.add_get("/sessions", self._list_sessions)
+        self._app.router.add_get("/sessions/{session_id}", self._get_session)
+        self._app.router.add_get("/sessions/{session_id}/events", self._get_events)
+        self._app.router.add_get(_WS_ROUTE, self._session_ws)
+        self._app.router.add_get("/threads", self._list_threads)
+        self._app.router.add_get("/threads/{slug}", self._get_thread)
+        self._runner: web.AppRunner | None = None
+        self._site: web.TCPSite | None = None
+
+    @property
+    def app(self) -> web.Application:
+        """Expose the aiohttp application for testing."""
+        return self._app
+
+    async def start(self) -> None:
+        """Start listening on the configured host/port."""
+        if self._runner is not None:
+            return
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        self._site = web.TCPSite(self._runner, host=self._config.host, port=self._config.port)
+        await self._site.start()
+        logger.info(
+            "native web server listening on http://{}:{}", self._config.host, self._config.port
+        )
+
+    async def stop(self) -> None:
+        """Stop the aiohttp server."""
+        if self._runner is not None:
+            await self._runner.cleanup()
+        self._runner = None
+        self._site = None
+
+    async def _health(self, request: web.Request) -> web.Response:
+        return web.json_response({"ok": True})
+
+    async def _create_session(self, request: web.Request) -> web.Response:
+        payload = await self._read_json(request)
+        manifest = await self._bridge.create_session(
+            primary_thread=self._optional_string(payload.get("primary_thread")),
+            mounted_threads=self._string_list(payload.get("mounted_threads")),
+        )
+        return web.json_response({"session": serialize_manifest(manifest)}, status=201)
+
+    async def _list_sessions(self, request: web.Request) -> web.Response:
+        thread_slug = self._optional_string(request.query.get("thread_slug"))
+        status = self._optional_string(request.query.get("status"))
+        sessions = self._bridge.list_sessions(thread_slug=thread_slug, status=status)
+        return web.json_response(
+            {"sessions": [serialize_manifest(session) for session in sessions]}
+        )
+
+    async def _get_session(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        manifest = self._bridge.get_session(session_id)
+        if manifest is None:
+            raise web.HTTPNotFound(text=f"Unknown session_id: {session_id}")
+        return web.json_response({"session": serialize_manifest(manifest)})
+
+    async def _get_events(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        after_seq = self._parse_after_seq(request.query.get("after_seq"))
+        self._require_manifest(session_id)
+        events = self._bridge.get_events(session_id, after_seq=after_seq)
+        return web.json_response({"events": [serialize_event(event) for event in events]})
+
+    async def _list_threads(self, request: web.Request) -> web.Response:
+        return web.json_response({"threads": self._bridge.list_threads()})
+
+    async def _get_thread(self, request: web.Request) -> web.Response:
+        slug = request.match_info["slug"]
+        try:
+            thread = self._bridge.get_thread(slug)
+        except ValueError as exc:
+            raise web.HTTPNotFound(text=str(exc)) from exc
+        return web.json_response({"thread": thread})
+
+    async def _session_ws(self, request: web.Request) -> web.StreamResponse:
+        session_id = request.match_info["session_id"]
+        manifest = self._require_manifest(session_id)
+        subscription = await self._bridge.subscribe(session_id)
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        await ws.send_json(serialize_snapshot(manifest, self._bridge.get_events(session_id)))
+
+        pump_task = asyncio.create_task(self._pump_session_events(ws, subscription))
+        try:
+            async for msg in ws:
+                if msg.type == WSMsgType.TEXT:
+                    await self._handle_ws_message(ws, session_id, msg.data)
+                elif msg.type == WSMsgType.ERROR:
+                    logger.warning("websocket error for {}: {}", session_id, ws.exception())
+        finally:
+            pump_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pump_task
+            await subscription.close()
+
+        return ws
+
+    async def _handle_ws_message(
+        self,
+        ws: web.WebSocketResponse,
+        session_id: str,
+        raw: str,
+    ) -> None:
+        try:
+            data = self._decode_json(raw)
+            message_type, payload = parse_ws_message(data)
+            if message_type == WS_SUBMIT_TURN:
+                await self._bridge.submit_turn(session_id, payload["content"])
+                return
+            if message_type == WS_END_SESSION:
+                await self._bridge.end_session(
+                    session_id,
+                    reason=payload["reason"],
+                    user_prompt=payload["user_prompt"],
+                )
+                return
+            if message_type == WS_UPDATE_SCOPE:
+                await self._bridge.update_scope(
+                    session_id,
+                    add_threads=payload["add_threads"],
+                    remove_threads=payload["remove_threads"],
+                )
+                return
+        except Exception as exc:
+            await ws.send_json({"type": "error", "message": str(exc)})
+
+    async def _pump_session_events(self, ws: web.WebSocketResponse, subscription: Any) -> None:
+        while not ws.closed:
+            event = await subscription.next_event()
+            await ws.send_json(serialize_event_frame(event))
+
+    async def _read_json(self, request: web.Request) -> dict[str, Any]:
+        try:
+            data = await request.json()
+        except Exception as exc:
+            raise web.HTTPBadRequest(text="Request body must be valid JSON") from exc
+        if not isinstance(data, dict):
+            raise web.HTTPBadRequest(text="Request body must be a JSON object")
+        return data
+
+    @staticmethod
+    def _decode_json(raw: str) -> dict[str, Any]:
+        import json
+
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("WebSocket payload must be a JSON object")
+        return data
+
+    @staticmethod
+    def _optional_string(value: Any) -> str | None:
+        text = str(value).strip() if value is not None else ""
+        return text or None
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @staticmethod
+    def _parse_after_seq(value: str | None) -> int:
+        if value is None or value == "":
+            return 0
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text="after_seq must be an integer") from exc
+        return max(parsed, 0)
+
+    def _require_manifest(self, session_id: str) -> SessionManifest:
+        manifest = self._bridge.get_session(session_id)
+        if manifest is None:
+            raise web.HTTPNotFound(text=f"Unknown session_id: {session_id}")
+        return manifest

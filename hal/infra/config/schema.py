@@ -27,11 +27,11 @@ class TelegramConfig(_StrictModel):
 
 
 class WebConfig(_StrictModel):
-    """Backend web channel configuration (WebSocket server)."""
+    """Native web runtime configuration (HTTP + WebSocket server)."""
 
     enabled: bool = False
-    host: str = "localhost"  # Bind host for the aiohttp WebSocket server
-    port: int = 8765  # Bind port for the aiohttp WebSocket server
+    host: str = "localhost"  # Bind host for the native aiohttp web server
+    port: int = 8765  # Bind port for the native aiohttp web server
 
 
 class ChannelsConfig(_StrictModel):

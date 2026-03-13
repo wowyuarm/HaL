@@ -15,6 +15,14 @@ from hal.bus.events import (
     ToolCallEvent,
 )
 from hal.context.message_building import add_assistant_message as append_assistant_message
+from hal.domain.events import (
+    HOOK_INJECTED,
+    LLM_REQUEST_STARTED,
+    LLM_RESPONSE_COMPLETED,
+    LOOP_ITERATION_STARTED,
+    MESSAGE_INJECTED,
+    TOOL_CALL_STARTED,
+)
 from hal.runtime.engine.context_advisor import (
     build_context_advisor_input,
     build_context_hint_keys,
@@ -190,14 +198,48 @@ class _EngineLoopHooks:
                 )
             )
 
+    async def _emit_session_event(
+        self,
+        event_type: str,
+        *,
+        actor: str,
+        payload: dict[str, Any] | None = None,
+        refs: dict[str, Any] | None = None,
+    ) -> None:
+        """Best-effort event emission for the current session scope."""
+        if not self._session_id:
+            return
+        state = self._engine._sessions.get(self._session_id)
+        if state is None:
+            return
+        await state.event_publisher.emit(
+            event_type,
+            actor=actor,  # type: ignore[arg-type]
+            payload=payload or {},
+            refs=refs or {},
+        )
+
     async def before_llm_call(self, messages: list[dict[str, Any]], meta: LoopMetadata) -> None:
         self._latest_user_message = self._extract_latest_user_content(messages)
         self._collect_completed_context_hint()
         await self._inject_buffered_pending(messages)
         await self._inject_fresh_pending(messages)
-        self._append_pending_reminders(messages)
-        self._append_pending_subagent_runtime_injections(messages)
-        self._flush_context_hints(messages)
+        await self._append_pending_reminders(messages)
+        await self._append_pending_subagent_runtime_injections(messages)
+        await self._flush_context_hints(messages)
+        await self._emit_session_event(
+            LOOP_ITERATION_STARTED,
+            actor="engine",
+            payload={"iteration": meta.iterations},
+        )
+        await self._emit_session_event(
+            LLM_REQUEST_STARTED,
+            actor="engine",
+            payload={
+                "iteration": meta.iterations,
+                "message_count": len(messages),
+            },
+        )
 
     async def on_tool_result(
         self,
@@ -229,6 +271,15 @@ class _EngineLoopHooks:
         response: Any,
         meta: LoopMetadata,
     ) -> bool:
+        await self._emit_session_event(
+            LLM_RESPONSE_COMPLETED,
+            actor="engine",
+            payload={
+                "iteration": meta.iterations,
+                "has_tool_calls": False,
+                "content_preview": (response.content or "")[:300],
+            },
+        )
         pending_injections = self._event_subscribers.pop_pending_subagent_runtime_injections()
         if not pending_injections:
             return False
@@ -289,26 +340,48 @@ class _EngineLoopHooks:
         if fresh:
             await self._inject_pending(messages, fresh)
 
-    def _append_pending_reminders(self, messages: list[dict[str, Any]]) -> None:
+    async def _append_pending_reminders(self, messages: list[dict[str, Any]]) -> None:
         """Append reminder events as synthetic user messages."""
-        self._append_user_messages(
-            messages,
-            [reminder.content for reminder in self._event_subscribers.pop_pending_reminders()],
-        )
+        for reminder in self._event_subscribers.pop_pending_reminders():
+            self._append_user_messages(messages, [reminder.content])
+            await self._emit_session_event(
+                HOOK_INJECTED,
+                actor="engine",
+                payload={
+                    "kind": "system_reminder",
+                    "content": reminder.content,
+                },
+            )
 
-    def _append_pending_subagent_runtime_injections(self, messages: list[dict[str, Any]]) -> None:
+    async def _append_pending_subagent_runtime_injections(
+        self, messages: list[dict[str, Any]]
+    ) -> None:
         """Append runtime subagent injections before the next LLM call."""
-        self._append_user_messages(
-            messages,
-            self._event_subscribers.pop_pending_subagent_runtime_injections(),
-        )
+        for injection in self._event_subscribers.pop_pending_subagent_runtime_injections():
+            self._append_user_messages(messages, [injection])
+            await self._emit_session_event(
+                MESSAGE_INJECTED,
+                actor="worker",
+                payload={
+                    "kind": "subagent_runtime",
+                    "content": injection,
+                },
+            )
 
-    def _flush_context_hints(self, messages: list[dict[str, Any]]) -> None:
+    async def _flush_context_hints(self, messages: list[dict[str, Any]]) -> None:
         """Append buffered context hints as user messages."""
         if not self._pending_context_hints:
             return
         for hint in self._pending_context_hints:
             messages.append({"role": "user", "content": hint})
+            await self._emit_session_event(
+                HOOK_INJECTED,
+                actor="engine",
+                payload={
+                    "kind": "context_hint",
+                    "content": hint,
+                },
+            )
         self._pending_context_hints.clear()
 
     @staticmethod
@@ -492,6 +565,16 @@ class _EngineLoopHooks:
         assistant_content: str | None,
         meta: LoopMetadata,
     ) -> bool | None:
+        await self._emit_session_event(
+            LLM_RESPONSE_COMPLETED,
+            actor="engine",
+            payload={
+                "iteration": meta.iterations,
+                "has_tool_calls": True,
+                "tool_call_count": len(tool_calls),
+                "content_preview": (assistant_content or "")[:300],
+            },
+        )
         self._buffer_fresh_pending_messages()
         self._maybe_start_context_advisor(
             tool_calls=tool_calls,
@@ -499,6 +582,18 @@ class _EngineLoopHooks:
         )
         if self._should_interrupt_tool_calls(tool_calls):
             return True
+
+        for tool_call in tool_calls:
+            await self._emit_session_event(
+                TOOL_CALL_STARTED,
+                actor="tool",
+                refs={"tool_call_id": tool_call.id},
+                payload={
+                    "tool": tool_call.name,
+                    "args": tool_call.arguments,
+                    "iteration": meta.iterations,
+                },
+            )
 
         if not (self._channel and self._chat_id):
             return None
