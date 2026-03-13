@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -79,6 +79,32 @@ async def test_http_scope_update_returns_updated_manifest(bridge, thread_repo) -
     assert response.status == 200
     payload = _decode_response(response)
     assert payload["session"]["mounted_threads"] == ["auth", "memory"]
+
+
+@pytest.mark.asyncio
+async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    turn_response = await server._submit_turn(  # type: ignore[attr-defined]
+        _FakeRequest(
+            payload={"content": "hello"},
+            match_info={"session_id": manifest.session_id},
+        )
+    )
+    turn_payload = _decode_response(turn_response)
+    assert turn_payload["session"]["turn_count"] == 1
+
+    with patch.object(bridge._engine, "_run_session_brief", new_callable=AsyncMock):
+        end_response = await server._end_session(  # type: ignore[attr-defined]
+            _FakeRequest(
+                payload={"reason": "brief"},
+                match_info={"session_id": manifest.session_id},
+            )
+        )
+    end_payload = _decode_response(end_response)
+    assert end_payload["session"]["status"] == "briefing"
 
 
 @pytest.mark.asyncio

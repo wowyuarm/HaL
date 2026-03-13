@@ -38,7 +38,9 @@ class WebServer:
         self._app.router.add_post("/sessions", self._create_session)
         self._app.router.add_get("/sessions", self._list_sessions)
         self._app.router.add_get("/sessions/{session_id}", self._get_session)
+        self._app.router.add_post("/sessions/{session_id}/turns", self._submit_turn)
         self._app.router.add_get("/sessions/{session_id}/events", self._get_events)
+        self._app.router.add_post("/sessions/{session_id}/end", self._end_session)
         self._app.router.add_post("/sessions/{session_id}/scope", self._update_scope)
         self._app.router.add_get(_WS_ROUTE, self._session_ws)
         self._app.router.add_get("/threads", self._list_threads)
@@ -103,6 +105,20 @@ class WebServer:
         events = self._bridge.get_events(session_id, after_seq=after_seq)
         return web.json_response({"events": [serialize_event(event) for event in events]})
 
+    async def _submit_turn(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        self._require_manifest(session_id)
+        payload = await self._read_json(request)
+        content = self._optional_string(payload.get("content"))
+        if not content:
+            raise web.HTTPBadRequest(text="submit_turn requires non-empty content")
+        try:
+            await self._bridge.submit_turn(session_id, content)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        manifest = self._require_manifest(session_id)
+        return web.json_response({"session": serialize_manifest(manifest)})
+
     async def _update_scope(self, request: web.Request) -> web.Response:
         session_id = request.match_info["session_id"]
         self._require_manifest(session_id)
@@ -115,6 +131,21 @@ class WebServer:
             )
         except ValueError as exc:
             raise web.HTTPBadRequest(text=str(exc)) from exc
+        return web.json_response({"session": serialize_manifest(manifest)})
+
+    async def _end_session(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        self._require_manifest(session_id)
+        payload = await self._read_json(request)
+        reason = self._optional_string(payload.get("reason"))
+        if reason not in {"brief", "drop"}:
+            raise web.HTTPBadRequest(text="end_session requires reason 'brief' or 'drop'")
+        user_prompt = self._optional_string(payload.get("user_prompt")) or ""
+        try:
+            await self._bridge.end_session(session_id, reason=reason, user_prompt=user_prompt)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        manifest = self._require_manifest(session_id)
         return web.json_response({"session": serialize_manifest(manifest)})
 
     async def _list_threads(self, request: web.Request) -> web.Response:

@@ -49,8 +49,8 @@ export function WorkingLog({
   const wasNearBottomRef = useRef(true);
   const items = buildWorkingLogItems(events);
   const display = session ? sessionDisplayState(session.status) : null;
-  const canSend = Boolean(session && session.status === "active" && socketState === "live");
-  const canEndSession = Boolean(session && session.status === "active" && socketState === "live");
+  const canSend = Boolean(session && session.status === "active");
+  const canEndSession = Boolean(session && session.status === "active");
   const canEditScope = Boolean(scopeEditable && session?.status === "active");
   const interactive = Boolean(session && isInteractiveSession(session.status));
 
@@ -131,7 +131,7 @@ export function WorkingLog({
           <span>Created {formatTimestamp(session.created_at)}</span>
           <span>Turns {session.turn_count}</span>
           <span>Events {events.length}</span>
-          <span>Socket {socketState}</span>
+          <span>{socketState === "live" ? "Live stream connected" : `Live stream ${socketState}`}</span>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">

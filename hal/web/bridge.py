@@ -55,6 +55,7 @@ class SessionBridge:
         self._layout = WorkspaceLayout(engine.workspace)
         self._session_store = SessionStore(self._layout)
         self._threads = ThreadRepository(engine.workspace)
+        self._session_locks: dict[str, asyncio.Lock] = {}
 
     async def create_session(
         self,
@@ -95,19 +96,8 @@ class SessionBridge:
 
     async def submit_turn(self, session_id: str, content: str) -> str | None:
         """Submit one user turn into an existing active session."""
-        manifest = self._require_session(session_id)
-        if manifest.status != "active":
-            raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
-
-        msg = build_direct_inbound_message(
-            channel=_WEB_CHANNEL,
-            chat_id=session_id,
-            content=content,
-            session_id=session_id,
-        )
-        msg.sender_id = _WEB_SENDER_ID
-        response = await self._engine.process(msg)
-        return str(getattr(response, "content", "")) if response else None
+        async with self._session_lock(session_id):
+            return await self._submit_turn_unlocked(session_id, content)
 
     async def end_session(
         self,
@@ -117,12 +107,13 @@ class SessionBridge:
         user_prompt: str = "",
     ) -> str | None:
         """End one session via the existing human-in-the-loop control commands."""
-        if reason == "brief":
-            command = f"/brief {user_prompt}".strip()
-            return await self.submit_turn(session_id, command)
-        if reason == "drop":
-            return await self.submit_turn(session_id, "/drop")
-        raise ValueError(f"Unsupported session end reason: {reason}")
+        async with self._session_lock(session_id):
+            if reason == "brief":
+                command = f"/brief {user_prompt}".strip()
+                return await self._submit_turn_unlocked(session_id, command)
+            if reason == "drop":
+                return await self._submit_turn_unlocked(session_id, "/drop")
+            raise ValueError(f"Unsupported session end reason: {reason}")
 
     async def update_scope(
         self,
@@ -132,14 +123,15 @@ class SessionBridge:
         remove_threads: list[str] | None = None,
     ) -> SessionManifest:
         """Mutate mounted thread scope for one active session."""
-        add = {slug for slug in (add_threads or []) if slug}
-        remove = {slug for slug in (remove_threads or []) if slug}
-        self._validate_threads(add | remove)
-        return await self._engine.update_session_scope(
-            session_id,
-            add_threads=add or None,
-            remove_threads=remove or None,
-        )
+        async with self._session_lock(session_id):
+            add = {slug for slug in (add_threads or []) if slug}
+            remove = {slug for slug in (remove_threads or []) if slug}
+            self._validate_threads(add | remove)
+            return await self._engine.update_session_scope(
+                session_id,
+                add_threads=add or None,
+                remove_threads=remove or None,
+            )
 
     async def subscribe(self, session_id: str) -> SessionSubscription:
         """Attach a live event subscriber to an active in-memory session."""
@@ -207,6 +199,30 @@ class SessionBridge:
         if manifest is None:
             raise ValueError(f"Unknown session_id: {session_id}")
         return manifest
+
+    async def _submit_turn_unlocked(self, session_id: str, content: str) -> str | None:
+        """Run one direct session turn while holding the per-session write lock."""
+        manifest = self._require_session(session_id)
+        if manifest.status != "active":
+            raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
+
+        msg = build_direct_inbound_message(
+            channel=_WEB_CHANNEL,
+            chat_id=session_id,
+            content=content,
+            session_id=session_id,
+        )
+        msg.sender_id = _WEB_SENDER_ID
+        response = await self._engine.process(msg)
+        return str(getattr(response, "content", "")) if response else None
+
+    def _session_lock(self, session_id: str) -> asyncio.Lock:
+        """Return the single-writer lock guarding one session's mutable runtime."""
+        lock = self._session_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[session_id] = lock
+        return lock
 
     def _require_thread_entry(self, slug: str) -> ThreadRegistryEntry:
         for entry in self._threads.collect_registry_entries(max_entries=_THREAD_LIST_MAX):

@@ -114,7 +114,9 @@ export function useSessionSocket(
       ws.onopen = () => {
         if (!isLive()) return;
         attemptRef.current = 0;
-        useHalStore.getState().setSocketState("live");
+        const nextStore = useHalStore.getState();
+        nextStore.setSocketState("live");
+        nextStore.setError(null);
       };
 
       ws.onmessage = (event: MessageEvent) => {

@@ -10,6 +10,7 @@ import pytest
 from hal.bus.events import InboundMessage, OutboundMessage, SubagentCompleteEvent
 from hal.bus.queue import MessageBus
 from hal.context.message_building import add_assistant_message, add_tool_result
+from hal.domain.events import BRIEF_STARTED
 from hal.infra.config.schema import ChannelsConfig, TelegramConfig
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from hal.runtime.engine import (
@@ -650,6 +651,14 @@ class TestBackgroundResume:
     ):
         session_id = _create_session(engine)
         engine.bus.publish_outbound = AsyncMock()  # type: ignore[method-assign]
+        turn_id = "t_0002"
+        engine._background_resume.store_session_snapshot(
+            session_id=session_id,
+            channel="telegram",
+            chat_id="c1",
+            messages=[{"role": "system", "content": "sys"}],
+            final_content=None,
+        )
 
         messages = [
             {"role": "system", "content": "sys"},
@@ -660,6 +669,7 @@ class TestBackgroundResume:
 
         await engine._background_resume._finalize_resumed_turn(
             session_id=session_id,
+            turn_id=turn_id,
             messages=messages,
             final_content="background reply",
             meta=LoopMetadata(),
@@ -670,7 +680,47 @@ class TestBackgroundResume:
             "[Session Baseline Context]" not in str(item.get("content", "")) for item in history
         )
         assert history[-1]["content"] == "background reply"
+        event_types = [event.type for event in engine._session_store.read_events(session_id)]
+        assert event_types[-2:] == ["assistant.message_completed", "turn.completed"]
         engine.bus.publish_outbound.assert_awaited_once()
+
+    async def test_background_completion_does_not_resume_closed_session(self, engine):
+        session_id = _create_session(engine)
+        await engine.end_session(session_id, status="dropped", reason="user_drop")
+
+        event = SubagentCompleteEvent(
+            label="worker",
+            status="completed",
+            content="done",
+            background=True,
+            messages=[],
+            session_id=session_id,
+        )
+
+        await engine.queue_background_completion(event)
+
+        assert session_id not in engine._background_resume._pending_background_events
+        assert engine._background_resume._load_resume_snapshot(session_id) is None
+
+    def test_resume_session_restores_history_from_snapshot(self, engine):
+        session_id = _create_session(engine, channel="telegram", chat_id="c1")
+        state = engine._sessions[session_id]
+        state.replay_history = [
+            {"role": "user", "content": "prior request"},
+            {"role": "assistant", "content": "prior reply"},
+        ]
+        snapshot_messages = engine._build_session_snapshot_messages(session_id=session_id)
+        engine._store_session_snapshot(
+            session_id=session_id,
+            messages=snapshot_messages,
+            final_content=None,
+        )
+        engine._sessions.pop(session_id, None)
+
+        restored = engine.resume_session(session_id)
+
+        assert restored is not None
+        assert restored.replay_history[-1]["content"] == "prior reply"
 
     def test_load_resume_snapshot_falls_back_to_session_repository(self, engine):
         session_id = _create_session(engine)
@@ -721,6 +771,26 @@ class TestBriefWorker:
         assert manifest is not None
         assert manifest.status == "ended"
         engine.bus.publish_outbound.assert_not_awaited()
+
+    async def test_restart_briefing_sessions_replays_saved_prompt(self, engine):
+        state = engine.create_session(channel="telegram", chat_id="brief-chat")
+        state.manifest.status = "briefing"
+        engine._session_store.write_manifest(state.session_id, state.manifest)
+        await state.event_publisher.emit(
+            BRIEF_STARTED,
+            turn_id="t_0001",
+            actor="user",
+            payload={"user_prompt": "focus on decisions"},
+        )
+        engine._sessions.pop(state.session_id, None)
+        resumed = engine.resume_session(state.session_id)
+        assert resumed is not None
+
+        with patch.object(engine, "_run_session_brief", new_callable=AsyncMock) as mock_run:
+            await engine._restart_briefing_sessions()
+            await asyncio.sleep(0)
+
+        mock_run.assert_awaited_once_with(state.session_id, user_prompt="focus on decisions")
 
 
 class TestExecuteLoop:

@@ -35,11 +35,39 @@ export async function createSession(input: {
   return payload.session;
 }
 
+export async function submitSessionTurn(
+  sessionId: string,
+  input: { content: string },
+): Promise<SessionManifest> {
+  const payload = await requestJson<{ session: SessionManifest }>(
+    `/sessions/${encodeURIComponent(sessionId)}/turns`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return payload.session;
+}
+
 export async function getSessionEvents(sessionId: string): Promise<SessionEvent[]> {
   const payload = await requestJson<{ events: SessionEvent[] }>(
     `/sessions/${encodeURIComponent(sessionId)}/events`,
   );
   return payload.events;
+}
+
+export async function endSession(
+  sessionId: string,
+  input: { reason: "brief" | "drop"; user_prompt?: string },
+): Promise<SessionManifest> {
+  const payload = await requestJson<{ session: SessionManifest }>(
+    `/sessions/${encodeURIComponent(sessionId)}/end`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return payload.session;
 }
 
 export async function updateSessionScope(

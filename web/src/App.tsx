@@ -4,6 +4,7 @@ import { WorkingLog } from "@/components/session/working-log";
 import { SessionScopeDialog } from "@/components/session/session-scope-dialog";
 import { SessionMountedThreadsDialog } from "@/components/session/session-mounted-threads-dialog";
 import { ThreadDetailPanel } from "@/components/thread/thread-detail";
+import { endSession, submitSessionTurn } from "@/lib/api";
 import { ThreadList } from "@/components/thread/thread-list";
 import { isInteractiveSession } from "@/lib/runtime";
 import { useHalStore } from "@/lib/store";
@@ -21,14 +22,15 @@ export default function App() {
   const selectedSessionId = useHalStore((s) => s.selectedSessionId);
   const socketState = useHalStore((s) => s.socketState);
   const loadingThreads = useHalStore((s) => s.loadingThreads);
-  const loadingThread = useHalStore((s) => s.loadingThread);
-  const loadingSession = useHalStore((s) => s.loadingSession);
+  const loadingThreadSlug = useHalStore((s) => s.loadingThreadSlug);
+  const loadingSessionId = useHalStore((s) => s.loadingSessionId);
   const creatingSession = useHalStore((s) => s.creatingSession);
   const updatingScopeSessionId = useHalStore((s) => s.updatingScopeSessionId);
   const lastError = useHalStore((s) => s.lastError);
   const loadThreads = useHalStore((s) => s.loadThreads);
   const loadThread = useHalStore((s) => s.loadThread);
   const loadSessionEvents = useHalStore((s) => s.loadSessionEvents);
+  const applySessionManifest = useHalStore((s) => s.applySessionManifest);
   const selectThread = useHalStore((s) => s.selectThread);
   const selectSession = useHalStore((s) => s.selectSession);
   const createSessionForThread = useHalStore((s) => s.createSessionForThread);
@@ -41,9 +43,11 @@ export default function App() {
   const scopeEditorSession = scopeEditorSessionId
     ? sessionManifests[scopeEditorSessionId] ?? null
     : null;
+  const loadingThread = Boolean(activeThreadSlug && loadingThreadSlug === activeThreadSlug);
+  const loadingSession = Boolean(selectedSessionId && loadingSessionId === selectedSessionId);
   const events = selectedSessionId ? sessionEvents[selectedSessionId] ?? [] : [];
   const latestEventSeq = events.at(-1)?.seq ?? 0;
-  const { send } = useSessionSocket(
+  useSessionSocket(
     selectedSession?.session_id ?? null,
     selectedSession?.status ?? null,
   );
@@ -127,21 +131,51 @@ export default function App() {
     }
   };
 
-  const handleSend = (content: string) => {
-    if (!selectedSession || !send({ type: "submit_turn", content })) {
-      setError("Live session socket is not ready yet.");
+  const handleSend = async (content: string) => {
+    if (!selectedSession) {
+      return;
+    }
+    setError(null);
+    try {
+      const manifest = await submitSessionTurn(selectedSession.session_id, { content });
+      if (socketState !== "live") {
+        applySessionManifest(manifest);
+        await loadSessionEvents(selectedSession.session_id);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to submit turn.");
     }
   };
 
-  const handleBrief = () => {
-    if (!selectedSession || !send({ type: "end_session", reason: "brief" })) {
-      setError("Unable to start briefing until the session socket is live.");
+  const handleBrief = async () => {
+    if (!selectedSession) {
+      return;
+    }
+    setError(null);
+    try {
+      const manifest = await endSession(selectedSession.session_id, { reason: "brief" });
+      if (socketState !== "live") {
+        applySessionManifest(manifest);
+        await loadSessionEvents(selectedSession.session_id);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to start briefing.");
     }
   };
 
-  const handleDrop = () => {
-    if (!selectedSession || !send({ type: "end_session", reason: "drop" })) {
-      setError("Unable to drop this session until the session socket is live.");
+  const handleDrop = async () => {
+    if (!selectedSession) {
+      return;
+    }
+    setError(null);
+    try {
+      const manifest = await endSession(selectedSession.session_id, { reason: "drop" });
+      if (socketState !== "live") {
+        applySessionManifest(manifest);
+        await loadSessionEvents(selectedSession.session_id);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to drop session.");
     }
   };
 

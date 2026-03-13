@@ -184,6 +184,7 @@ class _MessageInjectSubscriber:
             if state is not None:
                 await state.event_publisher.emit(
                     MESSAGE_INJECTED,
+                    turn_id=event.turn_id,
                     actor="user",
                     payload={
                         "sender_id": event.message.sender_id,
@@ -246,6 +247,7 @@ class _ToolCallSubscriber:
         )
         await state.event_publisher.emit(
             TOOL_CALL_COMPLETED,
+            turn_id=event.turn_id,
             actor="tool",
             payload={
                 "tool": event.tool_name,
@@ -265,6 +267,7 @@ class _ToolCallSubscriber:
                 content=self._reminder_text,
                 total_tool_calls=total_tool_calls,
                 messages=event.messages,
+                turn_id=event.turn_id,
                 session_id=event.session_id,
                 channel=event.channel,
                 chat_id=event.chat_id,
@@ -292,6 +295,7 @@ class _ToolCallSubscriber:
                 content=parsed.content,
                 background=False,
                 messages=event.messages,
+                turn_id=event.turn_id,
                 session_id=event.session_id,
                 channel=event.channel,
                 chat_id=event.chat_id,
@@ -363,6 +367,7 @@ class _EngineBackgroundSubscribers:
             if state is not None:
                 await state.event_publisher.emit(
                     SUBAGENT_COMPLETED,
+                    turn_id=event.turn_id,
                     actor="worker",
                     payload={
                         "record_id": event.record_id,

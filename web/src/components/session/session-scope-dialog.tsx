@@ -94,11 +94,6 @@ export function SessionScopeDialog({
                     checked={isPrimary}
                     onChange={() => {
                       setPrimaryThread(thread.slug);
-                      setExtraMountedThreads((current) => {
-                        const next = new Set(current);
-                        next.delete(thread.slug);
-                        return next;
-                      });
                     }}
                   />
 

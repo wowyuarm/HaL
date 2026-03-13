@@ -25,10 +25,11 @@ interface HalStore {
   selectedSessionId: string | null;
   socketState: SocketState;
   loadingThreads: boolean;
-  loadingThread: boolean;
-  loadingSession: boolean;
+  loadingThreadSlug: string | null;
+  loadingSessionId: string | null;
   creatingSession: boolean;
   updatingScopeSessionId: string | null;
+  activeThreadRequestId: number;
   lastError: string | null;
 
   selectThread: (slug: string) => void;
@@ -37,7 +38,10 @@ interface HalStore {
   setError: (message: string | null) => void;
 
   loadThreads: () => Promise<void>;
-  loadThread: (slug: string) => Promise<void>;
+  loadThread: (
+    slug: string,
+    options?: { adoptSelection?: boolean; focusSessionId?: string | null },
+  ) => Promise<void>;
   refreshActiveThread: () => Promise<void>;
   createScopedSession: (input: {
     primaryThread: string;
@@ -49,6 +53,7 @@ interface HalStore {
     input: { addThreads?: string[]; removeThreads?: string[] },
   ) => Promise<SessionManifest | null>;
   loadSessionEvents: (sessionId: string) => Promise<void>;
+  applySessionManifest: (manifest: SessionManifest) => void;
   applySessionSnapshot: (manifest: SessionManifest, events: SessionEvent[]) => void;
   appendSessionEvent: (event: SessionEvent) => void;
 }
@@ -222,6 +227,35 @@ function normalizeThreadDetail(detail: ThreadDetail): ThreadDetail {
   };
 }
 
+function mergeManifestIntoState(
+  state: Pick<HalStore, "threads" | "threadDetails" | "sessionManifests">,
+  manifest: SessionManifest,
+): Pick<HalStore, "threads" | "threadDetails" | "sessionManifests"> {
+  const previousManifest = state.sessionManifests[manifest.session_id];
+  const sessionManifests = upsertManifest(state.sessionManifests, manifest);
+  const baseThreads = reconcileManifestInThreadSummaries(
+    state.threads,
+    previousManifest,
+    manifest,
+  );
+  const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest);
+  return {
+    sessionManifests,
+    threadDetails,
+    threads: syncThreadSummaries(baseThreads, threadDetails),
+  };
+}
+
+function sessionScopeSlugs(manifest: SessionManifest): string[] {
+  const slugs = new Set<string>(manifest.mounted_threads);
+  if (manifest.primary_thread) {
+    slugs.add(manifest.primary_thread);
+  }
+  return [...slugs].sort();
+}
+
+let nextThreadLoadRequestId = 0;
+
 export const useHalStore = create<HalStore>((set, get) => ({
   threads: [],
   threadDetails: {},
@@ -231,10 +265,11 @@ export const useHalStore = create<HalStore>((set, get) => ({
   selectedSessionId: null,
   socketState: "disconnected",
   loadingThreads: false,
-  loadingThread: false,
-  loadingSession: false,
+  loadingThreadSlug: null,
+  loadingSessionId: null,
   creatingSession: false,
   updatingScopeSessionId: null,
+  activeThreadRequestId: 0,
   lastError: null,
 
   selectThread: (slug) => set({ activeThreadSlug: slug, selectedSessionId: null }),
@@ -262,8 +297,13 @@ export const useHalStore = create<HalStore>((set, get) => ({
     }
   },
 
-  loadThread: async (slug) => {
-    set({ loadingThread: true, lastError: null });
+  loadThread: async (slug, options) => {
+    const adoptSelection = options?.adoptSelection ?? true;
+    const focusSessionId = options?.focusSessionId ?? null;
+    const requestId = adoptSelection ? ++nextThreadLoadRequestId : 0;
+    if (adoptSelection) {
+      set({ loadingThreadSlug: slug, activeThreadRequestId: requestId, lastError: null });
+    }
     try {
       const detail = normalizeThreadDetail(await getThread(slug));
       set((state) => {
@@ -272,26 +312,43 @@ export const useHalStore = create<HalStore>((set, get) => ({
 
         const nextDetails = { ...state.threadDetails, [slug]: detail };
         const nextThreads = syncThreadSummaries(state.threads, nextDetails);
-        const selectedStillExists =
-          state.selectedSessionId &&
-          detail.sessions.some((session) => session.session_id === state.selectedSessionId);
-
-        return {
+        const nextState: Partial<HalStore> = {
           threadDetails: nextDetails,
           sessionManifests: manifests,
           threads: nextThreads,
-          activeThreadSlug: slug,
-          selectedSessionId: selectedStillExists
-            ? state.selectedSessionId
-            : (detail.sessions[0]?.session_id ?? null),
-          loadingThread: false,
         };
+        if (
+          adoptSelection &&
+          state.activeThreadSlug === slug &&
+          state.activeThreadRequestId === requestId
+        ) {
+          const focusExists =
+            focusSessionId &&
+            detail.sessions.some((session) => session.session_id === focusSessionId);
+          const selectedStillExists =
+            state.selectedSessionId &&
+            detail.sessions.some((session) => session.session_id === state.selectedSessionId);
+          nextState.selectedSessionId = focusExists
+            ? focusSessionId
+            : selectedStillExists
+              ? state.selectedSessionId
+              : (detail.sessions[0]?.session_id ?? null);
+          nextState.loadingThreadSlug = null;
+        }
+        return nextState as Partial<HalStore>;
       });
     } catch (error) {
-      set({
-        loadingThread: false,
-        lastError: error instanceof Error ? error.message : `Failed to load thread ${slug}.`,
-      });
+      if (!adoptSelection) {
+        return;
+      }
+      set((state) =>
+        state.activeThreadSlug === slug && state.activeThreadRequestId === requestId
+          ? {
+              loadingThreadSlug: null,
+              lastError: error instanceof Error ? error.message : `Failed to load thread ${slug}.`,
+            }
+          : {},
+      );
     }
   },
 
@@ -309,11 +366,22 @@ export const useHalStore = create<HalStore>((set, get) => ({
         mounted_threads: mountedThreads,
       });
       set((state) => ({
-        sessionManifests: upsertManifest(state.sessionManifests, manifest),
+        ...mergeManifestIntoState(state, manifest),
       }));
       await get().loadThreads();
-      await get().loadThread(primaryThread);
-      set({ selectedSessionId: manifest.session_id, creatingSession: false });
+      const activeThreadSlug = get().activeThreadSlug;
+      await Promise.all(
+        sessionScopeSlugs(manifest).map(async (slug) => {
+          await get().loadThread(slug, {
+            adoptSelection: slug === activeThreadSlug,
+            focusSessionId:
+              slug === primaryThread && activeThreadSlug === primaryThread
+                ? manifest.session_id
+                : null,
+          });
+        }),
+      );
+      set({ creatingSession: false });
       return manifest;
     } catch (error) {
       set({
@@ -335,22 +403,10 @@ export const useHalStore = create<HalStore>((set, get) => ({
         add_threads: addThreads,
         remove_threads: removeThreads,
       });
-      set((state) => {
-        const previousManifest = state.sessionManifests[manifest.session_id];
-        const sessionManifests = upsertManifest(state.sessionManifests, manifest);
-        const baseThreads = reconcileManifestInThreadSummaries(
-          state.threads,
-          previousManifest,
-          manifest,
-        );
-        const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest);
-        return {
-          sessionManifests,
-          threadDetails,
-          threads: syncThreadSummaries(baseThreads, threadDetails),
-          updatingScopeSessionId: null,
-        };
-      });
+      set((state) => ({
+        ...mergeManifestIntoState(state, manifest),
+        updatingScopeSessionId: null,
+      }));
       return manifest;
     } catch (error) {
       set({
@@ -362,40 +418,46 @@ export const useHalStore = create<HalStore>((set, get) => ({
   },
 
   loadSessionEvents: async (sessionId) => {
-    set({ loadingSession: true, lastError: null });
+    set({ loadingSessionId: sessionId, lastError: null });
     try {
       const events = await getSessionEvents(sessionId);
-      set((state) => ({
-        sessionEvents: { ...state.sessionEvents, [sessionId]: events },
-        loadingSession: false,
-      }));
+      set((state) =>
+        state.loadingSessionId === sessionId
+          ? {
+              sessionEvents: { ...state.sessionEvents, [sessionId]: events },
+              loadingSessionId: null,
+            }
+          : {
+              sessionEvents: { ...state.sessionEvents, [sessionId]: events },
+            },
+      );
     } catch (error) {
-      set({
-        loadingSession: false,
-        lastError: error instanceof Error ? error.message : "Failed to load session events.",
-      });
+      set((state) =>
+        state.loadingSessionId === sessionId
+          ? {
+              loadingSessionId: null,
+              lastError:
+                error instanceof Error ? error.message : "Failed to load session events.",
+            }
+          : {},
+      );
     }
   },
 
+  applySessionManifest: (manifest) =>
+    set((state) => ({
+      ...mergeManifestIntoState(state, manifest),
+    })),
+
   applySessionSnapshot: (manifest, events) =>
     set((state) => {
-      const previousManifest = state.sessionManifests[manifest.session_id];
       const sessionEvents = {
         ...state.sessionEvents,
         [manifest.session_id]: [...events].sort((a, b) => a.seq - b.seq),
       };
-      const sessionManifests = upsertManifest(state.sessionManifests, manifest);
-      const baseThreads = reconcileManifestInThreadSummaries(
-        state.threads,
-        previousManifest,
-        manifest,
-      );
-      const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest);
       return {
         sessionEvents,
-        sessionManifests,
-        threadDetails,
-        threads: syncThreadSummaries(baseThreads, threadDetails),
+        ...mergeManifestIntoState(state, manifest),
         selectedSessionId: manifest.session_id,
       };
     }),
@@ -410,20 +472,9 @@ export const useHalStore = create<HalStore>((set, get) => ({
         ...state.sessionEvents,
         [event.session_id]: mergeSessionEvents(currentEvents, [event]),
       };
-      const sessionManifests = patchedManifest
-        ? upsertManifest(state.sessionManifests, patchedManifest)
-        : state.sessionManifests;
-      const baseThreads = patchedManifest
-        ? reconcileManifestInThreadSummaries(state.threads, currentManifest, patchedManifest)
-        : state.threads;
-      const threadDetails = patchedManifest
-        ? reconcileManifestInThreadDetails(state.threadDetails, patchedManifest)
-        : state.threadDetails;
       return {
         sessionEvents,
-        sessionManifests,
-        threadDetails,
-        threads: syncThreadSummaries(baseThreads, threadDetails),
+        ...(patchedManifest ? mergeManifestIntoState(state, patchedManifest) : {}),
       };
     }),
 }));

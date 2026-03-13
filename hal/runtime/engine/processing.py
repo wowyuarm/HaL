@@ -210,7 +210,7 @@ async def _handle_brief_command(
     session_state.brief_task = asyncio.create_task(
         engine._run_session_brief(session_state.session_id, user_prompt=user_prompt)
     )
-    engine._clear_session_snapshot(session_state.session_id)
+    engine._background_resume.close_session(session_state.session_id)
 
     return OutboundMessage(
         channel=channel,
@@ -560,6 +560,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                     messages,
                     engine.max_iterations,
                     session_id=session_id,
+                    turn_id=turn_id,
                 )
             finally:
                 engine._set_session_active(session_id, False)
@@ -634,6 +635,7 @@ async def execute_loop(
     add_assistant_message_fn: Any,
     add_tool_result_fn: Any,
     session_id: str | None = None,
+    turn_id: str | None = None,
     session_key: str | None = None,
     channel: str | None = None,
     chat_id: str | None = None,
@@ -647,6 +649,7 @@ async def execute_loop(
     hooks = _EngineLoopHooks(
         engine=engine,
         session_id=session_id,
+        turn_id=turn_id,
         session_key=session_key,
         channel=channel,
         chat_id=chat_id,

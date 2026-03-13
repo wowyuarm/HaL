@@ -16,7 +16,13 @@ from hal.context.message_building import add_assistant_message, add_tool_result
 from hal.context.metrics import MetricsCollector
 from hal.context.thread_mentions import detect_thread_mentions
 from hal.domain.event_sink import SessionEventPublisher, SessionEventSink
-from hal.domain.events import SESSION_CREATED, SESSION_ENDED, SESSION_SCOPE_UPDATED, is_durable
+from hal.domain.events import (
+    BRIEF_STARTED,
+    SESSION_CREATED,
+    SESSION_ENDED,
+    SESSION_SCOPE_UPDATED,
+    is_durable,
+)
 from hal.domain.ports import LLMProviderPort
 from hal.domain.session import SessionManifest, SessionRuntimeState, build_session_id
 from hal.memory.manager import MemoryManager
@@ -209,6 +215,7 @@ class AgentEngine:
         """Run the engine, processing messages from the bus."""
         self._running = True
         logger.info("Agent engine started")
+        await self._restart_briefing_sessions()
 
         while self._running:
             try:
@@ -245,8 +252,15 @@ class AgentEngine:
         """Process a user message end-to-end."""
         return await process_message(self, msg, PROCESSING_MODE)
 
-    def _drain_pending_for_session(self, session_key: str) -> list[object]:
+    def _drain_pending_for_session(
+        self,
+        session_key: str | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> list[object]:
         """Drain inbound queue messages for the target session without blocking."""
+        if not session_id and not session_key:
+            return []
         matching: list[object] = []
         others: list[object] = []
 
@@ -255,7 +269,9 @@ class AgentEngine:
                 msg = self.bus.inbound.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if msg.session_key == session_key:
+            if session_id and getattr(msg, "session_id", None) == session_id:
+                matching.append(msg)
+            elif session_key and msg.session_key == session_key:
                 matching.append(msg)
             else:
                 others.append(msg)
@@ -314,6 +330,9 @@ class AgentEngine:
             last_activity_at=datetime.now(),
             event_publisher=publisher,
         )
+        restored_history = self._background_resume.load_session_history(session_id)
+        if restored_history:
+            state.replay_history = restored_history
         self._sessions[session_id] = state
         return state
 
@@ -336,6 +355,7 @@ class AgentEngine:
             payload={"reason": reason or status},
         )
         self._session_store.write_manifest(session_id, state.manifest)
+        self._background_resume.close_session(session_id)
         await state.event_publisher.close()
         self._sessions.pop(session_id, None)
         self._transport_registry.unbind_session(session_id)
@@ -557,6 +577,7 @@ class AgentEngine:
         messages: list[dict[str, object]],
         max_iterations: int,
         session_id: str | None = None,
+        turn_id: str | None = None,
     ) -> tuple[str | None, object, list[object]]:
         """Run the LLM tool-calling loop via the shared runtime."""
         # Resolve adapter-facing transport context from the session manifest.
@@ -575,6 +596,7 @@ class AgentEngine:
             add_assistant_message_fn=add_assistant_message,
             add_tool_result_fn=add_tool_result,
             session_id=session_id,
+            turn_id=turn_id,
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
@@ -630,6 +652,29 @@ class AgentEngine:
     def _clear_session_snapshot(self, session_id: str) -> None:
         """Delete persisted/cached background-resume snapshot."""
         self._background_resume.clear_session_snapshot(session_id)
+
+    async def _restart_briefing_sessions(self) -> None:
+        """Restart persisted briefing sessions after process restart."""
+        for session_id, state in list(self._sessions.items()):
+            if state.manifest.status != "briefing":
+                continue
+            if state.brief_task is not None and not state.brief_task.done():
+                continue
+            await self._start_session_brief(
+                session_id,
+                user_prompt=self._restore_brief_prompt(session_id),
+            )
+
+    def _restore_brief_prompt(self, session_id: str) -> str:
+        """Recover the last explicit /brief prompt from the durable event log."""
+        for event in reversed(self._session_store.read_events(session_id)):
+            if event.type != BRIEF_STARTED:
+                continue
+            user_prompt = event.payload.get("user_prompt")
+            if isinstance(user_prompt, str):
+                return user_prompt
+            break
+        return ""
 
     def _restore_active_sessions(self) -> None:
         """Restore active/briefing sessions from durable manifests.

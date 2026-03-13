@@ -134,6 +134,7 @@ class _EngineLoopHooks:
         self,
         engine: "AgentEngine",
         session_id: str | None,
+        turn_id: str | None,
         session_key: str | None,
         channel: str | None,
         chat_id: str | None,
@@ -146,6 +147,7 @@ class _EngineLoopHooks:
             channel=channel,
             chat_id=chat_id,
         )
+        self._turn_id = turn_id
         self.injected: list[InboundMessage] = []
         self._buffered_pending: list[InboundMessage] = []
         self._pending_context_hints: list[str] = []
@@ -191,6 +193,7 @@ class _EngineLoopHooks:
                     message=pending,
                     prefixed_content=prefixed,
                     messages=messages,
+                    turn_id=self._turn_id,
                     session_id=self._session_id,
                     channel=self._channel,
                     chat_id=self._chat_id,
@@ -214,6 +217,7 @@ class _EngineLoopHooks:
             return
         await state.event_publisher.emit(
             event_type,
+            turn_id=self._turn_id,
             actor=actor,  # type: ignore[arg-type]
             payload=payload or {},
             refs=refs or {},
@@ -258,6 +262,7 @@ class _EngineLoopHooks:
                 result=result,
                 total_tool_calls=meta.total_tool_calls,
                 messages=messages,
+                turn_id=self._turn_id,
                 session_id=self._session_id,
                 channel=self._channel,
                 chat_id=self._chat_id,
@@ -334,9 +339,12 @@ class _EngineLoopHooks:
 
     async def _inject_fresh_pending(self, messages: list[dict[str, Any]]) -> None:
         """Inject newly queued session messages before the next LLM call."""
-        if not self._session_key:
+        if not self._session_id and not self._session_key:
             return
-        fresh = self._engine._drain_pending_for_session(self._session_key)
+        fresh = self._engine._drain_pending_for_session(
+            session_id=self._session_id,
+            session_key=self._session_key,
+        )
         if fresh:
             await self._inject_pending(messages, fresh)
 
@@ -479,9 +487,12 @@ class _EngineLoopHooks:
 
     def _buffer_fresh_pending_messages(self) -> None:
         """Move newly queued session messages into the buffered interrupt queue."""
-        if not self._session_key:
+        if not self._session_id and not self._session_key:
             return
-        fresh = self._engine._drain_pending_for_session(self._session_key)
+        fresh = self._engine._drain_pending_for_session(
+            session_id=self._session_id,
+            session_key=self._session_key,
+        )
         self._buffered_pending.extend(fresh)
 
     def _should_interrupt_tool_calls(self, tool_calls: list[Any]) -> bool:

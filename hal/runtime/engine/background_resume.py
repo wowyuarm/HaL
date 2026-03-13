@@ -9,6 +9,14 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.bus.events import OutboundMessage, SubagentCompleteEvent
+from hal.domain.events import (
+    ASSISTANT_MESSAGE_COMPLETED,
+    LOOP_STARTED,
+    MESSAGE_INJECTED,
+    TURN_COMPLETED,
+    TURN_STARTED,
+)
+from hal.domain.session import build_turn_id
 from hal.runtime.session import build_persisted_session_history
 from hal.workspace import SessionRepository
 
@@ -85,6 +93,26 @@ class _EngineBackgroundResume:
         except Exception as error:
             logger.warning(f"Failed to delete session snapshot: {error}")
 
+    def close_session(self, session_id: str) -> None:
+        """Drop detached continuation state for one completed session."""
+        task = self._background_resume_tasks.pop(session_id, None)
+        if task and not task.done():
+            task.cancel()
+        self._pending_background_events.pop(session_id, None)
+        self._active_sessions.discard(session_id)
+        self.clear_session_snapshot(session_id)
+
+    def load_session_history(self, session_id: str) -> list[dict[str, Any]] | None:
+        """Restore persisted replay history from the detached resume snapshot."""
+        snapshot = self._load_resume_snapshot(session_id)
+        if snapshot is None:
+            return None
+        return build_persisted_session_history(
+            working_set_messages=snapshot,
+            final_content="",
+            include_final_assistant=False,
+        )
+
     async def queue_background_completion(self, event: SubagentCompleteEvent) -> None:
         """Queue detached subagent completions and continue same-session loop when idle."""
         if not event.background:
@@ -92,6 +120,9 @@ class _EngineBackgroundResume:
 
         session_id = event.session_id
         if not session_id:
+            return
+        if not self._session_is_resumable(session_id):
+            self.close_session(session_id)
             return
 
         # Active loops consume runtime injections directly via per-loop subscribers.
@@ -111,6 +142,9 @@ class _EngineBackgroundResume:
         """Resume a session loop from the last snapshot when detached results arrive."""
         try:
             while self._pending_background_events.get(session_id):
+                if not self._session_is_resumable(session_id):
+                    self.close_session(session_id)
+                    break
                 if session_id in self._active_sessions:
                     await asyncio.sleep(0.1)
                     continue
@@ -123,14 +157,25 @@ class _EngineBackgroundResume:
                 if snapshot is None:
                     continue
 
-                messages = self._append_runtime_injections(snapshot=snapshot, events=pending)
+                turn_id = await self._start_resumed_turn(
+                    session_id=session_id,
+                    queued_events=pending,
+                )
+                messages = await self._append_runtime_injections(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    snapshot=snapshot,
+                    events=pending,
+                )
                 final_content, meta = await self._run_resumed_loop(
                     session_id=session_id,
+                    turn_id=turn_id,
                     messages=messages,
                 )
                 final_content = _normalize_final_content(final_content)
                 await self._finalize_resumed_turn(
                     session_id=session_id,
+                    turn_id=turn_id,
                     messages=messages,
                     final_content=final_content,
                     meta=meta,
@@ -159,14 +204,65 @@ class _EngineBackgroundResume:
         )
         return copy.deepcopy(recovered)
 
-    def _append_runtime_injections(
+    def _session_is_resumable(self, session_id: str) -> bool:
+        """Return True when detached completions may resume this session."""
+        state = self._engine._sessions.get(session_id)
+        if state is not None:
+            return state.manifest.status == "active"
+
+        manifest = self._engine._session_store.read_manifest(session_id)
+        return manifest is not None and manifest.status == "active"
+
+    async def _start_resumed_turn(
         self,
         *,
+        session_id: str,
+        queued_events: list[SubagentCompleteEvent],
+    ) -> str:
+        """Open a durable turn for detached background continuation."""
+        state = self._engine.resume_session(session_id)
+        if state is None:
+            raise ValueError(f"Unknown session_id: {session_id}")
+        state.manifest.turn_count += 1
+        turn_id = build_turn_id(state.manifest.turn_count)
+        await state.event_publisher.emit(
+            TURN_STARTED,
+            turn_id=turn_id,
+            actor="engine",
+            refs={
+                "primary_thread": state.primary_thread,
+                "mounted_threads": sorted(state.mounted_threads),
+            },
+            payload={
+                "status": state.manifest.status,
+                "origin": "background_resume",
+                "queued_events": len(queued_events),
+            },
+        )
+        await state.event_publisher.emit(
+            LOOP_STARTED,
+            turn_id=turn_id,
+            actor="engine",
+            payload={
+                "origin": "background_resume",
+                "max_iterations": self._engine.max_iterations,
+            },
+        )
+        return turn_id
+
+    async def _append_runtime_injections(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
         snapshot: list[dict[str, Any]],
         events: list[SubagentCompleteEvent],
     ) -> list[dict[str, Any]]:
         """Build resumed message list by appending queued background injections."""
         messages = copy.deepcopy(snapshot)
+        state = self._engine.resume_session(session_id)
+        if state is None:
+            raise ValueError(f"Unknown session_id: {session_id}")
         for event in events:
             runtime_inject = _build_subagent_injection(
                 label=event.label,
@@ -186,12 +282,26 @@ class _EngineBackgroundResume:
                 max_tokens=_SUBAGENT_RUNTIME_MAX_TOKENS,
             )
             messages.append({"role": "user", "content": runtime_inject})
+            await state.event_publisher.emit(
+                MESSAGE_INJECTED,
+                turn_id=turn_id,
+                actor="worker",
+                payload={
+                    "kind": "subagent_runtime",
+                    "content": runtime_inject,
+                    "label": event.label,
+                    "status": event.status,
+                    "record_id": event.record_id,
+                    "artifact_path": event.artifact_path,
+                },
+            )
         return messages
 
     async def _run_resumed_loop(
         self,
         *,
         session_id: str,
+        turn_id: str,
         messages: list[dict[str, Any]],
     ) -> tuple[str, Any]:
         """Resume the engine loop once with injected background completions."""
@@ -204,6 +314,7 @@ class _EngineBackgroundResume:
                 messages=messages,
                 max_iterations=self._engine.max_iterations,
                 session_id=session_id,
+                turn_id=turn_id,
             )
         finally:
             self.set_session_active(session_id, False)
@@ -213,11 +324,15 @@ class _EngineBackgroundResume:
         self,
         *,
         session_id: str,
+        turn_id: str,
         messages: list[dict[str, Any]],
         final_content: str,
         meta: Any,
     ) -> None:
-        """Persist resumed output and emit outbound response."""
+        """Persist resumed output as a durable session turn and emit outbound response."""
+        state = self._engine.resume_session(session_id)
+        if state is None:
+            raise ValueError(f"Unknown session_id: {session_id}")
         transport = self._session_transports.get(session_id)
         channel = transport.channel if transport else "unknown"
         chat_id = transport.chat_id if transport else "unknown"
@@ -248,7 +363,34 @@ class _EngineBackgroundResume:
             final_content=None,
         )
 
+        await state.event_publisher.emit(
+            ASSISTANT_MESSAGE_COMPLETED,
+            turn_id=turn_id,
+            actor="engine",
+            payload={
+                "content": final_content,
+                "iterations": meta.iterations,
+                "tools_used": list(meta.tools_used),
+                "usage": dict(meta.total_usage),
+                "origin": "background_resume",
+            },
+        )
+        await state.event_publisher.emit(
+            TURN_COMPLETED,
+            turn_id=turn_id,
+            actor="engine",
+            payload={
+                "iterations": meta.iterations,
+                "tools_used": list(meta.tools_used),
+                "usage": dict(meta.total_usage),
+                "output_chars": len(final_content),
+                "origin": "background_resume",
+            },
+        )
+
         if bool(getattr(self._engine.tools.get("message"), "sent_in_turn", False)):
+            return
+        if transport is None:
             return
         await self._engine.bus.publish_outbound(
             OutboundMessage(channel=channel, chat_id=chat_id, content=final_content)

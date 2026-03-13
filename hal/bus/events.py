@@ -58,6 +58,7 @@ class ToolCallEvent(Event):
     result: str
     total_tool_calls: int
     messages: list[dict[str, Any]]
+    turn_id: str | None = None
     session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
@@ -71,6 +72,7 @@ class ReminderEvent(Event):
     content: str
     total_tool_calls: int
     messages: list[dict[str, Any]]
+    turn_id: str | None = None
     session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
@@ -84,6 +86,7 @@ class MessageInjectEvent(Event):
     message: InboundMessage
     prefixed_content: str
     messages: list[dict[str, Any]]
+    turn_id: str | None = None
     session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
@@ -99,6 +102,7 @@ class SubagentCompleteEvent(Event, SubagentArtifactMetadata[str], SubagentUsageM
     content: str
     background: bool
     messages: list[dict[str, Any]]
+    turn_id: str | None = None
     session_id: str | None = None
     channel: str | None = None
     chat_id: str | None = None
