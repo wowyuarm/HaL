@@ -113,6 +113,25 @@ def test_load_config_lifts_legacy_channels_web_block(tmp_home: Path) -> None:
     assert loaded.web == WebConfig(enabled=True, host="0.0.0.0", port=9999)
 
 
+def test_load_config_rejects_conflicting_legacy_and_top_level_web_blocks(tmp_home: Path) -> None:
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "web:\n"
+        "  enabled: true\n"
+        "  port: 8765\n"
+        "channels:\n"
+        "  outbound_poll_timeout_s: 1.0\n"
+        "  web:\n"
+        "    enabled: false\n"
+        "    port: 9999\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="legacy 'channels.web'"):
+        load_config()
+
+
 # ---------------------------------------------------------------------------
 # Strict loading: unknown keys rejected (extra="forbid")
 # ---------------------------------------------------------------------------

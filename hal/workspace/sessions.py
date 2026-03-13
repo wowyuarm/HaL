@@ -36,7 +36,7 @@ class SessionRepository:
 
     def snapshots_dir(self) -> Path:
         """Return directory containing detached resume snapshot files."""
-        return self.layout.sessions_dir()
+        return self.layout.resume_dir()
 
     def snapshot_path(self, session_id: str) -> Path:
         """Resolve one session resume snapshot file path."""

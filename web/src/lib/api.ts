@@ -41,3 +41,17 @@ export async function getSessionEvents(sessionId: string): Promise<SessionEvent[
   );
   return payload.events;
 }
+
+export async function updateSessionScope(
+  sessionId: string,
+  input: { add_threads?: string[]; remove_threads?: string[] },
+): Promise<SessionManifest> {
+  const payload = await requestJson<{ session: SessionManifest }>(
+    `/sessions/${encodeURIComponent(sessionId)}/scope`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return payload.session;
+}

@@ -2,8 +2,8 @@
 
 All paths follow the canonical workspace contract:
   system/       — identity, instructions, memory, config
-  work/         — threads, inbox
-  runtime/      — logs, sessions, metrics, cache
+  work/         — threads, sessions, inbox
+  runtime/      — logs, resume snapshots, metrics, cache
   capabilities/ — skills
   data/         — vectors, artifacts, media
 

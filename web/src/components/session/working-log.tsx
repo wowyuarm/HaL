@@ -51,7 +51,7 @@ export function WorkingLog({
   const display = session ? sessionDisplayState(session.status) : null;
   const canSend = Boolean(session && session.status === "active" && socketState === "live");
   const canEndSession = Boolean(session && session.status === "active" && socketState === "live");
-  const canEditScope = Boolean(scopeEditable && session?.status === "active" && socketState === "live");
+  const canEditScope = Boolean(scopeEditable && session?.status === "active");
   const interactive = Boolean(session && isInteractiveSession(session.status));
 
   useEffect(() => {

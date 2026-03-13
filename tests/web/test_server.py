@@ -63,6 +63,25 @@ async def test_http_handler_roundtrip_for_sessions_and_threads(bridge, thread_re
 
 
 @pytest.mark.asyncio
+async def test_http_scope_update_returns_updated_manifest(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    _create_thread(thread_repo, "memory", "Memory")
+    manifest = await bridge.create_session(primary_thread="auth")
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    response = await server._update_scope(  # type: ignore[attr-defined]
+        _FakeRequest(
+            payload={"add_threads": ["memory"]},
+            match_info={"session_id": manifest.session_id},
+        )
+    )
+
+    assert response.status == 200
+    payload = _decode_response(response)
+    assert payload["session"]["mounted_threads"] == ["auth", "memory"]
+
+
+@pytest.mark.asyncio
 async def test_ws_message_handler_updates_scope_without_socket(
     bridge,
     thread_repo,

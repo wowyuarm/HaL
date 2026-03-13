@@ -12,6 +12,7 @@ import { useSessionSocket } from "@/lib/ws";
 export default function App() {
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
   const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
+  const [scopeEditorSessionId, setScopeEditorSessionId] = useState<string | null>(null);
   const threads = useHalStore((s) => s.threads);
   const threadDetails = useHalStore((s) => s.threadDetails);
   const sessionManifests = useHalStore((s) => s.sessionManifests);
@@ -23,6 +24,7 @@ export default function App() {
   const loadingThread = useHalStore((s) => s.loadingThread);
   const loadingSession = useHalStore((s) => s.loadingSession);
   const creatingSession = useHalStore((s) => s.creatingSession);
+  const updatingScopeSessionId = useHalStore((s) => s.updatingScopeSessionId);
   const lastError = useHalStore((s) => s.lastError);
   const loadThreads = useHalStore((s) => s.loadThreads);
   const loadThread = useHalStore((s) => s.loadThread);
@@ -31,10 +33,14 @@ export default function App() {
   const selectSession = useHalStore((s) => s.selectSession);
   const createSessionForThread = useHalStore((s) => s.createSessionForThread);
   const createScopedSession = useHalStore((s) => s.createScopedSession);
+  const updateSessionScope = useHalStore((s) => s.updateSessionScope);
   const setError = useHalStore((s) => s.setError);
 
   const activeThread = activeThreadSlug ? threadDetails[activeThreadSlug] ?? null : null;
   const selectedSession = selectedSessionId ? sessionManifests[selectedSessionId] ?? null : null;
+  const scopeEditorSession = scopeEditorSessionId
+    ? sessionManifests[scopeEditorSessionId] ?? null
+    : null;
   const events = selectedSessionId ? sessionEvents[selectedSessionId] ?? [] : [];
   const latestEventSeq = events.at(-1)?.seq ?? 0;
   const { send } = useSessionSocket(
@@ -91,27 +97,34 @@ export default function App() {
     }
   };
 
+  const closeScopeEditor = () => {
+    if (updatingScopeSessionId) return;
+    setScopeEditorOpen(false);
+    setScopeEditorSessionId(null);
+  };
+
+  const handleOpenScopeEditor = () => {
+    if (!selectedSession) return;
+    setError(null);
+    setScopeEditorSessionId(selectedSession.session_id);
+    setScopeEditorOpen(true);
+  };
+
   const handleUpdateScope = async (input: {
     addThreads: string[];
     removeThreads: string[];
   }) => {
-    if (!selectedSession) return;
+    if (!scopeEditorSession) return;
     const hasChanges = input.addThreads.length > 0 || input.removeThreads.length > 0;
     if (!hasChanges) {
-      setScopeEditorOpen(false);
+      closeScopeEditor();
       return;
     }
-    if (
-      !send({
-        type: "update_scope",
-        add_threads: input.addThreads,
-        remove_threads: input.removeThreads,
-      })
-    ) {
-      setError("Unable to update scope until the session socket is live.");
-      return;
+    setError(null);
+    const manifest = await updateSessionScope(scopeEditorSession.session_id, input);
+    if (manifest) {
+      closeScopeEditor();
     }
-    setScopeEditorOpen(false);
   };
 
   const handleSend = (content: string) => {
@@ -203,7 +216,7 @@ export default function App() {
             loading={loadingThread || loadingSession}
             error={lastError}
             onSend={handleSend}
-            onEditScope={() => setScopeEditorOpen(true)}
+            onEditScope={handleOpenScopeEditor}
             onBrief={handleBrief}
             onDrop={handleDrop}
           />
@@ -220,10 +233,10 @@ export default function App() {
       />
       <SessionMountedThreadsDialog
         open={scopeEditorOpen}
-        session={selectedSession}
+        session={scopeEditorSession}
         threads={threads}
-        submitting={creatingSession}
-        onClose={() => setScopeEditorOpen(false)}
+        submitting={updatingScopeSessionId === scopeEditorSessionId}
+        onClose={closeScopeEditor}
         onSubmit={handleUpdateScope}
       />
     </div>

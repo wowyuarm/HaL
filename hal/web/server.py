@@ -39,6 +39,7 @@ class WebServer:
         self._app.router.add_get("/sessions", self._list_sessions)
         self._app.router.add_get("/sessions/{session_id}", self._get_session)
         self._app.router.add_get("/sessions/{session_id}/events", self._get_events)
+        self._app.router.add_post("/sessions/{session_id}/scope", self._update_scope)
         self._app.router.add_get(_WS_ROUTE, self._session_ws)
         self._app.router.add_get("/threads", self._list_threads)
         self._app.router.add_get("/threads/{slug}", self._get_thread)
@@ -101,6 +102,20 @@ class WebServer:
         self._require_manifest(session_id)
         events = self._bridge.get_events(session_id, after_seq=after_seq)
         return web.json_response({"events": [serialize_event(event) for event in events]})
+
+    async def _update_scope(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        self._require_manifest(session_id)
+        payload = await self._read_json(request)
+        try:
+            manifest = await self._bridge.update_scope(
+                session_id,
+                add_threads=self._string_list(payload.get("add_threads")),
+                remove_threads=self._string_list(payload.get("remove_threads")),
+            )
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        return web.json_response({"session": serialize_manifest(manifest)})
 
     async def _list_threads(self, request: web.Request) -> web.Response:
         return web.json_response({"threads": self._bridge.list_threads()})

@@ -21,16 +21,21 @@ export function SessionScopeDialog({
   onSubmit,
 }: SessionScopeDialogProps) {
   const [primaryThread, setPrimaryThread] = useState<string>("");
-  const [mountedThreads, setMountedThreads] = useState<Set<string>>(new Set());
+  const [extraMountedThreads, setExtraMountedThreads] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
     const fallbackPrimary = initialPrimarySlug ?? threads[0]?.slug ?? "";
     setPrimaryThread(fallbackPrimary);
-    setMountedThreads(fallbackPrimary ? new Set([fallbackPrimary]) : new Set());
+    setExtraMountedThreads(new Set());
   }, [initialPrimarySlug, open, threads]);
 
   if (!open) return null;
+
+  const mountedThreads = new Set(extraMountedThreads);
+  if (primaryThread) {
+    mountedThreads.add(primaryThread);
+  }
 
   const handleSubmit = async () => {
     if (!primaryThread) return;
@@ -89,7 +94,11 @@ export function SessionScopeDialog({
                     checked={isPrimary}
                     onChange={() => {
                       setPrimaryThread(thread.slug);
-                      setMountedThreads((current) => new Set(current).add(thread.slug));
+                      setExtraMountedThreads((current) => {
+                        const next = new Set(current);
+                        next.delete(thread.slug);
+                        return next;
+                      });
                     }}
                   />
 
@@ -112,14 +121,13 @@ export function SessionScopeDialog({
                           checked={checked}
                           disabled={isPrimary}
                           onChange={(event) => {
-                            setMountedThreads((current) => {
+                            setExtraMountedThreads((current) => {
                               const next = new Set(current);
                               if (event.target.checked) {
                                 next.add(thread.slug);
                               } else {
                                 next.delete(thread.slug);
                               }
-                              next.add(primaryThread || thread.slug);
                               return next;
                             });
                           }}

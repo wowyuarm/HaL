@@ -5,6 +5,7 @@ import {
   getSessionEvents,
   getThread,
   listThreads,
+  updateSessionScope,
 } from "@/lib/api";
 import type {
   SessionEvent,
@@ -27,6 +28,7 @@ interface HalStore {
   loadingThread: boolean;
   loadingSession: boolean;
   creatingSession: boolean;
+  updatingScopeSessionId: string | null;
   lastError: string | null;
 
   selectThread: (slug: string) => void;
@@ -42,6 +44,10 @@ interface HalStore {
     mountedThreads?: string[];
   }) => Promise<SessionManifest | null>;
   createSessionForThread: (slug: string) => Promise<SessionManifest | null>;
+  updateSessionScope: (
+    sessionId: string,
+    input: { addThreads?: string[]; removeThreads?: string[] },
+  ) => Promise<SessionManifest | null>;
   loadSessionEvents: (sessionId: string) => Promise<void>;
   applySessionSnapshot: (manifest: SessionManifest, events: SessionEvent[]) => void;
   appendSessionEvent: (event: SessionEvent) => void;
@@ -101,20 +107,38 @@ function patchManifestFromEvent(
   return nextManifest;
 }
 
-function syncManifestIntoThreadDetails(
+function sessionBelongsToThread(manifest: SessionManifest, slug: string): boolean {
+  return (
+    manifest.primary_thread === slug ||
+    manifest.mounted_threads.includes(slug) ||
+    manifest.touched_threads.includes(slug)
+  );
+}
+
+function reconcileManifestInThreadDetails(
   details: Record<string, ThreadDetail>,
   manifest: SessionManifest,
 ): Record<string, ThreadDetail> {
   const nextDetails: Record<string, ThreadDetail> = {};
   for (const [slug, detail] of Object.entries(details)) {
     const hasSession = detail.sessions.some((session) => session.session_id === manifest.session_id);
-    if (!hasSession) {
+    const shouldInclude = sessionBelongsToThread(manifest, slug);
+
+    if (!hasSession && !shouldInclude) {
       nextDetails[slug] = detail;
       continue;
     }
-    const sessions = detail.sessions
-      .map((session) => (session.session_id === manifest.session_id ? manifest : session))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+    const sessions = (
+      shouldInclude
+        ? hasSession
+          ? detail.sessions.map((session) =>
+              session.session_id === manifest.session_id ? manifest : session,
+            )
+          : [manifest, ...detail.sessions]
+        : detail.sessions.filter((session) => session.session_id !== manifest.session_id)
+    ).sort((a, b) => b.created_at.localeCompare(a.created_at));
+
     nextDetails[slug] = {
       ...detail,
       sessions,
@@ -122,6 +146,49 @@ function syncManifestIntoThreadDetails(
     };
   }
   return nextDetails;
+}
+
+function adjustSessionCount(
+  counts: Partial<Record<SessionStatus, number>>,
+  status: SessionStatus,
+  delta: number,
+): Partial<Record<SessionStatus, number>> {
+  const nextCounts = { ...counts };
+  const nextValue = Math.max((nextCounts[status] ?? 0) + delta, 0);
+  if (nextValue > 0) {
+    nextCounts[status] = nextValue;
+  } else {
+    delete nextCounts[status];
+  }
+  return nextCounts;
+}
+
+function reconcileManifestInThreadSummaries(
+  threads: ThreadSummary[],
+  previousManifest: SessionManifest | undefined,
+  nextManifest: SessionManifest,
+): ThreadSummary[] {
+  return threads.map((thread) => {
+    const belongedBefore = previousManifest
+      ? sessionBelongsToThread(previousManifest, thread.slug)
+      : false;
+    const belongsNow = sessionBelongsToThread(nextManifest, thread.slug);
+
+    if (!belongedBefore && !belongsNow) return thread;
+
+    let sessionCounts = thread.session_counts;
+    if (belongedBefore && previousManifest) {
+      sessionCounts = adjustSessionCount(sessionCounts, previousManifest.status, -1);
+    }
+    if (belongsNow) {
+      sessionCounts = adjustSessionCount(sessionCounts, nextManifest.status, 1);
+    }
+
+    return {
+      ...thread,
+      session_counts: sessionCounts,
+    };
+  });
 }
 
 function countSessions(sessions: SessionManifest[]): Partial<Record<SessionStatus, number>> {
@@ -167,6 +234,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
   loadingThread: false,
   loadingSession: false,
   creatingSession: false,
+  updatingScopeSessionId: null,
   lastError: null,
 
   selectThread: (slug) => set({ activeThreadSlug: slug, selectedSessionId: null }),
@@ -260,6 +328,39 @@ export const useHalStore = create<HalStore>((set, get) => ({
     return await get().createScopedSession({ primaryThread: slug });
   },
 
+  updateSessionScope: async (sessionId, { addThreads, removeThreads }) => {
+    set({ updatingScopeSessionId: sessionId, lastError: null });
+    try {
+      const manifest = await updateSessionScope(sessionId, {
+        add_threads: addThreads,
+        remove_threads: removeThreads,
+      });
+      set((state) => {
+        const previousManifest = state.sessionManifests[manifest.session_id];
+        const sessionManifests = upsertManifest(state.sessionManifests, manifest);
+        const baseThreads = reconcileManifestInThreadSummaries(
+          state.threads,
+          previousManifest,
+          manifest,
+        );
+        const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest);
+        return {
+          sessionManifests,
+          threadDetails,
+          threads: syncThreadSummaries(baseThreads, threadDetails),
+          updatingScopeSessionId: null,
+        };
+      });
+      return manifest;
+    } catch (error) {
+      set({
+        updatingScopeSessionId: null,
+        lastError: error instanceof Error ? error.message : "Failed to update session scope.",
+      });
+      return null;
+    }
+  },
+
   loadSessionEvents: async (sessionId) => {
     set({ loadingSession: true, lastError: null });
     try {
@@ -278,17 +379,23 @@ export const useHalStore = create<HalStore>((set, get) => ({
 
   applySessionSnapshot: (manifest, events) =>
     set((state) => {
+      const previousManifest = state.sessionManifests[manifest.session_id];
       const sessionEvents = {
         ...state.sessionEvents,
         [manifest.session_id]: [...events].sort((a, b) => a.seq - b.seq),
       };
       const sessionManifests = upsertManifest(state.sessionManifests, manifest);
-      const threadDetails = syncManifestIntoThreadDetails(state.threadDetails, manifest);
+      const baseThreads = reconcileManifestInThreadSummaries(
+        state.threads,
+        previousManifest,
+        manifest,
+      );
+      const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest);
       return {
         sessionEvents,
         sessionManifests,
         threadDetails,
-        threads: syncThreadSummaries(state.threads, threadDetails),
+        threads: syncThreadSummaries(baseThreads, threadDetails),
         selectedSessionId: manifest.session_id,
       };
     }),
@@ -306,14 +413,17 @@ export const useHalStore = create<HalStore>((set, get) => ({
       const sessionManifests = patchedManifest
         ? upsertManifest(state.sessionManifests, patchedManifest)
         : state.sessionManifests;
+      const baseThreads = patchedManifest
+        ? reconcileManifestInThreadSummaries(state.threads, currentManifest, patchedManifest)
+        : state.threads;
       const threadDetails = patchedManifest
-        ? syncManifestIntoThreadDetails(state.threadDetails, patchedManifest)
+        ? reconcileManifestInThreadDetails(state.threadDetails, patchedManifest)
         : state.threadDetails;
       return {
         sessionEvents,
         sessionManifests,
         threadDetails,
-        threads: syncThreadSummaries(state.threads, threadDetails),
+        threads: syncThreadSummaries(baseThreads, threadDetails),
       };
     }),
 }));

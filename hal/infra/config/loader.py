@@ -93,11 +93,14 @@ def _lift_legacy_web_config(data: dict[str, Any]) -> None:
     if not isinstance(channels, dict):
         return
 
-    legacy_web = channels.pop("web", None)
-    if legacy_web is None or "web" in data:
+    legacy_web = channels.get("web")
+    if legacy_web is None:
         return
+    if "web" in data:
+        raise ValueError("Config defines both top-level 'web' and legacy 'channels.web'.")
     if isinstance(legacy_web, dict):
         data["web"] = legacy_web
+        channels.pop("web", None)
 
 
 def _extract_auth(data: dict) -> dict:
