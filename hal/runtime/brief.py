@@ -207,11 +207,8 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
         logger.warning(f"Brief worker: no session state for {session_id}")
         return
 
-    route = engine._session_channels.get(session_id)
-    if route is None:
-        logger.warning(f"Brief worker: no session route for {session_id}")
-        return
-    channel, chat_id = route
+    channel = state.manifest.channel
+    chat_id = state.manifest.chat_id
     brief_cfg = engine._engine_config.brief
     worker_model = engine._worker_model
     worker_provider = engine._worker_provider
@@ -278,23 +275,31 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
 
     # 7. Send completion summary
     summary = _format_completion_summary(final_content, meta)
-    from hal.bus.events import OutboundMessage
+    if channel and chat_id:
+        from hal.bus.events import OutboundMessage
 
-    await engine.bus.publish_outbound(
-        OutboundMessage(
-            channel=channel,
-            chat_id=chat_id,
-            content=summary,
-            metadata={"system_meta": True, "kind": "session_brief_complete"},
+        await engine.bus.publish_outbound(
+            OutboundMessage(
+                channel=channel,
+                chat_id=chat_id,
+                content=summary,
+                metadata={"system_meta": True, "kind": "session_brief_complete"},
+            )
         )
-    )
 
     # 8. Record event (only on successful completion)
     if not worker_failed:
         await state.event_publisher.emit(
             BRIEF_COMPLETED,
             actor="worker",
-            refs={"channel": channel, "chat_id": chat_id},
+            refs={
+                key: value
+                for key, value in {
+                    "channel": channel,
+                    "chat_id": chat_id,
+                }.items()
+                if value
+            },
             payload={
                 "iterations": meta.iterations,
                 "files_modified": meta.files_modified,

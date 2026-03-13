@@ -17,6 +17,7 @@ from .processing import (
     _should_record_assistant_history,
 )
 from .subagent_injection import _SUBAGENT_RUNTIME_MAX_TOKENS, _build_subagent_injection
+from .transport import SessionTransportContext
 
 if TYPE_CHECKING:
     from . import AgentEngine
@@ -30,7 +31,7 @@ class _EngineBackgroundResume:
         self._session_repository = SessionRepository(engine.workspace)
         self._active_sessions: set[str] = set()
         self._session_snapshots: dict[str, list[dict[str, Any]]] = {}
-        self._session_routes: dict[str, tuple[str, str]] = {}
+        self._session_transports: dict[str, SessionTransportContext] = {}
         self._pending_background_events: dict[str, list[SubagentCompleteEvent]] = {}
         self._background_resume_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -61,7 +62,10 @@ class _EngineBackgroundResume:
         if final_content:
             snapshot.append({"role": "assistant", "content": final_content})
         self._session_snapshots[session_id] = snapshot
-        self._session_routes[session_id] = (channel, chat_id)
+        self._session_transports[session_id] = SessionTransportContext(
+            channel=channel,
+            chat_id=chat_id,
+        )
         try:
             self._session_repository.write_snapshot(
                 session_id=session_id,
@@ -75,7 +79,7 @@ class _EngineBackgroundResume:
     def clear_session_snapshot(self, session_id: str) -> None:
         """Drop cached and persisted snapshot state for one session."""
         self._session_snapshots.pop(session_id, None)
-        self._session_routes.pop(session_id, None)
+        self._session_transports.pop(session_id, None)
         try:
             self._session_repository.delete_snapshot(session_id)
         except Exception as error:
@@ -149,7 +153,10 @@ class _EngineBackgroundResume:
             return None
         recovered = copy.deepcopy(persisted.messages)
         self._session_snapshots[session_id] = recovered
-        self._session_routes[session_id] = (persisted.channel, persisted.chat_id)
+        self._session_transports[session_id] = SessionTransportContext(
+            channel=persisted.channel,
+            chat_id=persisted.chat_id,
+        )
         return copy.deepcopy(recovered)
 
     def _append_runtime_injections(
@@ -188,10 +195,9 @@ class _EngineBackgroundResume:
         messages: list[dict[str, Any]],
     ) -> tuple[str, Any]:
         """Resume the engine loop once with injected background completions."""
-        route = self._session_routes.get(session_id)
-        if route:
-            channel, chat_id = route
-            self._engine._update_tool_contexts(channel, chat_id)
+        transport = self._session_transports.get(session_id)
+        if transport:
+            self._engine._update_tool_contexts(transport.channel, transport.chat_id)
         self.set_session_active(session_id, True)
         try:
             final_content, meta, _ = await self._engine._execute_loop(
@@ -212,8 +218,9 @@ class _EngineBackgroundResume:
         meta: Any,
     ) -> None:
         """Persist resumed output and emit outbound response."""
-        route = self._session_routes.get(session_id)
-        channel, chat_id = route if route else ("unknown", "unknown")
+        transport = self._session_transports.get(session_id)
+        channel = transport.channel if transport else "unknown"
+        chat_id = transport.chat_id if transport else "unknown"
 
         record_assistant_history = _should_record_assistant_history(final_content)
         session_history = build_persisted_session_history(

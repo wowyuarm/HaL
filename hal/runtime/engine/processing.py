@@ -452,9 +452,9 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
     """Process a user message end-to-end."""
     session_state = engine._ensure_session_for_inbound(msg)
     session_id = session_state.session_id
-    route = engine._get_session_route(session_id)
-    channel = route[0] if route else msg.channel
-    chat_id = route[1] if route else msg.chat_id
+    transport = engine._transport_context_for_session(session_id)
+    channel = transport.channel if transport else msg.channel
+    chat_id = transport.chat_id if transport else msg.chat_id
 
     with logger.contextualize(session=session_id):
         # /brief command — start background brief worker and end session
@@ -633,6 +633,7 @@ async def execute_loop(
     max_iterations: int,
     add_assistant_message_fn: Any,
     add_tool_result_fn: Any,
+    session_id: str | None = None,
     session_key: str | None = None,
     channel: str | None = None,
     chat_id: str | None = None,
@@ -645,6 +646,7 @@ async def execute_loop(
 
     hooks = _EngineLoopHooks(
         engine=engine,
+        session_id=session_id,
         session_key=session_key,
         channel=channel,
         chat_id=chat_id,

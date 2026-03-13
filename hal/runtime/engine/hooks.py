@@ -133,11 +133,11 @@ class _EngineLoopHooks:
     def __init__(
         self,
         engine: "AgentEngine",
+        session_id: str | None,
         session_key: str | None,
         channel: str | None,
         chat_id: str | None,
     ) -> None:
-        session_id = engine._session_routes.get(session_key) if session_key else None
         _init_engine_scope(
             self,
             engine=engine,

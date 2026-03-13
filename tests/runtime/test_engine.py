@@ -277,7 +277,7 @@ class TestDispatch:
         second = engine._ensure_session_for_inbound(msg)
 
         assert second.session_id == first.session_id
-        assert engine._session_routes[msg.session_key] == first.session_id
+        assert engine._resolve_transport_session(msg.session_key) == first.session_id
 
     def test_stop_keeps_active_sessions_without_ending_them(self, engine):
         state = engine.create_session(channel="telegram", chat_id="c1")
@@ -638,7 +638,9 @@ class TestThreadTouching:
         )
         await engine.process(msg)
 
-        state = engine._sessions[engine._session_routes[msg.session_key]]
+        session_id = engine._resolve_transport_session(msg.session_key)
+        assert session_id is not None
+        state = engine._sessions[session_id]
         assert "github-actions" in state.touched_threads
 
 
@@ -680,13 +682,14 @@ class TestBackgroundResume:
             final_content="assistant reply",
         )
         engine._background_resume._session_snapshots.clear()
-        engine._background_resume._session_routes.clear()
+        engine._background_resume._session_transports.clear()
 
         loaded = engine._background_resume._load_resume_snapshot(session_id)
 
         assert loaded is not None
         assert loaded[-1]["content"] == "assistant reply"
-        assert engine._background_resume._session_routes[session_id] == ("telegram", "c1")
+        transport = engine._background_resume._session_transports[session_id]
+        assert (transport.channel, transport.chat_id) == ("telegram", "c1")
 
     def test_clear_session_snapshot_removes_cache_and_repository_copy(self, engine):
         session_id = _create_session(engine, channel="telegram", chat_id="c2")
@@ -701,6 +704,23 @@ class TestBackgroundResume:
         assert engine._background_resume._load_resume_snapshot(session_id) is not None
         engine._background_resume.clear_session_snapshot(session_id)
         assert engine._background_resume._load_resume_snapshot(session_id) is None
+
+
+class TestBriefWorker:
+    async def test_session_first_brief_runs_without_transport_route(self, engine):
+        from hal.runtime.brief import run_session_brief
+
+        state = engine.create_session()
+        engine.bus.publish_outbound = AsyncMock()  # type: ignore[method-assign]
+
+        with patch("hal.runtime.brief.run_tool_loop", new_callable=AsyncMock) as mock_loop:
+            mock_loop.return_value = ("brief done", LoopMetadata())
+            await run_session_brief(engine, state.session_id)
+
+        manifest = engine._session_store.read_manifest(state.session_id)
+        assert manifest is not None
+        assert manifest.status == "ended"
+        engine.bus.publish_outbound.assert_not_awaited()
 
 
 class TestExecuteLoop:
@@ -1287,7 +1307,8 @@ class TestMidLoopInjection:
         assert out is not None
         assert out.content == "started"
 
-        session_id = engine._session_routes[msg.session_key]
+        session_id = engine._resolve_transport_session(msg.session_key)
+        assert session_id is not None
         await bus.emit(
             SubagentCompleteEvent(
                 label="bg-task",

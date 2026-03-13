@@ -45,6 +45,7 @@ from .subagent_injection import (
     _split_subagent_tool_result,
 )
 from .subscribers import _EngineBackgroundSubscribers
+from .transport import SessionTransportContext, SessionTransportRegistry
 
 if TYPE_CHECKING:
     from hal.bus.events import SubagentCompleteEvent
@@ -138,10 +139,8 @@ class AgentEngine:
         self._background_resume = _EngineBackgroundResume(engine=self)
         self._session_store = SessionStore(self._layout)
         self._sessions: dict[str, SessionRuntimeState] = {}
-        # Transport route mapping: session_key (channel:chat_id) → session_id
-        self._session_routes: dict[str, str] = {}
-        # Reverse mapping: session_id → (channel, chat_id)
-        self._session_channels: dict[str, tuple[str, str]] = {}
+        # Adapter-facing index: transport session key -> active session id.
+        self._transport_registry = SessionTransportRegistry()
 
         self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(
@@ -297,7 +296,7 @@ class AgentEngine:
         self._session_store.write_manifest(sid, manifest)
         self._sessions[sid] = state
         if channel and chat_id:
-            self._register_session_route(session_id=sid, channel=channel, chat_id=chat_id)
+            self._bind_transport_session(session_id=sid, channel=channel, chat_id=chat_id)
         return state
 
     def resume_session(self, session_id: str) -> SessionRuntimeState | None:
@@ -339,20 +338,28 @@ class AgentEngine:
         self._session_store.write_manifest(session_id, state.manifest)
         await state.event_publisher.close()
         self._sessions.pop(session_id, None)
-        self._session_channels.pop(session_id, None)
-        for key, value in list(self._session_routes.items()):
-            if value == session_id:
-                self._session_routes.pop(key, None)
+        self._transport_registry.unbind_session(session_id)
 
-    def _register_session_route(self, *, session_id: str, channel: str, chat_id: str) -> None:
-        """Map a transport session_key to an engine session_id."""
-        session_key = f"{channel}:{chat_id}"
-        self._session_routes[session_key] = session_id
-        self._session_channels[session_id] = (channel, chat_id)
+    def _bind_transport_session(self, *, session_id: str, channel: str, chat_id: str) -> None:
+        """Bind one adapter transport endpoint to an active session."""
+        self._transport_registry.bind(session_id=session_id, channel=channel, chat_id=chat_id)
 
-    def _get_session_route(self, session_id: str) -> tuple[str, str] | None:
-        """Return (channel, chat_id) for a session, or None."""
-        return self._session_channels.get(session_id)
+    def _resolve_transport_session(self, session_key: str) -> str | None:
+        """Resolve an adapter session key to an active session id."""
+        return self._transport_registry.resolve_session_id(session_key)
+
+    def _transport_context_for_session(
+        self,
+        session_id: str,
+    ) -> SessionTransportContext | None:
+        """Return transport metadata from the session manifest when available."""
+        state = self._sessions.get(session_id)
+        manifest = (
+            state.manifest if state is not None else self._session_store.read_manifest(session_id)
+        )
+        if manifest is None or not manifest.channel or not manifest.chat_id:
+            return None
+        return SessionTransportContext(channel=manifest.channel, chat_id=manifest.chat_id)
 
     def _ensure_session_for_inbound(self, msg: object) -> SessionRuntimeState:
         """Get or create a session for an inbound message (transport adapter path)."""
@@ -368,14 +375,14 @@ class AgentEngine:
             return state
 
         session_key = msg.session_key
-        session_id = self._session_routes.get(session_key)
+        session_id = self._resolve_transport_session(session_key)
         if session_id:
             state = self._sessions.get(session_id)
             if state is not None:
                 # Clean up completed brief tasks
                 if state.brief_task is not None and state.brief_task.done():
                     self._sessions.pop(session_id, None)
-                    self._session_routes.pop(session_key, None)
+                    self._transport_registry.unbind_session(session_id)
                 else:
                     return state
 
@@ -552,21 +559,22 @@ class AgentEngine:
         session_id: str | None = None,
     ) -> tuple[str | None, object, list[object]]:
         """Run the LLM tool-calling loop via the shared runtime."""
-        # Resolve channel/chat_id from session route for hook compat
+        # Resolve adapter-facing transport context from the session manifest.
         channel: str | None = None
         chat_id: str | None = None
         session_key: str | None = None
         if session_id:
-            route = self._get_session_route(session_id)
-            if route:
-                channel, chat_id = route
-                session_key = f"{channel}:{chat_id}"
+            transport = self._transport_context_for_session(session_id)
+            if transport:
+                channel, chat_id = transport.channel, transport.chat_id
+                session_key = transport.session_key
         return await execute_loop(
             self,
             messages=messages,
             max_iterations=max_iterations,
             add_assistant_message_fn=add_assistant_message,
             add_tool_result_fn=add_tool_result,
+            session_id=session_id,
             session_key=session_key,
             channel=channel,
             chat_id=chat_id,
@@ -608,8 +616,9 @@ class AgentEngine:
         final_content: str | None,
     ) -> None:
         """Store full loop context snapshot for potential background continuation."""
-        route = self._get_session_route(session_id)
-        channel, chat_id = route if route else ("unknown", "unknown")
+        transport = self._transport_context_for_session(session_id)
+        channel = transport.channel if transport else "unknown"
+        chat_id = transport.chat_id if transport else "unknown"
         self._background_resume.store_session_snapshot(
             session_id=session_id,
             channel=channel,
@@ -632,9 +641,11 @@ class AgentEngine:
             for manifest in self._session_store.list_sessions(status=status):
                 self.resume_session(manifest.session_id)
                 if manifest.channel and manifest.chat_id:
-                    session_key = f"{manifest.channel}:{manifest.chat_id}"
-                    if session_key not in self._session_routes:
-                        self._register_session_route(
+                    if not self._transport_registry.has_binding(
+                        channel=manifest.channel,
+                        chat_id=manifest.chat_id,
+                    ):
+                        self._bind_transport_session(
                             session_id=manifest.session_id,
                             channel=manifest.channel,
                             chat_id=manifest.chat_id,
@@ -660,9 +671,9 @@ class AgentEngine:
             if state:
                 mounted = state.mounted_threads
                 history = list(state.replay_history)
-                route = self._get_session_route(session_id)
-                if route:
-                    channel, chat_id = route
+                transport = self._transport_context_for_session(session_id)
+                if transport:
+                    channel, chat_id = transport.channel, transport.chat_id
 
         return await build_context_inspection(
             provider=self.provider,
@@ -693,7 +704,7 @@ class AgentEngine:
     ) -> str:
         """Process a message directly for CLI usage."""
         # Auto-create/reuse session for CLI path
-        session_id = self._session_routes.get(session_key)
+        session_id = self._resolve_transport_session(session_key)
         if not session_id:
             state = self.create_session(channel=channel, chat_id=chat_id)
             session_id = state.session_id
