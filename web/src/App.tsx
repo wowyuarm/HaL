@@ -1,13 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
-import { ThreadDetailPanel } from "@/components/thread/thread-detail";
 import { WorkingLog } from "@/components/session/working-log";
+import { SessionScopeDialog } from "@/components/session/session-scope-dialog";
+import { ThreadDetailPanel } from "@/components/thread/thread-detail";
 import { ThreadList } from "@/components/thread/thread-list";
 import { isInteractiveSession } from "@/lib/runtime";
 import { useHalStore } from "@/lib/store";
 import { useSessionSocket } from "@/lib/ws";
 
 export default function App() {
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
   const threads = useHalStore((s) => s.threads);
   const threadDetails = useHalStore((s) => s.threadDetails);
   const sessionManifests = useHalStore((s) => s.sessionManifests);
@@ -26,6 +28,7 @@ export default function App() {
   const selectThread = useHalStore((s) => s.selectThread);
   const selectSession = useHalStore((s) => s.selectSession);
   const createSessionForThread = useHalStore((s) => s.createSessionForThread);
+  const createScopedSession = useHalStore((s) => s.createScopedSession);
   const setError = useHalStore((s) => s.setError);
 
   const activeThread = activeThreadSlug ? threadDetails[activeThreadSlug] ?? null : null;
@@ -75,6 +78,17 @@ export default function App() {
     await createSessionForThread(activeThreadSlug);
   };
 
+  const handleCreateScopedSession = async (input: {
+    primaryThread: string;
+    mountedThreads: string[];
+  }) => {
+    setError(null);
+    const manifest = await createScopedSession(input);
+    if (manifest) {
+      setScopeDialogOpen(false);
+    }
+  };
+
   const handleSend = (content: string) => {
     if (!selectedSession || !send({ type: "submit_turn", content })) {
       setError("Live session socket is not ready yet.");
@@ -97,9 +111,17 @@ export default function App() {
     <div className="flex h-screen bg-background text-foreground">
       <aside className="flex h-screen w-[240px] shrink-0 flex-col border-r border-border bg-panel">
         <div className="flex-1 overflow-y-auto px-3 py-4">
-          <p className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
-            Threads
-          </p>
+          <div className="flex items-center justify-between gap-2 px-2">
+            <p className="text-xs font-medium uppercase tracking-widest text-muted">Threads</p>
+            <button
+              type="button"
+              onClick={() => setScopeDialogOpen(true)}
+              disabled={threads.length === 0 || creatingSession}
+              className="rounded-md border border-border bg-elevated px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-foreground transition-colors duration-fast ease-standard hover:bg-background disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Scope
+            </button>
+          </div>
           <div className="mt-3">
             <ThreadList
               threads={threads}
@@ -160,6 +182,15 @@ export default function App() {
           />
         </div>
       </main>
+
+      <SessionScopeDialog
+        open={scopeDialogOpen}
+        threads={threads}
+        initialPrimarySlug={activeThreadSlug}
+        creating={creatingSession}
+        onClose={() => setScopeDialogOpen(false)}
+        onSubmit={handleCreateScopedSession}
+      />
     </div>
   );
 }

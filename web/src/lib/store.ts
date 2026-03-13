@@ -37,6 +37,10 @@ interface HalStore {
   loadThreads: () => Promise<void>;
   loadThread: (slug: string) => Promise<void>;
   refreshActiveThread: () => Promise<void>;
+  createScopedSession: (input: {
+    primaryThread: string;
+    mountedThreads?: string[];
+  }) => Promise<SessionManifest | null>;
   createSessionForThread: (slug: string) => Promise<SessionManifest | null>;
   loadSessionEvents: (sessionId: string) => Promise<void>;
   applySessionSnapshot: (manifest: SessionManifest, events: SessionEvent[]) => void;
@@ -229,15 +233,18 @@ export const useHalStore = create<HalStore>((set, get) => ({
     await get().loadThread(slug);
   },
 
-  createSessionForThread: async (slug) => {
+  createScopedSession: async ({ primaryThread, mountedThreads }) => {
     set({ creatingSession: true, lastError: null });
     try {
-      const manifest = await createSession({ primary_thread: slug });
+      const manifest = await createSession({
+        primary_thread: primaryThread,
+        mounted_threads: mountedThreads,
+      });
       set((state) => ({
         sessionManifests: upsertManifest(state.sessionManifests, manifest),
       }));
       await get().loadThreads();
-      await get().loadThread(slug);
+      await get().loadThread(primaryThread);
       set({ selectedSessionId: manifest.session_id, creatingSession: false });
       return manifest;
     } catch (error) {
@@ -247,6 +254,10 @@ export const useHalStore = create<HalStore>((set, get) => ({
       });
       return null;
     }
+  },
+
+  createSessionForThread: async (slug) => {
+    return await get().createScopedSession({ primaryThread: slug });
   },
 
   loadSessionEvents: async (sessionId) => {
