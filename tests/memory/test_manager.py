@@ -109,24 +109,3 @@ class TestMemoryManager:
         ctx = mgr.get_context(budget_tokens=20)
         assert estimate_text_tokens(ctx) <= 20
         assert "[...truncated]" in ctx
-
-    def test_record_event_writes_unified_events_log(self, tmp_path: Path):
-        mgr = MemoryManager(workspace=tmp_path)
-        entry = mgr.record_event(
-            session_id="s_test",
-            event_type="user_message",
-            channel="cli",
-            chat_id="d",
-            payload={"content": "hello"},
-        )
-
-        assert entry.session == "s_test"
-        assert entry.type == "user_message"
-        assert entry.payload["content"] == "hello"
-
-        events_file = tmp_path / "runtime" / "logs" / "events.jsonl"
-        assert events_file.exists()
-        lines = [line for line in events_file.read_text(encoding="utf-8").splitlines() if line]
-        assert len(lines) == 1
-        assert '"session":"s_test"' in lines[0]
-        assert '"type":"user_message"' in lines[0]

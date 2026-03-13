@@ -198,8 +198,8 @@ class SessionConfig(_StrictModel):
         default=1800, ge=100
     )  # Max token budget per generated checkpoint block
     history_image_replay: Literal["full", "low_detail", "summary", "drop"] = (
-        "summary"
-    )  # How replayed historical images should be represented in follow-up requests
+        "summary"  # How replayed historical images should be represented in follow-up requests
+    )
     tool_result_replay_max_bytes: int = Field(
         default=12_000, ge=0
     )  # Per-tool-result replay cap before converting long outputs into shorter summaries (0 = unlimited)

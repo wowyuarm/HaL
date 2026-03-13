@@ -282,6 +282,8 @@ class AgentEngine:
             session_id=sid,
             primary_thread=primary_thread,
             mounted_threads=effective_mounted,
+            channel=channel,
+            chat_id=chat_id,
         )
         publisher = SessionEventPublisher(sid)
         publisher.add_sink(_WorkingLogSink(self._session_store, manifest))
@@ -550,9 +552,22 @@ class AgentEngine:
         self._background_resume.clear_session_snapshot(session_id)
 
     def _restore_active_sessions(self) -> None:
-        """Restore active/briefing sessions from durable manifests."""
-        for manifest in self._session_store.list_sessions(status="active"):
-            self.resume_session(manifest.session_id)
+        """Restore active/briefing sessions from durable manifests.
+
+        Active sessions are restored first so their transport routes take
+        precedence over stale briefing sessions sharing the same channel:chat_id.
+        """
+        for status in ("active", "briefing"):
+            for manifest in self._session_store.list_sessions(status=status):
+                self.resume_session(manifest.session_id)
+                if manifest.channel and manifest.chat_id:
+                    session_key = f"{manifest.channel}:{manifest.chat_id}"
+                    if session_key not in self._session_routes:
+                        self._register_session_route(
+                            session_id=manifest.session_id,
+                            channel=manifest.channel,
+                            chat_id=manifest.chat_id,
+                        )
 
     async def queue_background_completion(self, event: "SubagentCompleteEvent") -> None:
         """Queue detached subagent completions and continue same-session loop when idle."""

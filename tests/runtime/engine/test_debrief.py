@@ -94,12 +94,24 @@ def test_cap_text_truncates_large_text() -> None:
 
 
 def test_format_session_events_respects_per_event_cap() -> None:
-    from hal.workspace.events import EventEntry
+    from hal.domain.events import SessionEvent
 
     huge_content = "x" * 20000  # ~5000 tokens, well over default max_event_tokens (1500)
     events = [
-        EventEntry(session="s1", type="user_message", payload={"content": huge_content}),
-        EventEntry(session="s1", type="assistant", payload={"content": "short reply"}),
+        SessionEvent(
+            seq=1,
+            session_id="s1",
+            type="user_message",
+            actor="user",
+            payload={"content": huge_content},
+        ),
+        SessionEvent(
+            seq=2,
+            session_id="s1",
+            type="assistant",
+            actor="engine",
+            payload={"content": "short reply"},
+        ),
     ]
     rendered = format_session_events_for_prompt(events)
     # The huge event should be truncated, but the short one preserved
@@ -110,11 +122,17 @@ def test_format_session_events_respects_per_event_cap() -> None:
 
 
 def test_format_session_events_overall_budget() -> None:
-    from hal.workspace.events import EventEntry
+    from hal.domain.events import SessionEvent
 
     # Create many events that individually fit but collectively exceed a small budget
     events = [
-        EventEntry(session="s1", type="msg", payload={"content": f"event number {i}"})
+        SessionEvent(
+            seq=i,
+            session_id="s1",
+            type="msg",
+            actor="user",
+            payload={"content": f"event number {i}"},
+        )
         for i in range(500)
     ]
     rendered = format_session_events_for_prompt(events, max_tokens=200)

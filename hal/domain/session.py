@@ -56,6 +56,8 @@ class SessionManifest(BaseModel):
     status: SessionStatus = "active"
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     ended_at: str | None = None
+    channel: str | None = None
+    chat_id: str | None = None
     primary_thread: str | None = None
     mounted_threads: list[str] = Field(default_factory=list)
     touched_threads: list[str] = Field(default_factory=list)

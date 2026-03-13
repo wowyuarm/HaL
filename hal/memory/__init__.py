@@ -1,12 +1,9 @@
 """Memory subsystem."""
 
 from hal.memory.manager import MemoryManager
-from hal.workspace.events import EventEntry, EventLogRepository
 from hal.workspace.memory import MemoryRepository
 
 __all__ = [
-    "EventEntry",
-    "EventLogRepository",
     "MemoryManager",
     "MemoryRepository",
 ]

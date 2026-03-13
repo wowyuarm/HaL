@@ -16,8 +16,10 @@ from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.context.message_building import add_assistant_message, add_tool_result
 from hal.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
+from hal.domain.events import BRIEF_COMPLETED, SessionEvent
 from hal.runtime.loop import LoopMetadata, run_tool_loop
-from hal.workspace.events import EventEntry
+from hal.workspace.layout import WorkspaceLayout
+from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
 
 _BRIEF_MAX_ITERATIONS = 30
 
@@ -71,7 +73,7 @@ def extract_touched_threads(arguments: dict[str, Any]) -> set[str]:
 
 
 def format_session_events_for_prompt(
-    events: list[EventEntry],
+    events: list[SessionEvent],
     *,
     model: str | None = None,
     max_tokens: int = _DEFAULT_MAX_PROMPT_TOKENS,
@@ -215,7 +217,7 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
     worker_provider = engine._worker_provider
 
     # 1. Read session events
-    events = engine.memory.event_log.read_session(session_id)
+    events = engine._session_store.read_events(session_id)
     rendered_events = format_session_events_for_prompt(
         events,
         model=worker_model,
@@ -249,6 +251,7 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
     # 4. Execute brief worker loop
     max_iterations = brief_cfg.max_iterations
     hooks = _BriefLoopHooks()
+    worker_failed = False
     try:
         final_content, meta = await run_tool_loop(
             provider=worker_provider,
@@ -264,11 +267,16 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
         logger.error(f"Brief worker loop failed: {e}")
         final_content = None
         meta = LoopMetadata()
+        worker_failed = True
 
     # 5. Index any written episode files
     indexed_chunks = await _index_written_episodes(engine, meta)
 
-    # 6. Send completion summary
+    # 6. Write thread-to-session references (only on successful completion)
+    if not worker_failed:
+        _write_thread_session_refs(engine, state)
+
+    # 7. Send completion summary
     summary = _format_completion_summary(final_content, meta)
     from hal.bus.events import OutboundMessage
 
@@ -281,18 +289,19 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
         )
     )
 
-    # 7. Record event
-    engine.memory.record_event(
-        session_id=session_id,
-        event_type="session_brief_complete",
-        channel=channel,
-        chat_id=chat_id,
-        payload={
-            "iterations": meta.iterations,
-            "files_modified": meta.files_modified,
-            "indexed_chunks": indexed_chunks,
-        },
-    )
+    # 8. Record event (only on successful completion)
+    if not worker_failed:
+        await state.event_publisher.emit(
+            BRIEF_COMPLETED,
+            actor="worker",
+            refs={"channel": channel, "chat_id": chat_id},
+            payload={
+                "iterations": meta.iterations,
+                "files_modified": meta.files_modified,
+                "indexed_chunks": indexed_chunks,
+                "threads_linked": sorted(_brief_target_threads(state)),
+            },
+        )
     logger.info(
         f"Brief worker complete: {meta.iterations} iterations, "
         f"{len(meta.files_modified)} files modified"
@@ -550,3 +559,38 @@ def _format_completion_summary(final_content: str | None, meta: LoopMetadata) ->
         suffix = f" (+{len(meta.files_modified) - 5} more)" if len(meta.files_modified) > 5 else ""
         return f"Session brief complete. Updated: {files}{suffix}"
     return "Session brief complete (no changes needed)."
+
+
+# ---------------------------------------------------------------------------
+# Thread session refs
+# ---------------------------------------------------------------------------
+
+
+def _brief_target_threads(state: Any) -> list[str]:
+    """Return thread slugs that should receive session refs after briefing."""
+    selected: list[str] = []
+    primary = state.primary_thread
+    if primary:
+        selected.append(primary)
+    mounted_and_touched = sorted(state.mounted_threads & state.touched_threads)
+    for slug in mounted_and_touched:
+        if slug not in selected:
+            selected.append(slug)
+    return selected
+
+
+def _write_thread_session_refs(engine: Any, state: Any) -> None:
+    """Append thread-to-session refs for the threads covered by this brief."""
+    targets = _brief_target_threads(state)
+    if not targets:
+        return
+    refs_repo = ThreadRefsRepository(WorkspaceLayout(engine.workspace))
+    primary = state.primary_thread
+    for slug in targets:
+        refs_repo.append_ref(
+            slug,
+            ThreadSessionRef(
+                session_id=state.session_id,
+                role="primary" if slug == primary else "mounted",
+            ),
+        )

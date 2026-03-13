@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Protocol
 
 from hal.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
-from hal.workspace.events import EventEntry, EventLogRepository
 from hal.workspace.memory import MemoryRepository
 
 
@@ -19,7 +18,6 @@ class MemoryManager:
     Central coordinator for all memory subsystems.
 
     Provides a unified interface for:
-    - Recording session events (events.jsonl)
     - Reading/writing persistent knowledge (long-term)
     - Assembling memory context for prompt injection
     - Semantic search over past conversations (optional)
@@ -31,7 +29,6 @@ class MemoryManager:
         memory_search: _MemorySearchLike | None = None,
     ):
         self.long_term = MemoryRepository(workspace)
-        self.event_log = EventLogRepository(workspace)
         self._search = memory_search
 
     def get_context(self, budget_tokens: int | None = None, token_model: str | None = None) -> str:
@@ -58,24 +55,6 @@ class MemoryManager:
             budget_tokens,
             model=token_model,
             suffix="\n\n[...truncated]",
-        )
-
-    def record_event(
-        self,
-        *,
-        session_id: str,
-        event_type: str,
-        channel: str | None = None,
-        chat_id: str | None = None,
-        payload: dict[str, object] | None = None,
-    ) -> EventEntry:
-        """Append a unified session event to events.jsonl."""
-        return self.event_log.append(
-            session=session_id,
-            event_type=event_type,
-            channel=channel,
-            chat_id=chat_id,
-            payload=payload or {},
         )
 
     async def search_memories(self, query: str, top_k: int = 3) -> list[object]:

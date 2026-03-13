@@ -78,17 +78,12 @@ def _fmt_ctx_budget(data: dict[str, Any]) -> str:
 
 def _fmt_ctx_working_set(data: dict[str, Any]) -> str:
     """High-signal working-set summary for compact inspection."""
-    baseline_created = bool(data.get("baseline_created", False))
-    baseline_mode = "recompiled-now" if baseline_created else "frozen-session"
     baseline_threads = data.get("baseline_thread_slugs") or []
     recalled_threads = data.get("recalled_thread_slugs") or []
     lines = [
         "🧩 <b>Working Set</b>",
-        f"  baseline        {baseline_mode}",
-        (
-            f"  threads         {len(baseline_threads)} baseline"
-            f" / {len(recalled_threads)} recalled"
-        ),
+        "  baseline        compiled fresh this turn",
+        (f"  threads         {len(baseline_threads)} baseline / {len(recalled_threads)} recalled"),
     ]
     if baseline_threads:
         lines.append(f"  baseline_slugs  {', '.join(str(slug) for slug in baseline_threads[:4])}")
@@ -114,10 +109,7 @@ def _fmt_ctx_risk(data: dict[str, Any]) -> str:
     if not isinstance(total_tokens, int):
         total_tokens = 0
 
-    if bool(data.get("baseline_created", False)):
-        risks.append("baseline was recompiled for this inspection")
-    else:
-        risks.append("using frozen session baseline")
+    risks.append("working set compiled fresh for this inspection")
     if total_tokens and system_tokens / max(total_tokens, 1) >= 0.5:
         risks.append("system prompt dominates current token budget")
     if data.get("history_message_count", 0) == 0:

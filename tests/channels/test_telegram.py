@@ -170,9 +170,9 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
     assert "<b>Budget</b>" in report
     assert "input_tokens    1,000" in report
     assert "system          950" in report
-    assert "baseline        frozen-session" in report
+    assert "baseline        compiled fresh this turn" in report
     assert "<b>Risk</b>" in report
-    assert "using frozen session baseline" in report
+    assert "working set compiled fresh for this inspection" in report
     assert "system prompt dominates current token budget" in report
     assert "roles           system 1, user 1" in report
     assert "largest         [0] system 800t" in report
@@ -1065,8 +1065,6 @@ async def test_startup_notification_with_update(monkeypatch: pytest.MonkeyPatch)
     assert "Changes since" in sent_text
     assert "fix: thing" in sent_text
 
-    mm.record_event.assert_not_called()
-
 
 @pytest.mark.asyncio
 async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1085,5 +1083,3 @@ async def test_startup_notification_without_update(monkeypatch: pytest.MonkeyPat
     sent_text = _extract_sent_text(mock_bot.send_message)
     assert "HaL online" in sent_text
     assert "Changes since" not in sent_text
-
-    mm.record_event.assert_not_called()
