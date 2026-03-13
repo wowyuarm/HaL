@@ -18,6 +18,7 @@ from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token
 from hal.context.token_counter import count_messages_tokens
 from hal.domain.events import (
     ASSISTANT_MESSAGE_COMPLETED,
+    BRIEF_STARTED,
     CONTEXT_COMPILED,
     LOOP_STARTED,
     TURN_COMPLETED,
@@ -188,11 +189,24 @@ async def _handle_brief_command(
     channel: str,
     chat_id: str,
     user_prompt: str,
+    turn_id: str,
 ) -> OutboundMessage:
     """Handle /brief: mark session as briefing, start background worker."""
     import asyncio
 
     session_state.manifest.status = "briefing"
+    await session_state.event_publisher.emit(
+        BRIEF_STARTED,
+        turn_id=turn_id,
+        actor="user",
+        payload={"user_prompt": user_prompt},
+    )
+    await session_state.event_publisher.emit(
+        TURN_COMPLETED,
+        turn_id=turn_id,
+        actor="engine",
+        payload={"command": "brief"},
+    )
     session_state.brief_task = asyncio.create_task(
         engine._run_session_brief(session_state.session_id, user_prompt=user_prompt)
     )
@@ -212,8 +226,15 @@ async def _handle_drop_command(
     session_state: Any,
     channel: str,
     chat_id: str,
+    turn_id: str,
 ) -> OutboundMessage:
     """Handle /drop: end session immediately without running brief worker."""
+    await session_state.event_publisher.emit(
+        TURN_COMPLETED,
+        turn_id=turn_id,
+        actor="engine",
+        payload={"command": "drop"},
+    )
     await engine.end_session(session_state.session_id, status="dropped", reason="user_drop")
 
     return OutboundMessage(
@@ -442,13 +463,14 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             _record_user_turn(
                 engine=engine, msg=msg, session_id=session_id, session_state=session_state
             )
-            await _start_turn(msg=msg, session_state=session_state)
+            turn_id = await _start_turn(msg=msg, session_state=session_state)
             return await _handle_brief_command(
                 engine=engine,
                 session_state=session_state,
                 channel=channel,
                 chat_id=chat_id,
                 user_prompt=brief_prompt,
+                turn_id=turn_id,
             )
 
         # /drop command — end session immediately without briefing
@@ -456,9 +478,13 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             _record_user_turn(
                 engine=engine, msg=msg, session_id=session_id, session_state=session_state
             )
-            await _start_turn(msg=msg, session_state=session_state)
+            turn_id = await _start_turn(msg=msg, session_state=session_state)
             return await _handle_drop_command(
-                engine=engine, session_state=session_state, channel=channel, chat_id=chat_id
+                engine=engine,
+                session_state=session_state,
+                channel=channel,
+                chat_id=chat_id,
+                turn_id=turn_id,
             )
 
         _record_user_turn(

@@ -1,166 +1,204 @@
-/**
- * assistant-ui ExternalStoreRuntime adapter.
- *
- * Bridges the Zustand store and WebSocket transport into assistant-ui's
- * `useExternalStoreRuntime`, giving us scroll management and composability
- * primitives while our store owns the data.
- *
- * Usage (inside a component that also calls `useWebSocket`):
- *
- *   const { send } = useWebSocket();
- *   const runtime = useHalRuntime(send);
- *   return <AssistantRuntimeProvider runtime={runtime}>...</AssistantRuntimeProvider>;
- */
-import { useMemo } from "react";
-import {
-  useExternalStoreRuntime,
-  type AppendMessage,
-  type ExternalStoreAdapter,
-  type ThreadMessageLike,
-} from "@assistant-ui/react";
+import type { SessionEvent, SessionManifest, SessionStatus } from "@/lib/types";
 
-import { useHalStore } from "@/lib/store";
-import type { ClientEnvelope } from "@/lib/store";
-import type { Message, ToolCall } from "@/lib/types";
-
-// ---------------------------------------------------------------------------
-// Message conversion (HaL Message → assistant-ui ThreadMessageLike)
-// ---------------------------------------------------------------------------
-
-/** Subset of ThreadMessageLike["content"] array element types we produce. */
-type ContentPart =
-  | { readonly type: "text"; readonly text: string }
-  | {
-      readonly type: "tool-call";
-      readonly toolCallId: string;
-      readonly toolName: string;
-      readonly args?: Readonly<Record<string, string>>;
-      readonly result?: string;
-      readonly isError?: boolean;
-    };
-
-/**
- * Map a HaL ToolCall (wire format) into an assistant-ui tool-call content
- * part.
- *
- * `args_summary` describes the tool *input* (e.g. "auth.py"), so it is
- * carried as `args` context.  On failure, `error` becomes the `result`.
- */
-function toolCallToPart(tc: ToolCall): ContentPart {
-  return {
-    type: "tool-call",
-    toolCallId: tc.id,
-    toolName: tc.name,
-    args: { summary: tc.args_summary },
-    ...(tc.status === "failed"
-      ? { result: tc.error ?? "Tool call failed.", isError: true }
-      : {}),
-  };
+export interface TurnGroup {
+  kind: "turn";
+  turnId: string;
+  startedAt: string;
+  events: SessionEvent[];
 }
 
-/**
- * Convert a HaL `Message` into assistant-ui's `ThreadMessageLike`.
- *
- * - User messages: plain text content.
- * - Assistant messages: text + optional tool-call parts from metadata.
- */
-function convertMessage(msg: Message): ThreadMessageLike {
-  const toolCalls = msg.metadata?.tool_calls;
-
-  // Fast path: no tool calls → return content as a plain string.
-  if (!toolCalls || toolCalls.length === 0) {
-    return {
-      id: msg.id,
-      role: msg.role,
-      content: msg.content,
-      createdAt: new Date(msg.ts),
-    };
-  }
-
-  // Build a content-parts array with text + tool calls.
-  const parts: ContentPart[] = [];
-
-  if (msg.content.length > 0) {
-    parts.push({ type: "text", text: msg.content });
-  }
-
-  for (const tc of toolCalls) {
-    parts.push(toolCallToPart(tc));
-  }
-
-  return {
-    id: msg.id,
-    role: msg.role,
-    content: parts,
-    createdAt: new Date(msg.ts),
-  };
+export interface StandaloneEventItem {
+  kind: "event";
+  event: SessionEvent;
 }
 
-// ---------------------------------------------------------------------------
-// Outbound: extract text from an AppendMessage
-// ---------------------------------------------------------------------------
+export type WorkingLogItem = TurnGroup | StandaloneEventItem;
 
-/**
- * Extract the plain-text content from an assistant-ui `AppendMessage`.
- *
- * AppendMessage.content is an array of typed parts; we concatenate all text
- * parts and trim the result.
- */
-function extractText(append: AppendMessage): string {
-  return append.content
-    .filter(
-      (part): part is Extract<(typeof append.content)[number], { type: "text" }> =>
-        part.type === "text",
-    )
-    .map((part) => part.text)
-    .join("\n\n")
-    .trim();
+const MINUTE = 60;
+const HOUR = 3600;
+const DAY = 86400;
+
+export function buildWorkingLogItems(events: SessionEvent[]): WorkingLogItem[] {
+  const ordered = [...events].sort((a, b) => a.seq - b.seq);
+  const items: WorkingLogItem[] = [];
+  const turnMap = new Map<string, TurnGroup>();
+
+  for (const event of ordered) {
+    if (!event.turn_id) {
+      items.push({ kind: "event", event });
+      continue;
+    }
+
+    let turn = turnMap.get(event.turn_id);
+    if (!turn) {
+      turn = {
+        kind: "turn",
+        turnId: event.turn_id,
+        startedAt: event.ts,
+        events: [],
+      };
+      turnMap.set(event.turn_id, turn);
+      items.push(turn);
+    }
+    turn.events.push(event);
+  }
+
+  return items;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+export function formatRelativeTime(ts: string | null | undefined): string {
+  if (!ts) return "--";
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts;
 
-/**
- * Build an assistant-ui runtime backed by the HaL store and WebSocket.
- *
- * @param send - The `send` function from `useWebSocket()`. Passed explicitly
- *   so that the WebSocket lifecycle is owned by a single call site (the app
- *   root), not duplicated per consumer.
- */
-export function useHalRuntime(send: (data: ClientEnvelope) => boolean) {
-  const messages = useHalStore((s) => s.messages);
-  const status = useHalStore((s) => s.status);
-  const addUserMessage = useHalStore((s) => s.addUserMessage);
-  const handleError = useHalStore((s) => s.handleError);
+  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffSec < 0 || diffSec < MINUTE) return "just now";
+  if (diffSec < HOUR) return `${Math.floor(diffSec / MINUTE)}m ago`;
+  if (diffSec < DAY) return `${Math.floor(diffSec / HOUR)}h ago`;
+  if (diffSec < DAY * 30) return `${Math.floor(diffSec / DAY)}d ago`;
 
-  const adapter = useMemo<ExternalStoreAdapter<Message>>(
-    () => ({
-      messages,
-      isRunning: status === "processing",
-      convertMessage,
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
-      onNew: async (append: AppendMessage) => {
-        const text = extractText(append);
-        if (!text) return;
+export function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "--";
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return ts;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-        const ok = send({ type: "message", content: text });
-        if (!ok) {
-          const error = "Cannot send: WebSocket is not connected.";
-          handleError(error);
-          throw new Error(error);
-        }
+export function formatCount(value: number | undefined): string {
+  const safe = value ?? 0;
+  if (safe < 1000) return String(safe);
+  const formatted = (safe / 1000).toFixed(1);
+  return formatted.endsWith(".0") ? `${formatted.slice(0, -2)}k` : `${formatted}k`;
+}
 
-        // Optimistic local insert after confirming the socket accepted the
-        // frame.  The server does not currently echo user messages back, so
-        // this is the only source of the user turn in the message list.
-        // If a future protocol revision adds server echo, `upsertMessage`
-        // in the store will reconcile by ID.
-        addUserMessage(text);
-      },
-    }),
-    [messages, status, addUserMessage, handleError, send],
-  );
+export function sessionDisplayState(
+  status: SessionStatus,
+): { label: string; dotClass: string; textClass: string } {
+  switch (status) {
+    case "active":
+      return {
+        label: "active",
+        dotClass: "bg-accent animate-pulse",
+        textClass: "text-accent",
+      };
+    case "briefing":
+      return {
+        label: "briefing",
+        dotClass: "bg-accent",
+        textClass: "text-accent",
+      };
+    case "ended":
+      return {
+        label: "briefed",
+        dotClass: "bg-emerald-600",
+        textClass: "text-emerald-700",
+      };
+    case "dropped":
+      return {
+        label: "dropped",
+        dotClass: "bg-muted",
+        textClass: "text-muted",
+      };
+  }
+}
 
-  return useExternalStoreRuntime(adapter);
+export function summarizeSession(manifest: SessionManifest): string {
+  const mounted = manifest.mounted_threads.length;
+  const turns = manifest.turn_count;
+  return `${turns} turn${turns === 1 ? "" : "s"} · ${mounted} thread${mounted === 1 ? "" : "s"}`;
+}
+
+export function isInteractiveSession(status: SessionStatus): boolean {
+  return status === "active" || status === "briefing";
+}
+
+export function eventSummary(event: SessionEvent): string {
+  switch (event.type) {
+    case "session.created":
+      return "Session created";
+    case "session.scope_updated": {
+      const added = stringList(event.payload.added_threads).join(", ");
+      const removed = stringList(event.payload.removed_threads).join(", ");
+      if (added && removed) return `Scope updated: +${added} / -${removed}`;
+      if (added) return `Scope updated: +${added}`;
+      if (removed) return `Scope updated: -${removed}`;
+      return "Scope updated";
+    }
+    case "session.ended":
+      return `Session ended: ${stringValue(event.payload.reason) ?? "completed"}`;
+    case "session.compacted":
+      return "Session history compacted";
+    case "context.compiled": {
+      const recalled = numberValue(event.payload.search_results) ?? 0;
+      const tokens = numberValue(event.payload.estimated_input_tokens);
+      return `Context compiled${tokens ? ` · ${formatCount(tokens)} tok` : ""} · ${recalled} recalls`;
+    }
+    case "loop.started":
+      return "Loop started";
+    case "loop.iteration_started":
+      return `Iteration ${numberValue(event.payload.iteration) ?? "?"} started`;
+    case "llm.request_started":
+      return "LLM request started";
+    case "llm.response_completed": {
+      const hasTools = Boolean(event.payload.has_tool_calls);
+      return hasTools ? "LLM response planned tool calls" : "LLM response completed";
+    }
+    case "tool.call_started":
+      return `Tool started: ${stringValue(event.payload.tool) ?? "unknown"}`;
+    case "tool.call_completed":
+      return `Tool completed: ${stringValue(event.payload.tool) ?? "unknown"}`;
+    case "hook.injected":
+      return `Hook injected: ${stringValue(event.payload.kind) ?? "context"}`;
+    case "message.injected":
+      return `Message injected: ${stringValue(event.payload.kind) ?? "runtime"}`;
+    case "brief.started":
+      return "Brief worker started";
+    case "brief.completed":
+      return "Brief worker completed";
+    case "subagent.completed":
+      return `Subagent completed: ${stringValue(event.payload.label) ?? "worker"}`;
+    case "turn.completed":
+      return "Turn completed";
+    case "turn.failed":
+      return "Turn failed";
+    default:
+      return event.type;
+  }
+}
+
+export function extractTextBlock(event: SessionEvent): string | null {
+  switch (event.type) {
+    case "user.message":
+      return stringValue(event.payload.content);
+    case "assistant.message_completed":
+      return stringValue(event.payload.content);
+    case "hook.injected":
+      return stringValue(event.payload.content);
+    case "message.injected":
+      return stringValue(event.payload.content) ?? stringValue(event.payload.prefixed_content);
+    default:
+      return null;
+  }
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : [];
 }

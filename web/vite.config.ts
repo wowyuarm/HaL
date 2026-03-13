@@ -11,10 +11,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/ws": {
-        target: "ws://localhost:8765",
-        ws: true,
+      "/threads": {
+        target: "http://localhost:8765",
         changeOrigin: true,
+      },
+      "/sessions": {
+        target: "http://localhost:8765",
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

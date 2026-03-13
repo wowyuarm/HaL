@@ -19,9 +19,17 @@ interface ComposerProps {
   onSend: (content: string) => void;
   disabled?: boolean;
   className?: string;
+  placeholder?: string;
+  buttonLabel?: string;
 }
 
-export function Composer({ onSend, disabled = false, className }: ComposerProps) {
+export function Composer({
+  onSend,
+  disabled = false,
+  className,
+  placeholder = "Type your next step...",
+  buttonLabel = "Send",
+}: ComposerProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -72,7 +80,7 @@ export function Composer({ onSend, disabled = false, className }: ComposerProps)
             }}
             disabled={disabled}
             rows={MIN_ROWS}
-            placeholder="Type a message or /command..."
+            placeholder={placeholder}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
@@ -91,7 +99,7 @@ export function Composer({ onSend, disabled = false, className }: ComposerProps)
           )}
         >
           <SendHorizontal className="h-4 w-4" />
-          Send
+          {buttonLabel}
         </button>
       </div>
     </div>

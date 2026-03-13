@@ -1,63 +1,101 @@
-/**
- * App — Root component.
- *
- * Wires together the WebSocket connection, Zustand store, and all UI
- * components into the Research Desk layout.
- *
- * Phase 1 sends messages directly via WebSocket + optimistic store inserts.
- * assistant-ui ExternalStoreRuntime is kept as a dependency but not wired
- * here until Phase 2 streaming or assistant-ui primitives are needed.
- */
-import { Composer } from "@/components/chat/composer";
-import { MessageList } from "@/components/chat/message-list";
-import { ContextSummary } from "@/components/context/context-summary";
+import { useEffect } from "react";
+
+import { ThreadDetailPanel } from "@/components/thread/thread-detail";
+import { WorkingLog } from "@/components/session/working-log";
 import { ThreadList } from "@/components/thread/thread-list";
-import { useHalStore, type ClientEnvelope } from "@/lib/store";
-import { useWebSocket } from "@/lib/ws";
+import { isInteractiveSession } from "@/lib/runtime";
+import { useHalStore } from "@/lib/store";
+import { useSessionSocket } from "@/lib/ws";
 
 export default function App() {
-  const { send, connected } = useWebSocket();
-
-  const messages = useHalStore((s) => s.messages);
   const threads = useHalStore((s) => s.threads);
-  const activeThread = useHalStore((s) => s.activeThread);
-  const status = useHalStore((s) => s.status);
-  const contextSummary = useHalStore((s) => s.contextSummary);
+  const threadDetails = useHalStore((s) => s.threadDetails);
+  const sessionManifests = useHalStore((s) => s.sessionManifests);
+  const sessionEvents = useHalStore((s) => s.sessionEvents);
+  const activeThreadSlug = useHalStore((s) => s.activeThreadSlug);
+  const selectedSessionId = useHalStore((s) => s.selectedSessionId);
+  const socketState = useHalStore((s) => s.socketState);
+  const loadingThreads = useHalStore((s) => s.loadingThreads);
+  const loadingThread = useHalStore((s) => s.loadingThread);
+  const loadingSession = useHalStore((s) => s.loadingSession);
+  const creatingSession = useHalStore((s) => s.creatingSession);
+  const lastError = useHalStore((s) => s.lastError);
+  const loadThreads = useHalStore((s) => s.loadThreads);
+  const loadThread = useHalStore((s) => s.loadThread);
+  const loadSessionEvents = useHalStore((s) => s.loadSessionEvents);
+  const selectThread = useHalStore((s) => s.selectThread);
+  const selectSession = useHalStore((s) => s.selectSession);
+  const createSessionForThread = useHalStore((s) => s.createSessionForThread);
+  const setError = useHalStore((s) => s.setError);
 
-  // Thread selection is optimistic in Phase 1 (single-user, no ack needed).
-  // Phase 2 should wait for server confirmation before updating activeThread.
+  const activeThread = activeThreadSlug ? threadDetails[activeThreadSlug] ?? null : null;
+  const selectedSession = selectedSessionId ? sessionManifests[selectedSessionId] ?? null : null;
+  const events = selectedSessionId ? sessionEvents[selectedSessionId] ?? [] : [];
+  const latestEventSeq = events.at(-1)?.seq ?? 0;
+  const { send } = useSessionSocket(
+    selectedSession?.session_id ?? null,
+    selectedSession?.status ?? null,
+  );
+
+  useEffect(() => {
+    void loadThreads();
+  }, [loadThreads]);
+
+  useEffect(() => {
+    if (!activeThreadSlug) return;
+    void loadThread(activeThreadSlug);
+  }, [activeThreadSlug, loadThread]);
+
+  useEffect(() => {
+    if (!selectedSession) return;
+    if (isInteractiveSession(selectedSession.status)) return;
+    if (latestEventSeq >= selectedSession.last_event_seq) return;
+    void loadSessionEvents(selectedSession.session_id);
+  }, [
+    latestEventSeq,
+    loadSessionEvents,
+    selectedSession?.last_event_seq,
+    selectedSession?.session_id,
+    selectedSession?.status,
+  ]);
+
   const handleSelectThread = (slug: string) => {
-    const ok = send({ type: "select_thread", slug });
-    if (ok) {
-      useHalStore.getState().selectThread(slug);
-    }
+    setError(null);
+    selectThread(slug);
+  };
+
+  const handleSelectSession = (sessionId: string) => {
+    setError(null);
+    selectSession(sessionId);
+  };
+
+  const handleCreateSession = async () => {
+    if (!activeThreadSlug) return;
+    setError(null);
+    await createSessionForThread(activeThreadSlug);
   };
 
   const handleSend = (content: string) => {
-    if (content.startsWith("/")) {
-      const parsed = parseSlashCommand(content);
-      if (parsed) {
-        const ok = send(parsed);
-        if (ok) {
-          useHalStore.getState().addUserMessage(content);
-        }
-        return;
-      }
-    }
-
-    const ok = send({ type: "message", content });
-    if (ok) {
-      useHalStore.getState().addUserMessage(content);
+    if (!selectedSession || !send({ type: "submit_turn", content })) {
+      setError("Live session socket is not ready yet.");
     }
   };
 
-  const activeThreadData = threads.find((t) => t.slug === activeThread);
+  const handleBrief = () => {
+    if (!selectedSession || !send({ type: "end_session", reason: "brief" })) {
+      setError("Unable to start briefing until the session socket is live.");
+    }
+  };
+
+  const handleDrop = () => {
+    if (!selectedSession || !send({ type: "end_session", reason: "drop" })) {
+      setError("Unable to drop this session until the session socket is live.");
+    }
+  };
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      {/* Sidebar */}
       <aside className="flex h-screen w-[240px] shrink-0 flex-col border-r border-border bg-panel">
-        {/* Thread list */}
         <div className="flex-1 overflow-y-auto px-3 py-4">
           <p className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
             Threads
@@ -65,68 +103,63 @@ export default function App() {
           <div className="mt-3">
             <ThreadList
               threads={threads}
-              activeThread={activeThread}
+              activeThread={activeThreadSlug}
               onSelect={handleSelectThread}
             />
           </div>
         </div>
-
-        {/* Context summary */}
         <div className="border-t border-border px-3 py-4">
-          <p className="px-2 text-xs font-medium uppercase tracking-widest text-muted">
-            Context
-          </p>
-          <div className="mt-2">
-            <ContextSummary
-              summary={contextSummary}
-              status={status}
-              connected={connected}
-            />
+          <div className="rounded-md border border-border bg-elevated px-3 py-3 text-xs text-muted">
+            <p className="font-medium uppercase tracking-widest text-foreground">
+              Working Log
+            </p>
+            <p className="mt-2 leading-relaxed">
+              Threads hold durable memory. Sessions are the observable work runs beneath them.
+            </p>
           </div>
         </div>
       </aside>
 
-      {/* Main area */}
-      <main className="flex h-screen flex-1 flex-col bg-background">
-        {/* Title bar */}
+      <main className="flex min-w-0 flex-1 flex-col bg-background">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-5">
           <h1 className="text-sm font-semibold text-foreground">
-            {activeThreadData?.name ?? "HaL"}
+            {activeThread?.name ?? "HaL"}
           </h1>
-          {activeThreadData?.scope && (
+          {activeThread?.scope && (
             <span className="rounded-sm border border-border bg-elevated px-1.5 py-0.5 font-mono text-[11px] text-muted">
-              {activeThreadData.scope}
+              {activeThread.scope}
             </span>
           )}
-          {!connected && (
-            <span className="rounded-sm bg-danger-subtle px-1.5 py-0.5 text-[11px] font-medium text-danger">
-              disconnected
+          <span className="rounded-sm border border-border bg-elevated px-1.5 py-0.5 text-[11px] font-medium text-muted">
+            {selectedSession ? `socket ${socketState}` : "select a session"}
+          </span>
+          {(loadingThreads || loadingThread || loadingSession) && (
+            <span className="rounded-sm bg-panel px-1.5 py-0.5 text-[11px] font-medium text-muted">
+              loading
             </span>
           )}
         </header>
 
-        {/* Message area */}
-        <MessageList messages={messages} />
-
-        {/* Composer */}
-        <Composer
-          onSend={handleSend}
-          disabled={!connected || status === "processing"}
-        />
+        <div className="grid min-h-0 flex-1 gap-4 p-4 xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]">
+          <ThreadDetailPanel
+            thread={activeThread}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={handleSelectSession}
+            onCreateSession={handleCreateSession}
+            creatingSession={creatingSession}
+          />
+          <WorkingLog
+            session={selectedSession}
+            events={events}
+            socketState={socketState}
+            loading={loadingThread || loadingSession}
+            error={lastError}
+            onSend={handleSend}
+            onBrief={handleBrief}
+            onDrop={handleDrop}
+          />
+        </div>
       </main>
     </div>
   );
-}
-
-function parseSlashCommand(content: string): ClientEnvelope | null {
-  const trimmed = content.trim();
-  const [, name = "", rawArgs = ""] = trimmed.match(/^\/(\S+)(?:\s+(.*))?$/) ?? [];
-  if (name !== "brief" && name !== "drop" && name !== "context") {
-    return null;
-  }
-  return {
-    type: "command" as const,
-    name,
-    args: rawArgs ? { raw: rawArgs } : {},
-  };
 }

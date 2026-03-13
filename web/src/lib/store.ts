@@ -1,271 +1,308 @@
-/**
- * HaL client store — engine state mirror.
- *
- * Zustand store that holds the canonical client-side projection of engine
- * state.  Every field is populated by server-pushed WebSocket events; the
- * UI is a pure function of this store.
- *
- * The only optimistic write is `addUserMessage`, which inserts a local
- * placeholder before the server acknowledges it.
- */
 import { create } from "zustand";
 
+import {
+  createSession,
+  getSessionEvents,
+  getThread,
+  listThreads,
+} from "@/lib/api";
 import type {
-  ContextSummaryData,
-  Message,
-  MessageMetadata,
-  MessageRole,
-  Thread,
+  SessionEvent,
+  SessionManifest,
+  SessionStatus,
+  SocketState,
+  ThreadDetail,
+  ThreadSummary,
 } from "@/lib/types";
 
-// ---------------------------------------------------------------------------
-// Engine status
-// ---------------------------------------------------------------------------
-
-export type EngineStatus = "idle" | "processing";
-
-// ---------------------------------------------------------------------------
-// WebSocket envelope types (server → client)
-// ---------------------------------------------------------------------------
-
-export interface SnapshotPayload {
-  type: "snapshot";
-  session_id: string | null;
-  active_thread: string | null;
-  threads: Thread[];
-  history: Message[];
-  context_summary: ContextSummaryData;
-  status: EngineStatus;
-}
-
-export interface MessagePayload {
-  type: "message";
-  id: string;
-  role: MessageRole;
-  content: string;
-  ts: string;
-  metadata?: MessageMetadata;
-}
-
-export interface StatusPayload {
-  type: "status";
-  state: EngineStatus;
-}
-
-export interface ThreadsPayload {
-  type: "threads";
-  list: Thread[];
-}
-
-export interface ContextSummaryPayload extends ContextSummaryData {
-  type: "context_summary";
-}
-
-export interface ErrorPayload {
-  type: "error";
-  message: string;
-}
-
-/** Union of all server-to-client envelopes. */
-export type ServerEnvelope =
-  | SnapshotPayload
-  | MessagePayload
-  | StatusPayload
-  | ThreadsPayload
-  | ContextSummaryPayload
-  | ErrorPayload;
-
-// ---------------------------------------------------------------------------
-// WebSocket envelope types (client → server)
-// ---------------------------------------------------------------------------
-
-export interface ClientMessageEnvelope {
-  type: "message";
-  content: string;
-}
-
-export interface ClientCommandEnvelope {
-  type: "command";
-  name: "brief" | "drop" | "context";
-  args: Record<string, unknown>;
-}
-
-export interface ClientSelectThreadEnvelope {
-  type: "select_thread";
-  slug: string;
-}
-
-export type ClientEnvelope =
-  | ClientMessageEnvelope
-  | ClientCommandEnvelope
-  | ClientSelectThreadEnvelope;
-
-// ---------------------------------------------------------------------------
-// Store shape
-// ---------------------------------------------------------------------------
-
-/** Default context summary before the first snapshot arrives. */
-const EMPTY_CONTEXT: ContextSummaryData = { tokens: 0, tools: 0, history: 0 };
-
-/** Prefix for client-generated message IDs (before server acknowledges). */
-const LOCAL_ID_PREFIX = "local_";
-
 interface HalStore {
-  // Connection
-  connected: boolean;
-  setConnected: (v: boolean) => void;
-
-  // Session
-  sessionId: string | null;
-  status: EngineStatus;
-
-  // Threads
-  threads: Thread[];
-  activeThread: string | null;
-  selectThread: (slug: string) => void;
-
-  // Messages
-  messages: Message[];
-
-  // Context
-  contextSummary: ContextSummaryData;
-
-  // Error surface (latest error, cleared on next snapshot)
+  threads: ThreadSummary[];
+  threadDetails: Record<string, ThreadDetail>;
+  sessionManifests: Record<string, SessionManifest>;
+  sessionEvents: Record<string, SessionEvent[]>;
+  activeThreadSlug: string | null;
+  selectedSessionId: string | null;
+  socketState: SocketState;
+  loadingThreads: boolean;
+  loadingThread: boolean;
+  loadingSession: boolean;
+  creatingSession: boolean;
   lastError: string | null;
 
-  // Server-event handlers
-  handleSnapshot: (data: SnapshotPayload) => void;
-  handleMessage: (data: MessagePayload) => void;
-  handleStatus: (data: StatusPayload) => void;
-  handleThreads: (data: ThreadsPayload) => void;
-  handleContextSummary: (data: ContextSummaryPayload) => void;
-  handleError: (data: ErrorPayload | string) => void;
+  selectThread: (slug: string) => void;
+  selectSession: (sessionId: string | null) => void;
+  setSocketState: (state: SocketState) => void;
+  setError: (message: string | null) => void;
 
-  // Optimistic user action
-  addUserMessage: (content: string) => void;
+  loadThreads: () => Promise<void>;
+  loadThread: (slug: string) => Promise<void>;
+  refreshActiveThread: () => Promise<void>;
+  createSessionForThread: (slug: string) => Promise<SessionManifest | null>;
+  loadSessionEvents: (sessionId: string) => Promise<void>;
+  applySessionSnapshot: (manifest: SessionManifest, events: SessionEvent[]) => void;
+  appendSessionEvent: (event: SessionEvent) => void;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function mergeSessionEvents(
+  current: SessionEvent[] | undefined,
+  incoming: SessionEvent[],
+): SessionEvent[] {
+  const merged = new Map<number, SessionEvent>();
+  for (const event of current ?? []) merged.set(event.seq, event);
+  for (const event of incoming) merged.set(event.seq, event);
+  return [...merged.values()].sort((a, b) => a.seq - b.seq);
+}
 
-/** Generate a client-side message ID (crypto.randomUUID with fallback). */
-function generateLocalId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`;
+function upsertManifest(
+  manifests: Record<string, SessionManifest>,
+  manifest: SessionManifest,
+): Record<string, SessionManifest> {
+  return { ...manifests, [manifest.session_id]: manifest };
+}
+
+function patchManifestFromEvent(
+  manifest: SessionManifest | undefined,
+  event: SessionEvent,
+  options: { alreadySeen: boolean },
+): SessionManifest | undefined {
+  if (!manifest) return manifest;
+  const { alreadySeen } = options;
+
+  const nextManifest: SessionManifest = {
+    ...manifest,
+    last_event_seq: Math.max(manifest.last_event_seq, event.seq),
+  };
+
+  if (!alreadySeen && event.type === "turn.started") {
+    nextManifest.turn_count += 1;
   }
-  // Fallback for environments without crypto.randomUUID
-  return `${LOCAL_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+  if (event.type === "brief.started") {
+    return { ...nextManifest, status: "briefing" };
+  }
+
+  if (event.type === "session.scope_updated") {
+    const mountedThreads = Array.isArray(event.refs.mounted_threads)
+      ? event.refs.mounted_threads.filter((item): item is string => typeof item === "string")
+      : nextManifest.mounted_threads;
+    return { ...nextManifest, mounted_threads: mountedThreads };
+  }
+
+  if (event.type === "session.ended") {
+    const reason = typeof event.payload.reason === "string" ? event.payload.reason : "";
+    const status: SessionStatus = reason === "user_drop" ? "dropped" : "ended";
+    return { ...nextManifest, status, ended_at: event.ts };
+  }
+
+  return nextManifest;
 }
 
-/**
- * Insert or replace a message in the list by ID.
- *
- * If the server pushes a message whose ID matches an existing entry (e.g. a
- * local optimistic insert later echoed back), the server version wins.
- */
-function upsertMessage(messages: Message[], incoming: Message): Message[] {
-  const idx = messages.findIndex((m) => m.id === incoming.id);
-  if (idx === -1) return [...messages, incoming];
-
-  const updated = messages.slice();
-  updated[idx] = incoming;
-  return updated;
+function syncManifestIntoThreadDetails(
+  details: Record<string, ThreadDetail>,
+  manifest: SessionManifest,
+): Record<string, ThreadDetail> {
+  const nextDetails: Record<string, ThreadDetail> = {};
+  for (const [slug, detail] of Object.entries(details)) {
+    const hasSession = detail.sessions.some((session) => session.session_id === manifest.session_id);
+    if (!hasSession) {
+      nextDetails[slug] = detail;
+      continue;
+    }
+    const sessions = detail.sessions
+      .map((session) => (session.session_id === manifest.session_id ? manifest : session))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    nextDetails[slug] = {
+      ...detail,
+      sessions,
+      session_counts: countSessions(sessions),
+    };
+  }
+  return nextDetails;
 }
 
-// ---------------------------------------------------------------------------
-// Store creation
-// ---------------------------------------------------------------------------
+function countSessions(sessions: SessionManifest[]): Partial<Record<SessionStatus, number>> {
+  const counts: Partial<Record<SessionStatus, number>> = {};
+  for (const session of sessions) {
+    counts[session.status] = (counts[session.status] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function syncThreadSummaries(
+  threads: ThreadSummary[],
+  details: Record<string, ThreadDetail>,
+): ThreadSummary[] {
+  return threads.map((thread) => {
+    const detail = details[thread.slug];
+    return detail
+      ? {
+          ...thread,
+          session_counts: detail.session_counts,
+          updated_at: detail.updated_at,
+        }
+      : thread;
+  });
+}
+
+function normalizeThreadDetail(detail: ThreadDetail): ThreadDetail {
+  return {
+    ...detail,
+    sessions: [...detail.sessions].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+  };
+}
 
 export const useHalStore = create<HalStore>((set, get) => ({
-  // -- Connection -----------------------------------------------------------
-  connected: false,
-  setConnected: (v) => set({ connected: v }),
-
-  // -- Session --------------------------------------------------------------
-  sessionId: null,
-  status: "idle",
-
-  // -- Threads --------------------------------------------------------------
   threads: [],
-  activeThread: null,
-  selectThread: (slug) => {
-    const { threads } = get();
-    if (threads.some((t) => t.slug === slug)) {
-      set({ activeThread: slug });
+  threadDetails: {},
+  sessionManifests: {},
+  sessionEvents: {},
+  activeThreadSlug: null,
+  selectedSessionId: null,
+  socketState: "disconnected",
+  loadingThreads: false,
+  loadingThread: false,
+  loadingSession: false,
+  creatingSession: false,
+  lastError: null,
+
+  selectThread: (slug) => set({ activeThreadSlug: slug, selectedSessionId: null }),
+  selectSession: (sessionId) => set({ selectedSessionId: sessionId }),
+  setSocketState: (state) => set({ socketState: state }),
+  setError: (message) => set({ lastError: message }),
+
+  loadThreads: async () => {
+    set({ loadingThreads: true, lastError: null });
+    try {
+      const threads = await listThreads();
+      set((state) => ({
+        threads,
+        activeThreadSlug:
+          state.activeThreadSlug && threads.some((thread) => thread.slug === state.activeThreadSlug)
+            ? state.activeThreadSlug
+            : (threads[0]?.slug ?? null),
+        loadingThreads: false,
+      }));
+    } catch (error) {
+      set({
+        loadingThreads: false,
+        lastError: error instanceof Error ? error.message : "Failed to load threads.",
+      });
     }
   },
 
-  // -- Messages -------------------------------------------------------------
-  messages: [],
+  loadThread: async (slug) => {
+    set({ loadingThread: true, lastError: null });
+    try {
+      const detail = normalizeThreadDetail(await getThread(slug));
+      set((state) => {
+        const manifests = { ...state.sessionManifests };
+        for (const session of detail.sessions) manifests[session.session_id] = session;
 
-  // -- Context --------------------------------------------------------------
-  contextSummary: EMPTY_CONTEXT,
+        const nextDetails = { ...state.threadDetails, [slug]: detail };
+        const nextThreads = syncThreadSummaries(state.threads, nextDetails);
+        const selectedStillExists =
+          state.selectedSessionId &&
+          detail.sessions.some((session) => session.session_id === state.selectedSessionId);
 
-  // -- Error ----------------------------------------------------------------
-  lastError: null,
+        return {
+          threadDetails: nextDetails,
+          sessionManifests: manifests,
+          threads: nextThreads,
+          activeThreadSlug: slug,
+          selectedSessionId: selectedStillExists
+            ? state.selectedSessionId
+            : (detail.sessions[0]?.session_id ?? null),
+          loadingThread: false,
+        };
+      });
+    } catch (error) {
+      set({
+        loadingThread: false,
+        lastError: error instanceof Error ? error.message : `Failed to load thread ${slug}.`,
+      });
+    }
+  },
 
-  // -- Server-event handlers ------------------------------------------------
+  refreshActiveThread: async () => {
+    const slug = get().activeThreadSlug;
+    if (!slug) return;
+    await get().loadThread(slug);
+  },
 
-  handleSnapshot: (data) =>
-    set({
-      sessionId: data.session_id,
-      activeThread: data.active_thread,
-      threads: data.threads,
-      messages: data.history,
-      contextSummary: data.context_summary,
-      status: data.status,
-      lastError: null,
-    }),
+  createSessionForThread: async (slug) => {
+    set({ creatingSession: true, lastError: null });
+    try {
+      const manifest = await createSession({ primary_thread: slug });
+      set((state) => ({
+        sessionManifests: upsertManifest(state.sessionManifests, manifest),
+      }));
+      await get().loadThreads();
+      await get().loadThread(slug);
+      set({ selectedSessionId: manifest.session_id, creatingSession: false });
+      return manifest;
+    } catch (error) {
+      set({
+        creatingSession: false,
+        lastError: error instanceof Error ? error.message : "Failed to create session.",
+      });
+      return null;
+    }
+  },
 
-  handleMessage: (data) =>
-    set((state) => ({
-      messages: upsertMessage(state.messages, {
-        id: data.id,
-        role: data.role,
-        content: data.content,
-        ts: data.ts,
-        metadata: data.metadata,
-      }),
-    })),
+  loadSessionEvents: async (sessionId) => {
+    set({ loadingSession: true, lastError: null });
+    try {
+      const events = await getSessionEvents(sessionId);
+      set((state) => ({
+        sessionEvents: { ...state.sessionEvents, [sessionId]: events },
+        loadingSession: false,
+      }));
+    } catch (error) {
+      set({
+        loadingSession: false,
+        lastError: error instanceof Error ? error.message : "Failed to load session events.",
+      });
+    }
+  },
 
-  handleStatus: (data) => set({ status: data.state }),
-
-  handleThreads: (data) =>
+  applySessionSnapshot: (manifest, events) =>
     set((state) => {
-      const activeStillExists = data.list.some(
-        (t) => t.slug === state.activeThread,
-      );
+      const sessionEvents = {
+        ...state.sessionEvents,
+        [manifest.session_id]: [...events].sort((a, b) => a.seq - b.seq),
+      };
+      const sessionManifests = upsertManifest(state.sessionManifests, manifest);
+      const threadDetails = syncManifestIntoThreadDetails(state.threadDetails, manifest);
       return {
-        threads: data.list,
-        activeThread: activeStillExists
-          ? state.activeThread
-          : (data.list[0]?.slug ?? null),
+        sessionEvents,
+        sessionManifests,
+        threadDetails,
+        threads: syncThreadSummaries(state.threads, threadDetails),
+        selectedSessionId: manifest.session_id,
       };
     }),
 
-  handleContextSummary: (data) =>
-    set({
-      contextSummary: { tokens: data.tokens, tools: data.tools, history: data.history },
+  appendSessionEvent: (event) =>
+    set((state) => {
+      const currentEvents = state.sessionEvents[event.session_id] ?? [];
+      const alreadySeen = currentEvents.some((existing) => existing.seq === event.seq);
+      const currentManifest = state.sessionManifests[event.session_id];
+      const patchedManifest = patchManifestFromEvent(currentManifest, event, { alreadySeen });
+      const sessionEvents = {
+        ...state.sessionEvents,
+        [event.session_id]: mergeSessionEvents(currentEvents, [event]),
+      };
+      const sessionManifests = patchedManifest
+        ? upsertManifest(state.sessionManifests, patchedManifest)
+        : state.sessionManifests;
+      const threadDetails = patchedManifest
+        ? syncManifestIntoThreadDetails(state.threadDetails, patchedManifest)
+        : state.threadDetails;
+      return {
+        sessionEvents,
+        sessionManifests,
+        threadDetails,
+        threads: syncThreadSummaries(state.threads, threadDetails),
+      };
     }),
-
-  handleError: (data) =>
-    set({
-      lastError: typeof data === "string" ? data : data.message,
-    }),
-
-  // -- Optimistic user action -----------------------------------------------
-
-  addUserMessage: (content) =>
-    set((state) => ({
-      messages: [
-        ...state.messages,
-        {
-          id: generateLocalId(),
-          role: "user",
-          content,
-          ts: new Date().toISOString(),
-        },
-      ],
-    })),
 }));

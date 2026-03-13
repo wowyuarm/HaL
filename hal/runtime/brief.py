@@ -302,6 +302,11 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
                 "threads_linked": sorted(_brief_target_threads(state)),
             },
         )
+    await engine.end_session(
+        session_id,
+        status="ended",
+        reason="brief_failed" if worker_failed else "brief_completed",
+    )
     logger.info(
         f"Brief worker complete: {meta.iterations} iterations, "
         f"{len(meta.files_modified)} files modified"

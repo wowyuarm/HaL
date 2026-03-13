@@ -1,20 +1,16 @@
 /**
  * ThreadList — Sidebar thread navigation list.
  *
- * Renders each thread as a clickable row with name + relative time.
- * Active thread is highlighted with an accent left border and subtle background.
+ * Renders thread entries plus compact session counters for the
+ * session-first working-log runtime.
  */
 
-import type { Thread } from "@/lib/types";
+import { formatRelativeTime } from "@/lib/runtime";
+import type { ThreadSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** Time thresholds (in seconds) for relative formatting. */
-const MINUTE = 60;
-const HOUR = 3600;
-const DAY = 86400;
-
 interface ThreadListProps {
-  threads: Thread[];
+  threads: ThreadSummary[];
   activeThread: string | null;
   onSelect: (slug: string) => void;
   className?: string;
@@ -43,12 +39,22 @@ export function ThreadList({ threads, activeThread, onSelect, className }: Threa
               isActive && "border-l-2 border-l-accent bg-accent-subtle",
             )}
           >
-            <span className="truncate text-sm font-medium text-foreground">
-              {thread.name}
-            </span>
-            <span className="mt-0.5 text-xs text-muted">
-              {formatRelativeTime(thread.last_active)}
-            </span>
+            <div className="flex items-start justify-between gap-3">
+              <span className="truncate text-sm font-medium text-foreground">
+                {thread.name}
+              </span>
+              <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted">
+                {thread.scope || "thread"}
+              </span>
+            </div>
+            <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted">
+              <span className="truncate">
+                {thread.updated_at ? formatRelativeTime(thread.updated_at) : "no recent update"}
+              </span>
+              <span className="shrink-0">
+                {formatCounts(thread.session_counts)}
+              </span>
+            </div>
           </button>
         );
       })}
@@ -56,30 +62,12 @@ export function ThreadList({ threads, activeThread, onSelect, className }: Threa
   );
 }
 
-/**
- * Format an ISO timestamp as a relative time string (e.g. "2h ago").
- * Falls back to an absolute date for anything older than 30 days.
- */
-function formatRelativeTime(ts: string): string {
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return ts;
-
-  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
-
-  if (diffSec < 0) return "just now";
-  if (diffSec < MINUTE) return "just now";
-  if (diffSec < HOUR) {
-    const mins = Math.floor(diffSec / MINUTE);
-    return `${mins}m ago`;
-  }
-  if (diffSec < DAY) {
-    const hours = Math.floor(diffSec / HOUR);
-    return `${hours}h ago`;
-  }
-  if (diffSec < DAY * 30) {
-    const days = Math.floor(diffSec / DAY);
-    return `${days}d ago`;
-  }
-
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+function formatCounts(counts: ThreadSummary["session_counts"]): string {
+  const active = counts.active ?? 0;
+  const briefing = counts.briefing ?? 0;
+  const ended = counts.ended ?? 0;
+  const dropped = counts.dropped ?? 0;
+  const total = active + briefing + ended + dropped;
+  if (total === 0) return "0 sessions";
+  return `${total} session${total === 1 ? "" : "s"}`;
 }
