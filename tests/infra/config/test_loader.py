@@ -18,6 +18,7 @@ from hal.infra.config.schema import (
     Config,
     EngineConfig,
     ExecToolConfig,
+    WebConfig,
     WebFetchConfig,
     WebSearchConfig,
 )
@@ -92,6 +93,24 @@ def test_load_config_invalid_yaml_raises(tmp_home: Path) -> None:
 
     with pytest.raises(yaml.YAMLError):
         load_config()
+
+
+def test_load_config_lifts_legacy_channels_web_block(tmp_home: Path) -> None:
+    path = get_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "channels:\n"
+        "  outbound_poll_timeout_s: 1.0\n"
+        "  web:\n"
+        "    enabled: true\n"
+        "    host: 0.0.0.0\n"
+        "    port: 9999\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_config()
+
+    assert loaded.web == WebConfig(enabled=True, host="0.0.0.0", port=9999)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +237,9 @@ def test_defaults_match_original_hardcoded_values() -> None:
     # Channels
     assert cfg.channels.outbound_poll_timeout_s == 1.0
     assert cfg.channels.telegram.send_progress is True
+    assert cfg.web.enabled is False
+    assert cfg.web.host == "localhost"
+    assert cfg.web.port == 8765
     assert cfg.channels.telegram.send_tool_hints is True
 
     # History / context

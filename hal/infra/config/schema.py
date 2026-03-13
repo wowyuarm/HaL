@@ -35,10 +35,9 @@ class WebConfig(_StrictModel):
 
 
 class ChannelsConfig(_StrictModel):
-    """Configuration for chat channels."""
+    """Configuration for external adapter channels."""
 
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
-    web: WebConfig = Field(default_factory=WebConfig)
     outbound_poll_timeout_s: float = Field(default=1.0, gt=0)  # Outbound dispatch poll interval
 
 
@@ -240,6 +239,7 @@ class Config(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

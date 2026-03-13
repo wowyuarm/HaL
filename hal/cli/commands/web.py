@@ -27,12 +27,12 @@ def web(
     config = load_config()
     config.channels.telegram.enabled = False
     if host is not None:
-        config.channels.web.host = host
+        config.web.host = host
     if port is not None:
-        config.channels.web.port = port
+        config.web.port = port
 
-    effective_host = config.channels.web.host
-    effective_port = config.channels.web.port
+    effective_host = config.web.host
+    effective_port = config.web.port
     console.print(
         f"{__logo__} Starting HaL native web runtime on {effective_host}:{effective_port}..."
     )
@@ -40,7 +40,7 @@ def web(
     runtime = build_gateway_runtime(config)
     agent = runtime.agent
     memory_search = runtime.memory_search
-    server = WebServer(config.channels.web, SessionBridge(agent))
+    server = WebServer(config.web, SessionBridge(agent))
 
     async def run() -> None:
         nonlocal memory_search

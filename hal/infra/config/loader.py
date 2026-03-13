@@ -38,6 +38,8 @@ def load_config(config_path: Path | None = None) -> Config:
             auth_data = yaml.safe_load(f) or {}
         data = _deep_merge(data, auth_data)
 
+    _lift_legacy_web_config(data)
+
     if data:
         config = Config.model_validate(data)
     else:
@@ -83,6 +85,19 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def _lift_legacy_web_config(data: dict[str, Any]) -> None:
+    """Move legacy ``channels.web`` config to top-level ``web`` in-place."""
+    channels = data.get("channels")
+    if not isinstance(channels, dict):
+        return
+
+    legacy_web = channels.pop("web", None)
+    if legacy_web is None or "web" in data:
+        return
+    if isinstance(legacy_web, dict):
+        data["web"] = legacy_web
 
 
 def _extract_auth(data: dict) -> dict:

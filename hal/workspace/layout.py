@@ -61,7 +61,14 @@ class WorkspaceLayout:
         return self.root / "runtime" / "logs"
 
     def sessions_dir(self) -> Path:
-        return self.root / "runtime" / "sessions"
+        """Legacy alias kept for background-resume snapshots.
+
+        Native session manifests now live under ``work/sessions``. The
+        historical ``runtime/sessions`` bucket has been superseded by
+        ``runtime/resume`` for detached loop snapshots, so this helper now
+        points there as a compatibility wrapper.
+        """
+        return self.resume_dir()
 
     def resume_dir(self) -> Path:
         return self.root / "runtime" / "resume"
@@ -86,6 +93,20 @@ class WorkspaceLayout:
 
     def subagent_artifacts_dir(self) -> Path:
         return self.artifacts_dir() / "subagent"
+
+    def ensure_base_dirs(self) -> None:
+        """Create the canonical top-level directories used by the runtime."""
+        for path in (
+            self.root / "system",
+            self.threads_dir(),
+            self.work_sessions_dir(),
+            self.skills_dir(),
+            self.logs_dir(),
+            self.resume_dir(),
+            self.metrics_dir(),
+            self.subagent_artifacts_dir(),
+        ):
+            path.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------

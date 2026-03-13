@@ -131,10 +131,11 @@ class AgentEngine:
         self._web_search_config = web_search_config
         self._web_fetch_config = web_fetch_config
         self._channels_config = channels_config
+        self._layout = WorkspaceLayout(workspace)
+        self._layout.ensure_base_dirs()
         self._metrics_repository = MetricsRepository(workspace)
         self._metrics_collector = MetricsCollector(self._metrics_repository.context_metrics_path())
         self._background_resume = _EngineBackgroundResume(engine=self)
-        self._layout = WorkspaceLayout(workspace)
         self._session_store = SessionStore(self._layout)
         self._sessions: dict[str, SessionRuntimeState] = {}
         # Transport route mapping: session_key (channel:chat_id) → session_id

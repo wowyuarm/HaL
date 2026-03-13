@@ -64,7 +64,7 @@ class _EngineBackgroundResume:
         self._session_routes[session_id] = (channel, chat_id)
         try:
             self._session_repository.write_snapshot(
-                session_key=session_id,
+                session_id=session_id,
                 channel=channel,
                 chat_id=chat_id,
                 messages=snapshot,
