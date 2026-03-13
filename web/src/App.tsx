@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { WorkingLog } from "@/components/session/working-log";
 import { SessionScopeDialog } from "@/components/session/session-scope-dialog";
+import { SessionMountedThreadsDialog } from "@/components/session/session-mounted-threads-dialog";
 import { ThreadDetailPanel } from "@/components/thread/thread-detail";
 import { ThreadList } from "@/components/thread/thread-list";
 import { isInteractiveSession } from "@/lib/runtime";
@@ -10,6 +11,7 @@ import { useSessionSocket } from "@/lib/ws";
 
 export default function App() {
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
   const threads = useHalStore((s) => s.threads);
   const threadDetails = useHalStore((s) => s.threadDetails);
   const sessionManifests = useHalStore((s) => s.sessionManifests);
@@ -87,6 +89,29 @@ export default function App() {
     if (manifest) {
       setScopeDialogOpen(false);
     }
+  };
+
+  const handleUpdateScope = async (input: {
+    addThreads: string[];
+    removeThreads: string[];
+  }) => {
+    if (!selectedSession) return;
+    const hasChanges = input.addThreads.length > 0 || input.removeThreads.length > 0;
+    if (!hasChanges) {
+      setScopeEditorOpen(false);
+      return;
+    }
+    if (
+      !send({
+        type: "update_scope",
+        add_threads: input.addThreads,
+        remove_threads: input.removeThreads,
+      })
+    ) {
+      setError("Unable to update scope until the session socket is live.");
+      return;
+    }
+    setScopeEditorOpen(false);
   };
 
   const handleSend = (content: string) => {
@@ -174,9 +199,11 @@ export default function App() {
             session={selectedSession}
             events={events}
             socketState={socketState}
+            scopeEditable={threads.length > 0}
             loading={loadingThread || loadingSession}
             error={lastError}
             onSend={handleSend}
+            onEditScope={() => setScopeEditorOpen(true)}
             onBrief={handleBrief}
             onDrop={handleDrop}
           />
@@ -190,6 +217,14 @@ export default function App() {
         creating={creatingSession}
         onClose={() => setScopeDialogOpen(false)}
         onSubmit={handleCreateScopedSession}
+      />
+      <SessionMountedThreadsDialog
+        open={scopeEditorOpen}
+        session={selectedSession}
+        threads={threads}
+        submitting={creatingSession}
+        onClose={() => setScopeEditorOpen(false)}
+        onSubmit={handleUpdateScope}
       />
     </div>
   );

@@ -24,9 +24,11 @@ interface WorkingLogProps {
   session: SessionManifest | null;
   events: SessionEvent[];
   socketState: SocketState;
+  scopeEditable?: boolean;
   loading?: boolean;
   error?: string | null;
   onSend: (content: string) => void;
+  onEditScope: () => void;
   onBrief: () => void;
   onDrop: () => void;
 }
@@ -35,9 +37,11 @@ export function WorkingLog({
   session,
   events,
   socketState,
+  scopeEditable = false,
   loading = false,
   error = null,
   onSend,
+  onEditScope,
   onBrief,
   onDrop,
 }: WorkingLogProps) {
@@ -47,6 +51,7 @@ export function WorkingLog({
   const display = session ? sessionDisplayState(session.status) : null;
   const canSend = Boolean(session && session.status === "active" && socketState === "live");
   const canEndSession = Boolean(session && session.status === "active" && socketState === "live");
+  const canEditScope = Boolean(scopeEditable && session?.status === "active" && socketState === "live");
   const interactive = Boolean(session && isInteractiveSession(session.status));
 
   useEffect(() => {
@@ -92,6 +97,14 @@ export function WorkingLog({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onEditScope}
+              disabled={!canEditScope}
+              className={buttonClass("neutral")}
+            >
+              Scope
+            </button>
             <button
               type="button"
               onClick={onBrief}
