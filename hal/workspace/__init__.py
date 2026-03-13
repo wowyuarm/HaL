@@ -14,8 +14,10 @@ from .layout import (
     SkillRepository,
     WorkspaceLayout,
 )
+from .session_store import SessionStore
 from .sessions import SessionRepository, SessionSnapshot
 from .system_files import SystemRepository, WorkspaceDocument
+from .thread_refs import ThreadRefsRepository, ThreadSessionRef
 from .thread_state import (
     build_episode_file_name,
     ensure_recent_episodes_section,
@@ -42,14 +44,17 @@ __all__ = [
     "LogRepository",
     "SessionRepository",
     "SessionSnapshot",
+    "SessionStore",
     "SkillRepository",
     "SKILL_FILENAME",
     "THREAD_METADATA_FILENAME",
     "THREADS_DIRNAME",
     "THREAD_STATE_FILENAME",
     "ThreadEpisodeWriteResult",
+    "ThreadRefsRepository",
     "ThreadRepository",
     "ThreadRegistryEntry",
+    "ThreadSessionRef",
     "WorkspaceLayout",
     "WorkspaceDocument",
     "collect_thread_episode_paths",

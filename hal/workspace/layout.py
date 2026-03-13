@@ -39,6 +39,21 @@ class WorkspaceLayout:
     def threads_dir(self) -> Path:
         return self.root / "work" / "threads"
 
+    def work_sessions_dir(self) -> Path:
+        return self.root / "work" / "sessions"
+
+    def session_dir(self, session_id: str) -> Path:
+        return self.work_sessions_dir() / session_id
+
+    def session_manifest_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "manifest.json"
+
+    def session_log_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "working-log.jsonl"
+
+    def thread_refs_dir(self, slug: str) -> Path:
+        return self.threads_dir() / slug / "refs"
+
     def skills_dir(self) -> Path:
         return self.root / "capabilities" / "skills"
 
@@ -47,6 +62,12 @@ class WorkspaceLayout:
 
     def sessions_dir(self) -> Path:
         return self.root / "runtime" / "sessions"
+
+    def resume_dir(self) -> Path:
+        return self.root / "runtime" / "resume"
+
+    def session_resume_path(self, session_id: str) -> Path:
+        return self.resume_dir() / f"{session_id}.json"
 
     def metrics_dir(self) -> Path:
         return self.root / "runtime" / "metrics"
