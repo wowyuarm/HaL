@@ -50,15 +50,18 @@ const PAYLOAD_PREVIEW_LIMIT = 160;
 
 interface WorkingLogProps {
   session: SessionManifest | null;
+  threadName?: string | null;
   events: SessionEvent[];
   socketState: SocketState;
   scopeEditable?: boolean;
   loading?: boolean;
   error?: string | null;
+  briefPanelOpen?: boolean;
   onSend: (content: string) => void;
   onEditScope: () => void;
   onBrief: () => void;
   onDrop: () => void;
+  onToggleBriefPanel: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,15 +70,18 @@ interface WorkingLogProps {
 
 export function WorkingLog({
   session,
+  threadName = null,
   events,
   socketState,
   scopeEditable = false,
   loading = false,
   error = null,
+  briefPanelOpen = false,
   onSend,
   onEditScope,
   onBrief,
   onDrop,
+  onToggleBriefPanel,
 }: WorkingLogProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
@@ -132,73 +138,79 @@ export function WorkingLog({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-border bg-hal-float">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* ── Session header ── */}
       <SessionHeader
         session={session}
+        threadName={threadName}
         socketState={socketState}
         displayLabel={display?.label ?? "unknown"}
         canEditScope={canEditScope}
         canEndSession={canEndSession}
         eventsCount={events.length}
+        briefPanelOpen={briefPanelOpen}
         onEditScope={onEditScope}
         onBrief={onBrief}
         onDrop={onDrop}
+        onToggleBriefPanel={onToggleBriefPanel}
       />
 
       {/* ── Scrollable working log body ── */}
-      <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        {error ? (
-          <Panel
-            surface="base"
-            border
-            className="mb-4 border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger"
-          >
-            {error}
-          </Panel>
-        ) : null}
+      <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto px-1 py-5">
+        <div className="mx-auto max-w-4xl space-y-4">
+          {error ? (
+            <Panel
+              surface="base"
+              border
+              className="border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger"
+            >
+              {error}
+            </Panel>
+          ) : null}
 
-        {loading ? (
-          <Panel surface="base" border className="px-4 py-4 text-body text-hal-muted">
-            Loading session history...
-          </Panel>
-        ) : items.length === 0 ? (
-          <Panel
-            surface="base"
-            border
-            className="border-dashed px-4 py-4 text-body text-hal-muted"
-          >
-            No working-log events yet.
-          </Panel>
-        ) : (
-          <div className="space-y-3">
-            {items.map((item) =>
-              item.kind === "turn" ? (
-                <TurnCard
-                  key={item.turn.turnId}
-                  turn={item.turn}
-                  expanded={expandedTurns.has(item.turn.turnId)}
-                  onToggleEvidence={() => toggleTurnEvidence(item.turn.turnId)}
-                />
-              ) : (
-                <SessionActivityRow key={item.item.seq} item={item.item} />
-              ),
-            )}
-          </div>
-        )}
+          {loading ? (
+            <Panel surface="base" border className="px-4 py-4 text-body text-hal-muted">
+              Loading session history...
+            </Panel>
+          ) : items.length === 0 ? (
+            <Panel
+              surface="base"
+              border
+              className="border-dashed px-4 py-4 text-body text-hal-muted"
+            >
+              No working-log events yet.
+            </Panel>
+          ) : (
+            <div className="space-y-3">
+              {items.map((item) =>
+                item.kind === "turn" ? (
+                  <TurnCard
+                    key={item.turn.turnId}
+                    turn={item.turn}
+                    expanded={expandedTurns.has(item.turn.turnId)}
+                    onToggleEvidence={() => toggleTurnEvidence(item.turn.turnId)}
+                  />
+                ) : (
+                  <SessionActivityRow key={item.item.seq} item={item.item} />
+                ),
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Composer ── */}
-      <Composer
-        onSend={onSend}
-        disabled={!canSend}
-        buttonLabel=""
-        placeholder={
-          interactive
-            ? "Describe the next step, question, or direction for this session..."
-            : "Create a new session to continue working."
-        }
-      />
+      {interactive ? (
+        <Composer
+          onSend={onSend}
+          disabled={!canSend}
+          placeholder={
+            canSend
+              ? "Describe the next step, question, or direction for this session..."
+              : "This session is finishing its brief. Wait for the compiled result."
+          }
+        />
+      ) : null}
     </section>
   );
 }
@@ -209,90 +221,91 @@ export function WorkingLog({
 
 function SessionHeader({
   session,
+  threadName,
   socketState,
   displayLabel,
   canEditScope,
   canEndSession,
   eventsCount,
+  briefPanelOpen,
   onEditScope,
   onBrief,
   onDrop,
+  onToggleBriefPanel,
 }: {
   session: SessionManifest;
+  threadName: string | null;
   socketState: SocketState;
   displayLabel: string;
   canEditScope: boolean;
   canEndSession: boolean;
   eventsCount: number;
+  briefPanelOpen: boolean;
   onEditScope: () => void;
   onBrief: () => void;
   onDrop: () => void;
+  onToggleBriefPanel: () => void;
 }) {
+  const showSocketState = session.status === "active" || session.status === "briefing";
+
   return (
-    <header className="shrink-0 border-b border-border bg-hal-panel px-5 py-4">
-      {/* Row 1: session ID + status + lifecycle actions */}
+    <header className="shrink-0 border-b border-subtle px-5 py-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <StatusDot state={sessionDotState(session.status)} />
-            <h2 className="min-w-0 truncate font-mono text-meta text-hal-primary">
-              {session.session_id}
+          <div className="text-caption uppercase tracking-widest text-hal-muted">Session</div>
+          <div className="mt-2 flex items-center gap-2">
+            <h2 className="min-w-0 truncate text-subheading text-hal-primary">
+              {threadName ?? session.primary_thread ?? "Working log"}
             </h2>
             <StatusBadge state={sessionBadgeState(session.status)}>
               {displayLabel}
             </StatusBadge>
           </div>
 
-          {/* Row 2: primary thread + compact metadata */}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-hal-muted">
-            {session.primary_thread ? (
-              <span>
-                Primary:{" "}
-                <span className="font-mono text-hal-primary">
-                  {session.primary_thread}
-                </span>
-              </span>
-            ) : (
-              <span>No primary thread</span>
-            )}
+            <StatusDot state={sessionDotState(session.status)} />
+            <span className="font-mono text-hal-primary">{session.session_id}</span>
             <span>{formatTimestamp(session.created_at)}</span>
             <span>{session.turn_count} turns</span>
             <span>{eventsCount} events</span>
-            <Tag>{socketLabel(socketState)}</Tag>
+            {showSocketState ? <Tag>{socketLabel(socketState)}</Tag> : null}
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onEditScope}
-            disabled={!canEditScope}
-          >
-            Scope
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={onBrief}
-            disabled={!canEndSession}
-          >
-            Brief
-          </Button>
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button
             variant="ghost"
             size="sm"
-            onClick={onDrop}
-            disabled={!canEndSession}
+            onClick={onToggleBriefPanel}
+            aria-pressed={briefPanelOpen}
+            className={cn(
+              briefPanelOpen && "bg-hal-panel text-hal-primary",
+            )}
           >
-            Drop
+            {briefPanelOpen ? "Hide brief" : "Thread brief"}
           </Button>
+          {canEditScope ? (
+            <Button variant="secondary" size="sm" onClick={onEditScope}>
+              Scope
+            </Button>
+          ) : null}
+          {canEndSession ? (
+            <>
+              <Button variant="primary" size="sm" onClick={onBrief}>
+                Brief
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onDrop}>
+                Drop
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
 
       {/* Row 3: mounted thread tags */}
       {session.mounted_threads.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-caption uppercase tracking-widest text-hal-muted">Threads</span>
           {session.mounted_threads.map((slug) => (
             <Tag
               key={slug}

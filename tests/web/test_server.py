@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from aiohttp import web
 
 from hal.infra.config.schema import WebConfig
 from hal.web import WebServer
@@ -60,6 +61,42 @@ async def test_http_handler_roundtrip_for_sessions_and_threads(bridge, thread_re
     thread_payload = _decode_response(thread_response)
     assert thread_payload["thread"]["brief_markdown"].startswith("# Auth")
     assert thread_payload["thread"]["sessions"][0]["session_id"] == session_id
+
+
+@pytest.mark.asyncio
+async def test_frontend_routes_serve_index_and_assets(tmp_path, bridge) -> None:
+    dist_dir = tmp_path / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    index_path = dist_dir / "index.html"
+    asset_path = assets_dir / "app.js"
+    index_path.write_text("<!doctype html><title>HaL</title>", encoding="utf-8")
+    asset_path.write_text("console.log('hal');", encoding="utf-8")
+
+    with patch.object(WebServer, "_resolve_frontend_dist", return_value=dist_dir):
+        server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    index_response = await server._serve_frontend_index(_FakeRequest())  # type: ignore[attr-defined]
+    asset_response = await server._serve_frontend_asset(  # type: ignore[attr-defined]
+        _FakeRequest(match_info={"asset_path": "app.js"})
+    )
+
+    assert isinstance(index_response, web.FileResponse)
+    assert isinstance(asset_response, web.FileResponse)
+    assert index_response._path == index_path  # type: ignore[attr-defined]
+    assert asset_response._path == asset_path  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_frontend_index_returns_service_unavailable_without_bundle(bridge) -> None:
+    with patch.object(WebServer, "_resolve_frontend_dist", return_value=None):
+        server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    with pytest.raises(Exception) as exc_info:
+        await server._serve_frontend_index(_FakeRequest())  # type: ignore[attr-defined]
+
+    assert getattr(exc_info.value, "status", None) == 503
+    assert "npm run build" in getattr(exc_info.value, "text", "")
 
 
 @pytest.mark.asyncio

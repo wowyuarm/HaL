@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from pathlib import Path
 from typing import Any
 
 from aiohttp import WSMsgType, web
@@ -25,6 +26,12 @@ from .protocol import (
 )
 
 _WS_ROUTE = "/sessions/{session_id}/ws"
+_FRONTEND_INDEX = "index.html"
+_FRONTEND_ASSETS_DIR = "assets"
+_FRONTEND_ASSETS_ROUTE = f"/{_FRONTEND_ASSETS_DIR}/{{asset_path:.*}}"
+_FRONTEND_MISSING_MESSAGE = (
+    "HaL web frontend bundle not found. Run `npm run build` in ./web before starting `hal web`."
+)
 
 
 class WebServer:
@@ -33,7 +40,12 @@ class WebServer:
     def __init__(self, config: WebConfig, bridge: SessionBridge) -> None:
         self._config = config
         self._bridge = bridge
+        self._frontend_dist = self._resolve_frontend_dist()
         self._app = web.Application()
+        self._app.router.add_get("/", self._serve_frontend_index)
+        self._app.router.add_get(f"/{_FRONTEND_INDEX}", self._serve_frontend_index)
+        self._app.router.add_get(_FRONTEND_ASSETS_ROUTE, self._serve_frontend_asset)
+        self._app.router.add_get("/favicon.ico", self._serve_favicon)
         self._app.router.add_get("/health", self._health)
         self._app.router.add_post("/sessions", self._create_session)
         self._app.router.add_get("/sessions", self._list_sessions)
@@ -57,6 +69,10 @@ class WebServer:
         """Start listening on the configured host/port."""
         if self._runner is not None:
             return
+        if self._frontend_dist is None:
+            logger.warning(_FRONTEND_MISSING_MESSAGE)
+        else:
+            logger.info("serving frontend bundle from {}", self._frontend_dist)
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, host=self._config.host, port=self._config.port)
@@ -74,6 +90,29 @@ class WebServer:
 
     async def _health(self, request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
+
+    async def _serve_frontend_index(self, request: web.Request) -> web.FileResponse:
+        frontend_dist = self._require_frontend_dist()
+        return web.FileResponse(frontend_dist / _FRONTEND_INDEX)
+
+    async def _serve_frontend_asset(self, request: web.Request) -> web.FileResponse:
+        frontend_dist = self._require_frontend_dist()
+        assets_root = frontend_dist / _FRONTEND_ASSETS_DIR
+        asset_path = self._safe_frontend_path(
+            assets_root,
+            request.match_info.get("asset_path", ""),
+        )
+        if not asset_path.is_file():
+            raise web.HTTPNotFound(text=f"Unknown frontend asset: {request.path}")
+        return web.FileResponse(asset_path)
+
+    async def _serve_favicon(self, request: web.Request) -> web.StreamResponse:
+        if self._frontend_dist is None:
+            return web.Response(status=204)
+        favicon_path = self._frontend_dist / "favicon.ico"
+        if favicon_path.is_file():
+            return web.FileResponse(favicon_path)
+        return web.Response(status=204)
 
     async def _create_session(self, request: web.Request) -> web.Response:
         payload = await self._read_json(request)
@@ -269,3 +308,29 @@ class WebServer:
         if manifest is None:
             raise web.HTTPNotFound(text=f"Unknown session_id: {session_id}")
         return manifest
+
+    def _require_frontend_dist(self) -> Path:
+        if self._frontend_dist is None:
+            raise web.HTTPServiceUnavailable(text=_FRONTEND_MISSING_MESSAGE)
+        return self._frontend_dist
+
+    @staticmethod
+    def _resolve_frontend_dist() -> Path | None:
+        server_file = Path(__file__).resolve()
+        candidates = [
+            server_file.parents[2] / "web" / "dist",
+            server_file.parent / "dist",
+        ]
+        for candidate in candidates:
+            if (candidate / _FRONTEND_INDEX).is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def _safe_frontend_path(root: Path, relative_path: str) -> Path:
+        candidate = (root / relative_path).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError as exc:
+            raise web.HTTPNotFound(text="Invalid frontend asset path") from exc
+        return candidate

@@ -20,7 +20,6 @@ interface ComposerProps {
   disabled?: boolean;
   className?: string;
   placeholder?: string;
-  buttonLabel?: string;
 }
 
 export function Composer({
@@ -28,7 +27,6 @@ export function Composer({
   disabled = false,
   className,
   placeholder = "Type your next step...",
-  buttonLabel = "Send",
 }: ComposerProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -64,10 +62,10 @@ export function Composer({
   }, [value]);
 
   return (
-    <div className={cn("shrink-0 border-t border-border px-5 py-3", className)}>
-      <div className="mx-auto flex max-w-3xl items-end gap-3">
+    <div className={cn("shrink-0 border-t border-subtle px-5 py-3", className)}>
+      <div className="mx-auto flex max-w-3xl items-end gap-2.5">
         {/* Input field */}
-        <div className="flex-1 rounded-md border border-border bg-hal-inset px-3 py-2">
+        <div className="flex-1 rounded-md border border-subtle bg-hal-inset px-3 py-2">
           <textarea
             ref={textareaRef}
             value={value}
@@ -91,15 +89,16 @@ export function Composer({
           disabled={!canSend}
           onClick={handleSend}
           className={cn(
-            "inline-flex shrink-0 items-center gap-2 rounded-md bg-accent px-4 py-2",
-            "text-body font-medium text-white",
+            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border",
             "transition-colors duration-fast ease-standard",
-            "hover:brightness-95",
+            canSend
+              ? "border-accent bg-accent text-white hover:brightness-95"
+              : "border-subtle bg-hal-float text-hal-muted",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
+          aria-label="Send message"
         >
           <SendHorizontal className="h-4 w-4" />
-          {buttonLabel}
         </button>
       </div>
     </div>

@@ -69,13 +69,20 @@ export function SessionList({
                 className={cn(
                   "w-full rounded-md border px-3 py-3 text-left transition-colors duration-fast ease-standard",
                   isSelected
-                    ? "border-accent bg-hal-live-subtle"
-                    : "border-subtle hover:bg-hal-float",
+                    ? "border-border bg-hal-float"
+                    : "border-subtle hover:border-border hover:bg-hal-float",
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "h-4 w-0.5 rounded-full bg-transparent",
+                          isSelected && "bg-accent",
+                        )}
+                        aria-hidden="true"
+                      />
                       <StatusDot state={sessionDotState(session.status)} />
                       <span className="truncate font-mono text-meta text-hal-primary">
                         {session.session_id}

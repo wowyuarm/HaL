@@ -19,5 +19,7 @@ poetry.lock
 .pytest_cache/
 .vscode/
 .claude/
+.codex/
 uv.lock
 .pyscn/
+.playwright-cli

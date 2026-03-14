@@ -19,7 +19,7 @@ import { useSessionSocket } from "@/lib/ws";
 
 const GRID_NAVIGATION = "grid-cols-[240px_minmax(0,1fr)]";
 const GRID_WORKING = "grid-cols-[48px_minmax(0,1fr)]";
-const GRID_WORKING_BRIEF = "grid-cols-[48px_minmax(0,1fr)_minmax(320px,420px)]";
+const GRID_WORKING_BRIEF = "grid-cols-[48px_minmax(0,1fr)_minmax(340px,420px)]";
 
 // ---------------------------------------------------------------------------
 // App
@@ -38,7 +38,6 @@ export default function App() {
   const activeThreadSlug = useHalStore((s) => s.activeThreadSlug);
   const selectedSessionId = useHalStore((s) => s.selectedSessionId);
   const socketState = useHalStore((s) => s.socketState);
-  const loadingThreads = useHalStore((s) => s.loadingThreads);
   const loadingThreadSlug = useHalStore((s) => s.loadingThreadSlug);
   const loadingSessionId = useHalStore((s) => s.loadingSessionId);
   const creatingSession = useHalStore((s) => s.creatingSession);
@@ -238,56 +237,28 @@ export default function App() {
       )}
 
       {/* ── Main area ── */}
-      <main className="flex min-w-0 flex-col bg-hal-canvas">
-        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-subtle px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <h1 className="truncate text-subheading text-hal-primary">
-              {activeThread?.name ?? "HaL"}
-            </h1>
-            {activeThread?.scope && (
-              <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 font-mono text-caption text-hal-muted">
-                {activeThread.scope}
-              </span>
-            )}
-            <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 text-caption text-hal-muted">
-              {selectedSession ? `socket ${socketState}` : "select a session"}
-            </span>
-            {(loadingThreads || loadingThread || loadingSession) && (
-              <span className="rounded-sm bg-hal-panel px-1.5 py-0.5 text-caption text-hal-muted">
-                loading
-              </span>
-            )}
-          </div>
-          {isWorkCanvas && (
-            <button
-              type="button"
-              onClick={toggleBriefPanel}
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-caption uppercase tracking-wide",
-                "transition-colors duration-normal ease-standard",
-                briefPanelOpen
-                  ? "border-accent bg-accent-subtle text-accent"
-                  : "border-border bg-hal-float text-hal-muted hover:text-hal-primary",
-              )}
-            >
-              Brief
-            </button>
+      <main className="min-w-0 bg-hal-canvas">
+        <div
+          className={cn(
+            "h-full min-h-0",
+            isWorkCanvas ? "px-4 py-4" : "px-6 py-6",
           )}
-        </header>
-
-        <div className="min-h-0 flex-1 p-4">
+        >
           {isWorkCanvas ? (
             <WorkingLog
               session={selectedSession}
+              threadName={activeThread?.name ?? null}
               events={events}
               socketState={socketState}
               scopeEditable={threads.length > 0}
               loading={loadingThread || loadingSession}
               error={lastError}
+              briefPanelOpen={briefPanelOpen}
               onSend={handleSend}
               onEditScope={handleOpenScopeEditor}
               onBrief={handleBrief}
               onDrop={handleDrop}
+              onToggleBriefPanel={toggleBriefPanel}
             />
           ) : (
             <ThreadDetailPanel
@@ -367,12 +338,10 @@ function NavigationSidebar({
         </div>
       </div>
       <div className="border-t border-subtle px-3 py-4">
-        <div className="rounded-md border border-border bg-hal-float px-3 py-3 text-xs text-hal-muted">
-          <p className="font-medium uppercase tracking-widest text-hal-primary">Working Log</p>
-          <p className="mt-2 leading-relaxed">
-            Threads hold durable memory. Sessions are the observable work runs beneath them.
-          </p>
-        </div>
+        <p className="px-2 text-caption uppercase tracking-widest text-hal-muted">Workspace</p>
+        <p className="px-2 pt-2 text-meta leading-relaxed text-hal-muted">
+          Threads hold durable memory. Sessions are the observable runs beneath them.
+        </p>
       </div>
     </aside>
   );
@@ -408,11 +377,11 @@ function ThreadRail({
               title={thread.name}
               aria-label={thread.name}
               className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-caption uppercase",
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-caption uppercase",
                 "transition-colors duration-normal ease-standard",
                 isActive
-                  ? "border border-accent bg-accent text-white"
-                  : "border border-subtle bg-hal-float text-hal-muted hover:border-border hover:text-hal-primary",
+                  ? "border-accent bg-hal-float text-hal-primary"
+                  : "border-subtle bg-hal-canvas text-hal-muted hover:border-border hover:bg-hal-float hover:text-hal-primary",
               )}
             >
               {threadInitial(thread.name)}
@@ -442,15 +411,17 @@ function ThreadRail({
 
 function BriefPanel({ briefMarkdown }: { briefMarkdown: string | null }) {
   return (
-    <aside className="flex min-h-0 flex-col border-l border-subtle bg-hal-panel">
-      <div className="flex h-12 shrink-0 items-center border-b border-subtle px-4">
-        <h2 className="text-xs font-medium uppercase tracking-widest text-hal-muted">Brief</h2>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="prose prose-mineral max-w-none text-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {briefMarkdown || "_This thread does not have a brief yet._"}
-          </ReactMarkdown>
+    <aside className="min-h-0 border-l border-subtle px-3 py-4">
+      <div className="flex h-full min-h-0 flex-col rounded-lg border border-border bg-hal-float shadow-popover">
+        <div className="flex h-12 shrink-0 items-center border-b border-subtle px-4">
+          <h2 className="text-caption uppercase tracking-widest text-hal-muted">Brief</h2>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="prose prose-mineral max-w-none text-[15px] leading-7">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {briefMarkdown || "_This thread does not have a brief yet._"}
+            </ReactMarkdown>
+          </div>
         </div>
       </div>
     </aside>

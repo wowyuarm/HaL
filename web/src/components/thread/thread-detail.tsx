@@ -3,14 +3,14 @@
  *
  * Shows thread name, description, scope tag, BRIEF.md prose rendering,
  * metadata (updated timestamp, session count), and session list below.
- * Uses Panel(raised) as the overall container per design system guidance.
+ * Navigation mode stays on the shared canvas with the BRIEF centered for
+ * reading comfort instead of wrapping the whole detail view in a card.
  */
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { SessionList } from "@/components/session/session-list";
-import { Panel } from "@/components/ui/panel";
 import { Tag } from "@/components/ui/tag";
 import { formatCount, formatTimestamp } from "@/lib/runtime";
 import type { ThreadDetail } from "@/lib/types";
@@ -45,56 +45,50 @@ export function ThreadDetailPanel({
     (thread.session_counts.dropped ?? 0);
 
   return (
-    <Panel
-      surface="raised"
-      border
-      className="flex h-full min-h-0 flex-col"
-    >
-      {/* Thread header */}
-      <header className="border-b border-subtle px-5 py-4">
+    <section className="flex h-full min-h-0 flex-col">
+      <header className="mx-auto w-full max-w-5xl border-b border-subtle px-2 pb-5 pt-1">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="truncate text-heading text-hal-primary">
               {thread.name}
             </h2>
-            <p className="mt-1 text-body text-hal-muted">
+            <p className="mt-2 max-w-3xl text-body text-hal-muted">
               {thread.description || "No description."}
             </p>
           </div>
           <Tag>{thread.scope || "thread"}</Tag>
         </div>
 
-        <div className="mt-3 flex items-center gap-4 text-meta text-hal-muted">
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-hal-muted">
           <span>Updated {formatTimestamp(thread.updated_at)}</span>
           <span>{formatCount(totalSessions)} sessions</span>
         </div>
       </header>
 
-      {/* Scrollable body: BRIEF + session list */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {/* BRIEF.md */}
-        <section className="mb-6">
-          <p className="mb-3 text-caption uppercase tracking-widest text-hal-muted">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-2 py-6">
+          <section className="mx-auto w-full max-w-3xl">
+            <p className="mb-4 text-caption uppercase tracking-widest text-hal-muted">
             BRIEF.md
-          </p>
-          <Panel surface="base" border className="px-4 py-3">
-            <div className="prose prose-mineral max-w-none text-[15px] leading-relaxed">
+            </p>
+            <div className="prose prose-mineral max-w-none text-[15px] leading-7 text-hal-primary">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {thread.brief_markdown || "_This thread does not have a brief yet._"}
               </ReactMarkdown>
             </div>
-          </Panel>
-        </section>
+          </section>
 
-        {/* Session list */}
-        <SessionList
-          sessions={thread.sessions}
-          selectedSessionId={selectedSessionId}
-          onSelect={onSelectSession}
-          onCreate={onCreateSession}
-          creating={creatingSession}
-        />
+          <section className="border-t border-subtle pt-5">
+            <SessionList
+              sessions={thread.sessions}
+              selectedSessionId={selectedSessionId}
+              onSelect={onSelectSession}
+              onCreate={onCreateSession}
+              creating={creatingSession}
+            />
+          </section>
+        </div>
       </div>
-    </Panel>
+    </section>
   );
 }

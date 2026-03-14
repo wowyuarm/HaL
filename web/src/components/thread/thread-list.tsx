@@ -37,14 +37,21 @@ export function ThreadList({ threads, activeThread, onSelect, className }: Threa
             onClick={() => onSelect(thread.slug)}
             aria-current={isActive ? "page" : undefined}
             className={cn(
-              "flex w-full flex-col rounded-md px-3 py-2 text-left",
+              "flex w-full flex-col rounded-md border border-transparent px-3 py-2 text-left",
               "transition-colors duration-fast ease-standard",
-              "hover:bg-hal-float",
-              isActive && "border-l-2 border-l-accent bg-hal-live-subtle",
+              "hover:border-subtle hover:bg-hal-float",
+              isActive && "border-border bg-hal-float",
             )}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "h-4 w-0.5 rounded-full bg-transparent",
+                    isActive && "bg-accent",
+                  )}
+                  aria-hidden="true"
+                />
                 {hasActiveSessions ? <StatusDot state="live" /> : null}
                 <span className="truncate text-body font-medium text-hal-primary">
                   {thread.name}
