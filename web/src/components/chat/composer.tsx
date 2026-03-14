@@ -62,44 +62,47 @@ export function Composer({
   }, [value]);
 
   return (
-    <div className={cn("shrink-0 border-t border-subtle px-5 py-3", className)}>
-      <div className="mx-auto flex max-w-3xl items-end gap-2.5">
-        {/* Input field */}
-        <div className="flex-1 rounded-md border border-subtle bg-hal-inset px-3 py-2">
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (canSend) handleSend();
-              }
-            }}
-            disabled={disabled}
-            rows={MIN_ROWS}
-            placeholder={placeholder}
-            className="w-full resize-none bg-transparent text-body text-hal-primary outline-none placeholder:text-hal-muted disabled:cursor-not-allowed disabled:opacity-60"
-          />
-        </div>
+    <div className={cn("shrink-0 border-t border-subtle px-3 py-3 md:px-4 md:py-4", className)}>
+      <div className="hal-paper mx-auto max-w-5xl rounded-[22px] border border-border p-3 shadow-sm md:p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+          <div className="flex-1 rounded-[18px] border border-subtle bg-hal-inset px-4 py-3">
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSend) handleSend();
+                }
+              }}
+              disabled={disabled}
+              rows={MIN_ROWS}
+              placeholder={placeholder}
+              className="w-full resize-none bg-transparent text-body leading-7 text-hal-primary outline-none placeholder:text-hal-muted disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-subtle pt-2.5 text-caption text-hal-muted">
+              <span>Enter sends. Shift+Enter adds a newline.</span>
+              <span>{value.trim() ? `${value.trim().length} chars` : "Human directs, HaL executes."}</span>
+            </div>
+          </div>
 
-        {/* Send button */}
-        <button
-          type="button"
-          disabled={!canSend}
-          onClick={handleSend}
-          className={cn(
-            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border",
-            "transition-colors duration-fast ease-standard",
-            canSend
-              ? "border-accent bg-accent text-white hover:brightness-95"
-              : "border-subtle bg-hal-float text-hal-muted",
-            "disabled:cursor-not-allowed disabled:opacity-50",
-          )}
-          aria-label="Send message"
-        >
-          <SendHorizontal className="h-4 w-4" />
-        </button>
+          <button
+            type="button"
+            disabled={!canSend}
+            onClick={handleSend}
+            className={cn(
+              "inline-flex h-11 w-11 shrink-0 items-center justify-center self-end rounded-full border shadow-sm transition-colors duration-fast ease-standard",
+              canSend
+                ? "border-accent bg-accent text-white hover:brightness-95"
+                : "border-subtle bg-hal-float text-hal-muted",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+            aria-label="Send message"
+          >
+            <SendHorizontal className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>
   );

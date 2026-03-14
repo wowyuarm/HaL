@@ -85,6 +85,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
+        serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
       },
       transitionDuration: {
@@ -102,7 +103,43 @@ const config: Config = {
             "--tw-prose-headings": "var(--hal-text)",
             "--tw-prose-links": "var(--hal-live)",
             "--tw-prose-code": "var(--hal-text)",
+            "--tw-prose-bold": "var(--hal-text)",
+            "--tw-prose-bullets": "rgba(74, 122, 116, 0.48)",
+            "--tw-prose-hr": "var(--border-subtle)",
+            "--tw-prose-quotes": "var(--hal-text)",
             "--tw-prose-pre-bg": "var(--hal-inset)",
+            h1: {
+              fontFamily: "var(--font-serif)",
+              fontWeight: "600",
+              letterSpacing: "-0.02em",
+            },
+            h2: {
+              fontFamily: "var(--font-serif)",
+              fontWeight: "600",
+              letterSpacing: "-0.015em",
+            },
+            h3: {
+              fontFamily: "var(--font-serif)",
+              fontWeight: "600",
+            },
+            p: {
+              lineHeight: "1.8",
+            },
+            code: {
+              borderRadius: "999px",
+              backgroundColor: "rgba(36, 33, 29, 0.05)",
+              padding: "0.18rem 0.48rem",
+              fontWeight: "500",
+            },
+            pre: {
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "14px",
+            },
+            blockquote: {
+              borderLeft: "2px solid var(--border-accent)",
+              color: "var(--hal-text-muted)",
+              fontStyle: "normal",
+            },
           },
         },
       },

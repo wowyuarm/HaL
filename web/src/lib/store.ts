@@ -287,7 +287,11 @@ export const useHalStore = create<HalStore>((set, get) => ({
   activeThreadRequestId: 0,
   lastError: null,
 
-  selectThread: (slug) => set({ activeThreadSlug: slug, selectedSessionId: null }),
+  selectThread: (slug) =>
+    set((state) => ({
+      activeThreadSlug: slug,
+      selectedSessionId: state.selectedSessionId,
+    })),
   selectSession: (sessionId) => set({ selectedSessionId: sessionId }),
   toggleBriefPanel: () => set((state) => ({ briefPanelOpen: !state.briefPanelOpen })),
   setSocketState: (state) => set({ socketState: state }),

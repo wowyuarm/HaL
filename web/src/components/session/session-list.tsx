@@ -34,12 +34,10 @@ export function SessionList({
 }: SessionListProps) {
   return (
     <section className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <p className="text-caption uppercase tracking-widest text-hal-muted">
-            Sessions
-          </p>
-          <p className="mt-1 text-meta text-hal-muted">
+          <p className="hal-rule-label">Sessions</p>
+          <p className="mt-2 text-meta text-hal-muted">
             One session = one observable collaboration run.
           </p>
         </div>
@@ -55,7 +53,7 @@ export function SessionList({
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {sessions.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border bg-hal-float px-3 py-4 text-body text-hal-muted">
+          <div className="rounded-[18px] border border-dashed border-border bg-hal-float px-4 py-5 text-body text-hal-muted">
             No sessions yet for this thread.
           </div>
         ) : (
@@ -67,28 +65,21 @@ export function SessionList({
                 type="button"
                 onClick={() => onSelect(session.session_id)}
                 className={cn(
-                  "w-full rounded-md border px-3 py-3 text-left transition-colors duration-fast ease-standard",
+                  "w-full rounded-[18px] border px-4 py-4 text-left transition-all duration-fast ease-standard",
                   isSelected
-                    ? "border-border bg-hal-float"
-                    : "border-subtle hover:border-border hover:bg-hal-float",
+                    ? "border-accent bg-hal-float shadow-sm"
+                    : "border-subtle bg-[rgba(255,255,255,0.3)] hover:-translate-y-px hover:border-border hover:bg-hal-float",
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "h-4 w-0.5 rounded-full bg-transparent",
-                          isSelected && "bg-accent",
-                        )}
-                        aria-hidden="true"
-                      />
                       <StatusDot state={sessionDotState(session.status)} />
                       <span className="truncate font-mono text-meta text-hal-primary">
                         {session.session_id}
                       </span>
                     </div>
-                    <p className="mt-2 text-meta text-hal-primary">
+                    <p className="mt-3 text-meta leading-6 text-hal-primary">
                       {summarizeSession(session)}
                     </p>
                   </div>

@@ -100,11 +100,15 @@ export function SessionScopeDialog({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-body font-medium text-hal-primary">{thread.name}</p>
-                        <p className="mt-1 text-xs text-hal-muted">{thread.description || "No description."}</p>
+                        <p className="truncate text-body font-medium text-hal-primary">
+                          {thread.name}
+                        </p>
+                        <p className="mt-1 text-xs text-hal-muted">
+                          {thread.description || "No description."}
+                        </p>
                       </div>
-                      <span className="rounded-sm border border-border bg-hal-panel px-2 py-0.5 font-mono text-caption text-hal-muted">
-                        {thread.scope || "thread"}
+                      <span className="rounded-sm border border-border bg-hal-panel px-2 py-0.5 font-mono text-caption uppercase text-hal-muted">
+                        {thread.status || "thread"}
                       </span>
                     </div>
 

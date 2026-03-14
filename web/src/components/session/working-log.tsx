@@ -131,7 +131,7 @@ export function WorkingLog({
   // Empty state: no session selected.
   if (!session) {
     return (
-      <section className="flex h-full items-center justify-center rounded-md border border-dashed border-border p-8 text-body text-hal-muted">
+      <section className="hal-paper hal-sheet flex h-full items-center justify-center rounded-[24px] border border-dashed border-border p-8 text-body text-hal-muted">
         Select a session to inspect its working log.
       </section>
     );
@@ -156,29 +156,37 @@ export function WorkingLog({
       />
 
       {/* ── Scrollable working log body ── */}
-      <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto px-1 py-5">
-        <div className="mx-auto max-w-4xl space-y-4">
+      <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto px-1 py-4 md:px-2 md:py-5">
+        <div className="mx-auto max-w-5xl space-y-4">
           {error ? (
             <Panel
               surface="base"
               border
-              className="border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger"
+              className="rounded-[18px] border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger"
             >
               {error}
             </Panel>
           ) : null}
 
           {loading ? (
-            <Panel surface="base" border className="px-4 py-4 text-body text-hal-muted">
+            <Panel
+              surface="base"
+              border
+              className="rounded-[18px] px-4 py-4 text-body text-hal-muted"
+            >
               Loading session history...
             </Panel>
           ) : items.length === 0 ? (
             <Panel
               surface="base"
               border
-              className="border-dashed px-4 py-4 text-body text-hal-muted"
+              className="hal-paper hal-sheet rounded-[22px] border-dashed px-5 py-6 text-body text-hal-muted"
             >
-              No working-log events yet.
+              <p className="hal-rule-label">Working Log</p>
+              <p className="mt-4 max-w-xl text-[15px] leading-7 text-hal-muted">
+                No observable events have been recorded for this session yet. If this is an active
+                run, the log will fill in as the event stream reconnects or new turns begin.
+              </p>
             </Panel>
           ) : (
             <div className="space-y-3">
@@ -249,12 +257,12 @@ function SessionHeader({
   const showSocketState = session.status === "active" || session.status === "briefing";
 
   return (
-    <header className="shrink-0 border-b border-subtle px-5 py-4">
-      <div className="flex items-start justify-between gap-4">
+    <header className="hal-paper hal-sheet shrink-0 rounded-[24px] border border-border px-5 py-5 md:px-6 md:py-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <div className="text-caption uppercase tracking-widest text-hal-muted">Session</div>
-          <div className="mt-2 flex items-center gap-2">
-            <h2 className="min-w-0 truncate text-subheading text-hal-primary">
+          <p className="hal-rule-label">Session</p>
+          <div className="mt-4 flex flex-wrap items-center gap-2.5">
+            <h2 className="min-w-0 truncate font-serif text-[28px] leading-none tracking-[-0.03em] text-hal-primary md:text-[34px]">
               {threadName ?? session.primary_thread ?? "Working log"}
             </h2>
             <StatusBadge state={sessionBadgeState(session.status)}>
@@ -262,7 +270,7 @@ function SessionHeader({
             </StatusBadge>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-hal-muted">
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-meta text-hal-muted">
             <StatusDot state={sessionDotState(session.status)} />
             <span className="font-mono text-hal-primary">{session.session_id}</span>
             <span>{formatTimestamp(session.created_at)}</span>
@@ -272,7 +280,7 @@ function SessionHeader({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
@@ -294,7 +302,12 @@ function SessionHeader({
               <Button variant="primary" size="sm" onClick={onBrief}>
                 Brief
               </Button>
-              <Button variant="ghost" size="sm" onClick={onDrop}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onDrop}
+                className="text-danger hover:border-danger hover:bg-hal-danger-subtle hover:text-danger"
+              >
                 Drop
               </Button>
             </>
@@ -304,8 +317,8 @@ function SessionHeader({
 
       {/* Row 3: mounted thread tags */}
       {session.mounted_threads.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="text-caption uppercase tracking-widest text-hal-muted">Threads</span>
+        <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-subtle pt-4">
+          <span className="hal-meta-kicker">Threads</span>
           {session.mounted_threads.map((slug) => (
             <Tag
               key={slug}
@@ -342,13 +355,13 @@ function TurnCard({
   return (
     <article
       className={cn(
-        "overflow-hidden rounded-md border border-border bg-hal-panel",
+        "hal-paper overflow-hidden rounded-[20px] border border-border bg-hal-panel shadow-sm",
         turn.hasEvidence && "border-l-[2px]",
       )}
       style={turn.hasEvidence ? { borderLeftColor: seamColor } : undefined}
     >
       {/* Turn header */}
-      <header className="flex items-center justify-between gap-3 border-b border-subtle px-4 py-3">
+      <header className="flex items-center justify-between gap-3 border-b border-subtle px-4 py-3.5">
         <div className="flex items-center gap-2">
           <span className="font-mono text-caption text-hal-muted">{turn.turnId}</span>
           <StatusBadge state={turnBadgeState(turn.state)}>{turn.state}</StatusBadge>
@@ -369,7 +382,7 @@ function TurnCard({
               type="button"
               onClick={onToggleEvidence}
               aria-expanded={expanded}
-              className="text-caption text-hal-muted transition-colors duration-fast ease-standard hover:text-hal-primary"
+              className="rounded-full border border-subtle px-2.5 py-1 text-caption font-medium uppercase tracking-[0.12em] text-hal-muted transition-colors duration-fast ease-standard hover:border-border hover:text-hal-primary"
             >
               {expanded ? "hide evidence" : `evidence (${totalEvidenceCount(turn)})`}
             </button>
@@ -378,7 +391,7 @@ function TurnCard({
       </header>
 
       {/* Activity layer */}
-      <div className="space-y-2 px-4 py-3">
+      <div className="space-y-3 px-4 py-4">
         {turn.activityItems.length === 0 ? (
           <p className="text-body text-hal-muted">No activity captured.</p>
         ) : (
@@ -432,7 +445,7 @@ function UserMessageRow({ item }: { item: ActivityItem }) {
     <Panel
       surface="base"
       border
-      className="border-l-2 border-l-human bg-hal-human-subtle px-4 py-3"
+      className="rounded-[18px] border-l-2 border-l-human bg-hal-human-subtle px-4 py-3.5"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <Tag variant="human">You</Tag>
@@ -460,7 +473,11 @@ function AssistantOutputRow({
     turn.assistantOutput?.seq === item.seq ? turn.assistantOutput : undefined;
 
   return (
-    <Panel surface="base" border className="px-4 py-3">
+    <Panel
+      surface="base"
+      border
+      className="rounded-[18px] border-l-2 border-l-accent bg-[rgba(255,255,255,0.72)] px-4 py-3.5"
+    >
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Tag variant="accent">HaL</Tag>
@@ -493,7 +510,7 @@ function AssistantOutputRow({
 
 function ToolResultRow({ item }: { item: ActivityItem }) {
   return (
-    <div className="flex items-center gap-2 rounded-sm border border-subtle px-3 py-2">
+    <div className="flex items-center gap-2 rounded-[16px] border border-subtle bg-[rgba(255,255,255,0.38)] px-3 py-2">
       <StatusDot state={toolDotState(item.status)} />
       <span className="font-mono text-meta text-hal-primary">
         {item.toolName ?? "tool"}
@@ -513,7 +530,7 @@ function ToolResultRow({ item }: { item: ActivityItem }) {
 
 function MessageInjectedRow({ item }: { item: ActivityItem }) {
   return (
-    <Panel surface="inset" className="px-4 py-3">
+    <Panel surface="inset" className="rounded-[18px] px-4 py-3.5">
       <div className="mb-2 flex items-center justify-between gap-3">
         <Tag>Injected</Tag>
         <span
@@ -530,7 +547,7 @@ function MessageInjectedRow({ item }: { item: ActivityItem }) {
 
 function SubagentCompletedRow({ item }: { item: ActivityItem }) {
   return (
-    <div className="flex items-center gap-2 rounded-sm border border-subtle px-3 py-2">
+    <div className="flex items-center gap-2 rounded-[16px] border border-subtle bg-[rgba(255,255,255,0.3)] px-3 py-2">
       <StatusBadge state={workerBadgeState(item.status)}>
         {item.status ?? "completed"}
       </StatusBadge>
@@ -555,7 +572,7 @@ function TurnFailedRow({ item }: { item: ActivityItem }) {
     <Panel
       surface="base"
       border
-      className="border-danger bg-hal-danger-subtle px-4 py-3"
+      className="rounded-[18px] border-danger bg-hal-danger-subtle px-4 py-3.5"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <StatusBadge state="danger">failed</StatusBadge>
@@ -587,7 +604,7 @@ function EvidenceBlock({ turn }: { turn: TurnViewModel }) {
   ].filter((c) => c.value > 0);
 
   return (
-    <div className="rounded-sm bg-hal-inset px-4 py-3">
+    <div className="rounded-b-[18px] bg-hal-inset px-4 py-3.5">
       {/* Evidence summary counts */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-meta font-medium text-hal-primary">Evidence</span>
@@ -599,11 +616,11 @@ function EvidenceBlock({ turn }: { turn: TurnViewModel }) {
       </div>
 
       {/* Flat event list */}
-      <div className="mt-3 space-y-1">
+      <div className="mt-3 space-y-1.5">
         {turn.evidenceEvents.map((event) => (
           <div
             key={event.seq}
-            className="flex items-start gap-2 rounded-sm border border-subtle bg-hal-canvas px-3 py-1.5"
+            className="flex items-start gap-2 rounded-[14px] border border-subtle bg-hal-canvas px-3 py-2"
           >
             <span
               className="shrink-0 font-mono text-caption text-hal-muted"
@@ -628,7 +645,7 @@ function EvidenceBlock({ turn }: { turn: TurnViewModel }) {
 
 function SessionActivityRow({ item }: { item: SessionActivityItem }) {
   return (
-    <div className="flex items-center gap-2 rounded-sm border border-subtle bg-hal-panel px-3 py-2">
+    <div className="flex items-center gap-2 rounded-[16px] border border-subtle bg-[rgba(255,255,255,0.3)] px-3 py-2">
       <StatusBadge state={sessionActivityBadgeState(item.kind)}>
         {item.title}
       </StatusBadge>
