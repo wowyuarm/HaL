@@ -67,7 +67,7 @@ export function Composer({
     <div className={cn("shrink-0 border-t border-border px-5 py-3", className)}>
       <div className="mx-auto flex max-w-3xl items-end gap-3">
         {/* Input field */}
-        <div className="flex-1 rounded-md border border-border bg-inset px-3 py-2">
+        <div className="flex-1 rounded-md border border-border bg-hal-inset px-3 py-2">
           <textarea
             ref={textareaRef}
             value={value}
@@ -81,7 +81,7 @@ export function Composer({
             disabled={disabled}
             rows={MIN_ROWS}
             placeholder={placeholder}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full resize-none bg-transparent text-sm leading-relaxed text-hal-primary outline-none placeholder:text-hal-muted disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
 
@@ -92,7 +92,7 @@ export function Composer({
           onClick={handleSend}
           className={cn(
             "inline-flex shrink-0 items-center gap-2 rounded-md bg-accent px-4 py-2",
-            "text-sm font-medium text-on-accent",
+            "text-sm font-medium text-white",
             "transition-colors duration-fast ease-standard",
             "hover:brightness-95",
             "disabled:cursor-not-allowed disabled:opacity-50",

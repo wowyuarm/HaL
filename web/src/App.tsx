@@ -1,19 +1,36 @@
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { WorkingLog } from "@/components/session/working-log";
 import { SessionScopeDialog } from "@/components/session/session-scope-dialog";
 import { SessionMountedThreadsDialog } from "@/components/session/session-mounted-threads-dialog";
 import { ThreadDetailPanel } from "@/components/thread/thread-detail";
-import { endSession, submitSessionTurn } from "@/lib/api";
 import { ThreadList } from "@/components/thread/thread-list";
+import { endSession, submitSessionTurn } from "@/lib/api";
 import { isInteractiveSession } from "@/lib/runtime";
-import { useHalStore } from "@/lib/store";
+import { useHalStore, useLayoutMode } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { useSessionSocket } from "@/lib/ws";
+
+// ---------------------------------------------------------------------------
+// Grid column definitions per layout mode
+// ---------------------------------------------------------------------------
+
+const GRID_NAVIGATION = "grid-cols-[240px_minmax(0,1fr)]";
+const GRID_WORKING = "grid-cols-[48px_minmax(0,1fr)]";
+const GRID_WORKING_BRIEF = "grid-cols-[48px_minmax(0,1fr)_minmax(320px,420px)]";
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
 
 export default function App() {
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
   const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
   const [scopeEditorSessionId, setScopeEditorSessionId] = useState<string | null>(null);
+
+  const layoutMode = useLayoutMode();
   const threads = useHalStore((s) => s.threads);
   const threadDetails = useHalStore((s) => s.threadDetails);
   const sessionManifests = useHalStore((s) => s.sessionManifests);
@@ -27,6 +44,8 @@ export default function App() {
   const creatingSession = useHalStore((s) => s.creatingSession);
   const updatingScopeSessionId = useHalStore((s) => s.updatingScopeSessionId);
   const lastError = useHalStore((s) => s.lastError);
+  const briefPanelOpen = useHalStore((s) => s.briefPanelOpen);
+
   const loadThreads = useHalStore((s) => s.loadThreads);
   const loadThread = useHalStore((s) => s.loadThread);
   const loadSessionEvents = useHalStore((s) => s.loadSessionEvents);
@@ -36,8 +55,10 @@ export default function App() {
   const createSessionForThread = useHalStore((s) => s.createSessionForThread);
   const createScopedSession = useHalStore((s) => s.createScopedSession);
   const updateSessionScope = useHalStore((s) => s.updateSessionScope);
+  const toggleBriefPanel = useHalStore((s) => s.toggleBriefPanel);
   const setError = useHalStore((s) => s.setError);
 
+  // Derived values
   const activeThread = activeThreadSlug ? threadDetails[activeThreadSlug] ?? null : null;
   const selectedSession = selectedSessionId ? sessionManifests[selectedSessionId] ?? null : null;
   const scopeEditorSession = scopeEditorSessionId
@@ -47,10 +68,14 @@ export default function App() {
   const loadingSession = Boolean(selectedSessionId && loadingSessionId === selectedSessionId);
   const events = selectedSessionId ? sessionEvents[selectedSessionId] ?? [] : [];
   const latestEventSeq = events.at(-1)?.seq ?? 0;
+  const isWorkCanvas = layoutMode === "working" || layoutMode === "review";
+
   useSessionSocket(
     selectedSession?.session_id ?? null,
     selectedSession?.status ?? null,
   );
+
+  // --- Data loading effects (unchanged) ---
 
   useEffect(() => {
     void loadThreads();
@@ -73,6 +98,8 @@ export default function App() {
     selectedSession?.session_id,
     selectedSession?.status,
   ]);
+
+  // --- Event handlers (unchanged) ---
 
   const handleSelectThread = (slug: string) => {
     setError(null);
@@ -179,84 +206,107 @@ export default function App() {
     }
   };
 
+  // --- Grid column class ---
+
+  const gridClass = layoutMode === "navigation"
+    ? GRID_NAVIGATION
+    : isWorkCanvas && briefPanelOpen
+      ? GRID_WORKING_BRIEF
+      : GRID_WORKING;
+
+  // --- Render ---
+
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      <aside className="flex h-screen w-[240px] shrink-0 flex-col border-r border-border bg-panel">
-        <div className="flex-1 overflow-y-auto px-3 py-4">
-          <div className="flex items-center justify-between gap-2 px-2">
-            <p className="text-xs font-medium uppercase tracking-widest text-muted">Threads</p>
+    <div className={cn("grid h-screen bg-hal-canvas text-hal-primary", gridClass)}>
+      {/* ── Sidebar ── */}
+      {layoutMode === "navigation" ? (
+        <NavigationSidebar
+          threads={threads}
+          activeThreadSlug={activeThreadSlug}
+          creatingSession={creatingSession}
+          onSelectThread={handleSelectThread}
+          onOpenScopeDialog={() => setScopeDialogOpen(true)}
+        />
+      ) : (
+        <ThreadRail
+          threads={threads}
+          activeThreadSlug={activeThreadSlug}
+          creatingSession={creatingSession}
+          onSelectThread={handleSelectThread}
+          onOpenScopeDialog={() => setScopeDialogOpen(true)}
+        />
+      )}
+
+      {/* ── Main area ── */}
+      <main className="flex min-w-0 flex-col bg-hal-canvas">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-subtle px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <h1 className="truncate text-sm font-semibold text-hal-primary">
+              {activeThread?.name ?? "HaL"}
+            </h1>
+            {activeThread?.scope && (
+              <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 font-mono text-[11px] text-hal-muted">
+                {activeThread.scope}
+              </span>
+            )}
+            <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 text-[11px] font-medium text-hal-muted">
+              {selectedSession ? `socket ${socketState}` : "select a session"}
+            </span>
+            {(loadingThreads || loadingThread || loadingSession) && (
+              <span className="rounded-sm bg-hal-panel px-1.5 py-0.5 text-[11px] font-medium text-hal-muted">
+                loading
+              </span>
+            )}
+          </div>
+          {isWorkCanvas && (
             <button
               type="button"
-              onClick={() => setScopeDialogOpen(true)}
-              disabled={threads.length === 0 || creatingSession}
-              className="rounded-md border border-border bg-elevated px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-foreground transition-colors duration-fast ease-standard hover:bg-background disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={toggleBriefPanel}
+              className={cn(
+                "rounded-md border px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide",
+                "transition-colors duration-normal ease-standard",
+                briefPanelOpen
+                  ? "border-accent bg-accent-subtle text-accent"
+                  : "border-border bg-hal-float text-hal-muted hover:text-hal-primary",
+              )}
             >
-              Scope
+              Brief
             </button>
-          </div>
-          <div className="mt-3">
-            <ThreadList
-              threads={threads}
-              activeThread={activeThreadSlug}
-              onSelect={handleSelectThread}
-            />
-          </div>
-        </div>
-        <div className="border-t border-border px-3 py-4">
-          <div className="rounded-md border border-border bg-elevated px-3 py-3 text-xs text-muted">
-            <p className="font-medium uppercase tracking-widest text-foreground">
-              Working Log
-            </p>
-            <p className="mt-2 leading-relaxed">
-              Threads hold durable memory. Sessions are the observable work runs beneath them.
-            </p>
-          </div>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col bg-background">
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-5">
-          <h1 className="text-sm font-semibold text-foreground">
-            {activeThread?.name ?? "HaL"}
-          </h1>
-          {activeThread?.scope && (
-            <span className="rounded-sm border border-border bg-elevated px-1.5 py-0.5 font-mono text-[11px] text-muted">
-              {activeThread.scope}
-            </span>
-          )}
-          <span className="rounded-sm border border-border bg-elevated px-1.5 py-0.5 text-[11px] font-medium text-muted">
-            {selectedSession ? `socket ${socketState}` : "select a session"}
-          </span>
-          {(loadingThreads || loadingThread || loadingSession) && (
-            <span className="rounded-sm bg-panel px-1.5 py-0.5 text-[11px] font-medium text-muted">
-              loading
-            </span>
           )}
         </header>
 
-        <div className="grid min-h-0 flex-1 gap-4 p-4 xl:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]">
-          <ThreadDetailPanel
-            thread={activeThread}
-            selectedSessionId={selectedSessionId}
-            onSelectSession={handleSelectSession}
-            onCreateSession={handleCreateSession}
-            creatingSession={creatingSession}
-          />
-          <WorkingLog
-            session={selectedSession}
-            events={events}
-            socketState={socketState}
-            scopeEditable={threads.length > 0}
-            loading={loadingThread || loadingSession}
-            error={lastError}
-            onSend={handleSend}
-            onEditScope={handleOpenScopeEditor}
-            onBrief={handleBrief}
-            onDrop={handleDrop}
-          />
+        <div className="min-h-0 flex-1 p-4">
+          {isWorkCanvas ? (
+            <WorkingLog
+              session={selectedSession}
+              events={events}
+              socketState={socketState}
+              scopeEditable={threads.length > 0}
+              loading={loadingThread || loadingSession}
+              error={lastError}
+              onSend={handleSend}
+              onEditScope={handleOpenScopeEditor}
+              onBrief={handleBrief}
+              onDrop={handleDrop}
+            />
+          ) : (
+            <ThreadDetailPanel
+              thread={activeThread}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={handleSelectSession}
+              onCreateSession={handleCreateSession}
+              creatingSession={creatingSession}
+            />
+          )}
         </div>
       </main>
 
+      {/* ── BRIEF panel (Working/Review only, toggled) ── */}
+      {isWorkCanvas && briefPanelOpen && (
+        <BriefPanel briefMarkdown={activeThread?.brief_markdown ?? null} />
+      )}
+
+      {/* ── Dialogs (fixed-position overlays, grid-inert) ── */}
       <SessionScopeDialog
         open={scopeDialogOpen}
         threads={threads}
@@ -275,4 +325,145 @@ export default function App() {
       />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Navigation sidebar — full thread list (~240px)
+// ---------------------------------------------------------------------------
+
+function NavigationSidebar({
+  threads,
+  activeThreadSlug,
+  creatingSession,
+  onSelectThread,
+  onOpenScopeDialog,
+}: {
+  threads: ReturnType<typeof useHalStore.getState>["threads"];
+  activeThreadSlug: string | null;
+  creatingSession: boolean;
+  onSelectThread: (slug: string) => void;
+  onOpenScopeDialog: () => void;
+}) {
+  return (
+    <aside className="flex min-h-0 flex-col border-r border-subtle bg-hal-panel">
+      <div className="flex-1 overflow-y-auto px-3 py-4">
+        <div className="flex items-center justify-between gap-2 px-2">
+          <p className="text-xs font-medium uppercase tracking-widest text-hal-muted">Threads</p>
+          <button
+            type="button"
+            onClick={onOpenScopeDialog}
+            disabled={threads.length === 0 || creatingSession}
+            className="rounded-md border border-border bg-hal-float px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-hal-primary transition-colors duration-fast ease-standard hover:bg-hal-canvas disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Scope
+          </button>
+        </div>
+        <div className="mt-3">
+          <ThreadList
+            threads={threads}
+            activeThread={activeThreadSlug}
+            onSelect={onSelectThread}
+          />
+        </div>
+      </div>
+      <div className="border-t border-subtle px-3 py-4">
+        <div className="rounded-md border border-border bg-hal-float px-3 py-3 text-xs text-hal-muted">
+          <p className="font-medium uppercase tracking-widest text-hal-primary">Working Log</p>
+          <p className="mt-2 leading-relaxed">
+            Threads hold durable memory. Sessions are the observable work runs beneath them.
+          </p>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Thread rail — collapsed icon-only sidebar (~48px)
+// ---------------------------------------------------------------------------
+
+function ThreadRail({
+  threads,
+  activeThreadSlug,
+  creatingSession,
+  onSelectThread,
+  onOpenScopeDialog,
+}: {
+  threads: ReturnType<typeof useHalStore.getState>["threads"];
+  activeThreadSlug: string | null;
+  creatingSession: boolean;
+  onSelectThread: (slug: string) => void;
+  onOpenScopeDialog: () => void;
+}) {
+  return (
+    <aside className="flex min-h-0 flex-col items-center border-r border-subtle bg-hal-canvas">
+      <div className="flex flex-1 flex-col items-center gap-1.5 overflow-y-auto py-3">
+        {threads.map((thread) => {
+          const isActive = thread.slug === activeThreadSlug;
+          return (
+            <button
+              key={thread.slug}
+              type="button"
+              onClick={() => onSelectThread(thread.slug)}
+              title={thread.name}
+              aria-label={thread.name}
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase",
+                "transition-colors duration-normal ease-standard",
+                isActive
+                  ? "border border-accent bg-accent text-white"
+                  : "border border-subtle bg-hal-float text-hal-muted hover:border-border hover:text-hal-primary",
+              )}
+            >
+              {threadInitial(thread.name)}
+            </button>
+          );
+        })}
+      </div>
+      <div className="border-t border-subtle p-2">
+        <button
+          type="button"
+          onClick={onOpenScopeDialog}
+          disabled={threads.length === 0 || creatingSession}
+          title="Create scoped session"
+          aria-label="Create scoped session"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-subtle bg-hal-float text-[11px] font-medium text-hal-muted transition-colors duration-normal ease-standard hover:border-border hover:text-hal-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          +
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BRIEF side panel — thread brief_markdown in an elevated container
+// ---------------------------------------------------------------------------
+
+function BriefPanel({ briefMarkdown }: { briefMarkdown: string | null }) {
+  return (
+    <aside className="flex min-h-0 flex-col border-l border-subtle bg-hal-panel">
+      <div className="flex h-12 shrink-0 items-center border-b border-subtle px-4">
+        <h2 className="text-xs font-medium uppercase tracking-widest text-hal-muted">Brief</h2>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="prose prose-mineral max-w-none text-sm">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {briefMarkdown || "_This thread does not have a brief yet._"}
+          </ReactMarkdown>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Extract the first meaningful character from a thread name for the rail badge. */
+function threadInitial(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  return trimmed[0]?.toUpperCase() ?? "?";
 }

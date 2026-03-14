@@ -46,19 +46,19 @@ export function SessionScopeDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-xl border border-border bg-panel shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-hal-canvas/80 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-xl border border-border bg-hal-panel shadow-2xl">
         <header className="border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold text-foreground">New Scoped Session</h2>
-          <p className="mt-1 text-sm text-muted">
+          <h2 className="text-base font-semibold text-hal-primary">New Scoped Session</h2>
+          <p className="mt-1 text-sm text-hal-muted">
             Pick the primary thread and any additional briefs you want mounted into this run.
           </p>
         </header>
 
         <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
-          <div className="mb-4 grid gap-3 rounded-lg border border-border bg-elevated p-4 text-sm text-muted md:grid-cols-2">
+          <div className="mb-4 grid gap-3 rounded-lg border border-border bg-hal-float p-4 text-sm text-hal-muted md:grid-cols-2">
             <div>
-              <p className="text-xs font-medium uppercase tracking-widest text-foreground">
+              <p className="text-xs font-medium uppercase tracking-widest text-hal-primary">
                 Primary Thread
               </p>
               <p className="mt-2">
@@ -66,7 +66,7 @@ export function SessionScopeDialog({
               </p>
             </div>
             <div>
-              <p className="text-xs font-medium uppercase tracking-widest text-foreground">
+              <p className="text-xs font-medium uppercase tracking-widest text-hal-primary">
                 Mounted Threads
               </p>
               <p className="mt-2">
@@ -84,7 +84,7 @@ export function SessionScopeDialog({
                   key={thread.slug}
                   className={cn(
                     "flex items-start gap-4 rounded-lg border px-4 py-3 transition-colors duration-fast ease-standard",
-                    isPrimary ? "border-accent bg-accent-subtle" : "border-border bg-background hover:bg-elevated",
+                    isPrimary ? "border-accent bg-accent-subtle" : "border-border bg-hal-canvas hover:bg-hal-float",
                   )}
                 >
                   <input
@@ -100,17 +100,17 @@ export function SessionScopeDialog({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{thread.name}</p>
-                        <p className="mt-1 text-xs text-muted">{thread.description || "No description."}</p>
+                        <p className="truncate text-sm font-medium text-hal-primary">{thread.name}</p>
+                        <p className="mt-1 text-xs text-hal-muted">{thread.description || "No description."}</p>
                       </div>
-                      <span className="rounded-sm border border-border bg-panel px-2 py-0.5 font-mono text-[11px] text-muted">
+                      <span className="rounded-sm border border-border bg-hal-panel px-2 py-0.5 font-mono text-[11px] text-hal-muted">
                         {thread.scope || "thread"}
                       </span>
                     </div>
 
                     <div className="mt-3 flex items-center justify-between gap-3">
-                      <span className="text-xs text-muted">{thread.slug}</span>
-                      <span className="flex items-center gap-2 text-xs text-foreground">
+                      <span className="text-xs text-hal-muted">{thread.slug}</span>
+                      <span className="flex items-center gap-2 text-xs text-hal-primary">
                         <input
                           type="checkbox"
                           checked={checked}
@@ -138,7 +138,7 @@ export function SessionScopeDialog({
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-4">
-          <div className="text-xs text-muted">
+          <div className="text-xs text-hal-muted">
             Primary is always mounted. You can add extra threads now and adjust scope later.
           </div>
           <div className="flex items-center gap-2">
@@ -146,7 +146,7 @@ export function SessionScopeDialog({
               type="button"
               onClick={onClose}
               disabled={creating}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground transition-colors duration-fast ease-standard hover:bg-elevated disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-border bg-hal-canvas px-3 py-1.5 text-sm text-hal-primary transition-colors duration-fast ease-standard hover:bg-hal-float disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
@@ -154,7 +154,7 @@ export function SessionScopeDialog({
               type="button"
               onClick={() => void handleSubmit()}
               disabled={!primaryThread || creating}
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition-colors duration-fast ease-standard hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors duration-fast ease-standard hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {creating ? "Creating..." : "Start Session"}
             </button>

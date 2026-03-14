@@ -6,30 +6,48 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--bg)",
-        panel: "var(--bg-panel)",
-        elevated: "var(--bg-elevated)",
-        inset: "var(--bg-inset)",
+        /* ── New semantic namespace (bg-hal-canvas, text-hal-primary, etc.) ── */
+        hal: {
+          canvas: "var(--hal-canvas)",
+          panel: "var(--hal-panel)",
+          float: "var(--hal-float)",
+          inset: "var(--hal-inset)",
+          primary: "var(--hal-text)",
+          muted: "var(--hal-text-muted)",
+          live: "var(--hal-live)",
+          "live-subtle": "var(--hal-live-subtle)",
+          success: "var(--hal-success)",
+          "success-subtle": "var(--hal-success-subtle)",
+          warning: "var(--hal-warning)",
+          "warning-subtle": "var(--hal-warning-subtle)",
+          human: "var(--hal-human)",
+          "human-subtle": "var(--hal-human-subtle)",
+          danger: "var(--hal-danger)",
+          "danger-subtle": "var(--hal-danger-subtle)",
+        },
 
-        border: "var(--border)",
-        "border-subtle": "var(--border-subtle)",
-        "border-accent": "var(--border-accent)",
-
-        foreground: "var(--text)",
-        muted: "var(--text-muted)",
-        "on-accent": "var(--text-on-accent)",
-
-        accent: "var(--accent)",
-        "accent-subtle": "var(--accent-subtle)",
-        human: "var(--human)",
-        "human-subtle": "var(--human-subtle)",
-        danger: "var(--danger)",
-        "danger-subtle": "var(--danger-subtle)",
+        /* ── Standalone semantic colors ── */
+        border: "var(--border-default)",
+        success: "var(--color-success)",
+        "success-subtle": "var(--color-success-subtle)",
+        warning: "var(--color-warning)",
+        "warning-subtle": "var(--color-warning-subtle)",
+        danger: "var(--color-danger)",
+        "danger-subtle": "var(--color-danger-subtle)",
+        human: "var(--color-human)",
+        "human-subtle": "var(--color-human-subtle)",
+        accent: "var(--color-accent)",
+        "accent-subtle": "var(--color-accent-subtle)",
       },
       borderColor: {
-        DEFAULT: "var(--border)",
+        DEFAULT: "var(--border-default)",
         subtle: "var(--border-subtle)",
+        strong: "var(--border-strong)",
         accent: "var(--border-accent)",
+        human: "var(--border-human)",
+        danger: "var(--border-danger)",
+        success: "var(--border-success)",
+        warning: "var(--border-warning)",
       },
       borderRadius: {
         sm: "var(--radius-sm)",
@@ -37,7 +55,33 @@ const config: Config = {
         lg: "var(--radius-lg)",
       },
       boxShadow: {
-        popover: "0 4px 12px rgba(0, 0, 0, 0.08)",
+        sm: "var(--shadow-sm)",
+        popover: "var(--shadow-popover)",
+      },
+      fontSize: {
+        heading: [
+          "var(--type-heading-size)",
+          { lineHeight: "var(--type-heading-line)", fontWeight: "var(--type-heading-weight)" },
+        ],
+        subheading: [
+          "var(--type-subheading-size)",
+          {
+            lineHeight: "var(--type-subheading-line)",
+            fontWeight: "var(--type-subheading-weight)",
+          },
+        ],
+        body: [
+          "var(--type-body-size)",
+          { lineHeight: "var(--type-body-line)", fontWeight: "var(--type-body-weight)" },
+        ],
+        meta: [
+          "var(--type-meta-size)",
+          { lineHeight: "var(--type-meta-line)", fontWeight: "var(--type-meta-weight)" },
+        ],
+        caption: [
+          "var(--type-caption-size)",
+          { lineHeight: "var(--type-caption-line)", fontWeight: "var(--type-caption-weight)" },
+        ],
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
@@ -46,18 +90,19 @@ const config: Config = {
       transitionDuration: {
         fast: "var(--duration-fast)",
         normal: "var(--duration-normal)",
+        slow: "var(--duration-slow)",
       },
       transitionTimingFunction: {
-        standard: "ease-out",
+        standard: "var(--ease-standard)",
       },
       typography: {
         mineral: {
           css: {
-            "--tw-prose-body": "var(--text)",
-            "--tw-prose-headings": "var(--text)",
-            "--tw-prose-links": "var(--accent)",
-            "--tw-prose-code": "var(--text)",
-            "--tw-prose-pre-bg": "var(--bg-inset)",
+            "--tw-prose-body": "var(--hal-text)",
+            "--tw-prose-headings": "var(--hal-text)",
+            "--tw-prose-links": "var(--hal-live)",
+            "--tw-prose-code": "var(--hal-text)",
+            "--tw-prose-pre-bg": "var(--hal-inset)",
           },
         },
       },

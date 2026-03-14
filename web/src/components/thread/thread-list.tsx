@@ -1,13 +1,16 @@
 /**
- * ThreadList — Sidebar thread navigation list.
+ * ThreadList -- Sidebar thread navigation list.
  *
  * Renders thread entries plus compact session counters for the
- * session-first working-log runtime.
+ * session-first working-log runtime. Uses design system tokens
+ * for active state, typography, and metadata.
  */
 
 import { formatRelativeTime } from "@/lib/runtime";
 import type { ThreadSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { StatusDot } from "@/components/ui/status-dot";
+import { Tag } from "@/components/ui/tag";
 
 interface ThreadListProps {
   threads: ThreadSummary[];
@@ -18,13 +21,14 @@ interface ThreadListProps {
 
 export function ThreadList({ threads, activeThread, onSelect, className }: ThreadListProps) {
   if (threads.length === 0) {
-    return <p className="px-2 text-xs text-muted">No threads yet.</p>;
+    return <p className="px-2 text-meta text-hal-muted">No threads yet.</p>;
   }
 
   return (
     <nav className={cn("space-y-0.5", className)} aria-label="Thread list">
       {threads.map((thread) => {
         const isActive = thread.slug === activeThread;
+        const hasActiveSessions = (thread.session_counts.active ?? 0) > 0;
 
         return (
           <button
@@ -35,19 +39,20 @@ export function ThreadList({ threads, activeThread, onSelect, className }: Threa
             className={cn(
               "flex w-full flex-col rounded-md px-3 py-2 text-left",
               "transition-colors duration-fast ease-standard",
-              "hover:bg-elevated",
-              isActive && "border-l-2 border-l-accent bg-accent-subtle",
+              "hover:bg-hal-float",
+              isActive && "border-l-2 border-l-accent bg-hal-live-subtle",
             )}
           >
             <div className="flex items-start justify-between gap-3">
-              <span className="truncate text-sm font-medium text-foreground">
-                {thread.name}
-              </span>
-              <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted">
-                {thread.scope || "thread"}
-              </span>
+              <div className="flex items-center gap-2">
+                {hasActiveSessions ? <StatusDot state="live" /> : null}
+                <span className="truncate text-body font-medium text-hal-primary">
+                  {thread.name}
+                </span>
+              </div>
+              <Tag>{thread.scope || "thread"}</Tag>
             </div>
-            <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted">
+            <div className="mt-1 flex items-center justify-between gap-3 text-meta text-hal-muted">
               <span className="truncate">
                 {thread.updated_at ? formatRelativeTime(thread.updated_at) : "no recent update"}
               </span>

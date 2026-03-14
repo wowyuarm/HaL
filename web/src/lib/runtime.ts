@@ -104,8 +104,8 @@ export function sessionDisplayState(
     case "dropped":
       return {
         label: "dropped",
-        dotClass: "bg-muted",
-        textClass: "text-muted",
+        dotClass: "bg-hal-muted",
+        textClass: "text-hal-muted",
       };
   }
 }

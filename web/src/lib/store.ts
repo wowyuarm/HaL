@@ -8,6 +8,7 @@ import {
   updateSessionScope,
 } from "@/lib/api";
 import type {
+  LayoutMode,
   SessionEvent,
   SessionManifest,
   SessionStatus,
@@ -23,6 +24,7 @@ interface HalStore {
   sessionEvents: Record<string, SessionEvent[]>;
   activeThreadSlug: string | null;
   selectedSessionId: string | null;
+  briefPanelOpen: boolean;
   socketState: SocketState;
   loadingThreads: boolean;
   loadingThreadSlug: string | null;
@@ -34,6 +36,7 @@ interface HalStore {
 
   selectThread: (slug: string) => void;
   selectSession: (sessionId: string | null) => void;
+  toggleBriefPanel: () => void;
   setSocketState: (state: SocketState) => void;
   setError: (message: string | null) => void;
 
@@ -254,6 +257,17 @@ function sessionScopeSlugs(manifest: SessionManifest): string[] {
   return [...slugs].sort();
 }
 
+/** Derive layout mode from current selection state. Pure, no store dependency. */
+export function deriveLayoutMode(
+  selectedSessionId: string | null,
+  sessionManifest: SessionManifest | null,
+): LayoutMode {
+  if (!selectedSessionId || !sessionManifest) return "navigation";
+  if (sessionManifest.status === "active" || sessionManifest.status === "briefing")
+    return "working";
+  return "review";
+}
+
 let nextThreadLoadRequestId = 0;
 
 export const useHalStore = create<HalStore>((set, get) => ({
@@ -263,6 +277,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
   sessionEvents: {},
   activeThreadSlug: null,
   selectedSessionId: null,
+  briefPanelOpen: false,
   socketState: "disconnected",
   loadingThreads: false,
   loadingThreadSlug: null,
@@ -274,6 +289,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
 
   selectThread: (slug) => set({ activeThreadSlug: slug, selectedSessionId: null }),
   selectSession: (sessionId) => set({ selectedSessionId: sessionId }),
+  toggleBriefPanel: () => set((state) => ({ briefPanelOpen: !state.briefPanelOpen })),
   setSocketState: (state) => set({ socketState: state }),
   setError: (message) => set({ lastError: message }),
 
@@ -478,3 +494,42 @@ export const useHalStore = create<HalStore>((set, get) => ({
       };
     }),
 }));
+
+// ---------------------------------------------------------------------------
+// Derived selector hooks
+// ---------------------------------------------------------------------------
+
+/** Derived layout mode — recomputes only when selection or manifest status changes. */
+export function useLayoutMode(): LayoutMode {
+  return useHalStore((s) => {
+    const manifest = s.selectedSessionId
+      ? s.sessionManifests[s.selectedSessionId]
+      : null;
+    return deriveLayoutMode(s.selectedSessionId, manifest ?? null);
+  });
+}
+
+/** ThreadDetail for the currently active thread, or null. */
+export function useCurrentThread(): ThreadDetail | null {
+  return useHalStore((s) =>
+    s.activeThreadSlug ? (s.threadDetails[s.activeThreadSlug] ?? null) : null,
+  );
+}
+
+/** SessionManifest for the currently selected session, or null. */
+export function useCurrentSession(): SessionManifest | null {
+  return useHalStore((s) =>
+    s.selectedSessionId ? (s.sessionManifests[s.selectedSessionId] ?? null) : null,
+  );
+}
+
+/** Whether the selected session accepts interaction (active or briefing). */
+export function useIsInteractive(): boolean {
+  return useHalStore((s) => {
+    if (!s.selectedSessionId) return false;
+    const manifest = s.sessionManifests[s.selectedSessionId];
+    return manifest
+      ? manifest.status === "active" || manifest.status === "briefing"
+      : false;
+  });
+}

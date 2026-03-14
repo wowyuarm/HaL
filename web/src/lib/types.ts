@@ -1,3 +1,6 @@
+/** Derived workspace layout mode for the main application shell. */
+export type LayoutMode = "navigation" | "working" | "review";
+
 /** Session lifecycle states persisted by the backend. */
 export type SessionStatus = "active" | "briefing" | "ended" | "dropped";
 

@@ -3,44 +3,113 @@
 @tailwind utilities;
 
 /* ──────────────────────────────────────────────
-   Light Mineral — Design Tokens
+   HaL Design System — Foundation Tokens
+   See docs/specs/design-system.md for rationale.
    ────────────────────────────────────────────── */
 
 :root {
   color-scheme: light;
 
-  /* Surfaces */
-  --bg: #F7F4EF;
-  --bg-panel: #EFECE6;
-  --bg-elevated: #FFFFFF;
-  --bg-inset: #E8E4DD;
+  /* ── Surfaces ── */
+  --surface-base: #F7F4EF;
+  --surface-raised: #EFECE6;
+  --surface-elevated: #FFFFFF;
+  --surface-inset: #E8E4DD;
 
-  /* Borders */
-  --border: #D4CFC6;
-  --border-subtle: #E2DED7;
-  --border-accent: #4A7A74;
-
-  /* Text */
-  --text: #24211D;
-  --text-muted: #7A756D;
+  /* ── Text ── */
+  --text-primary: #24211D;
+  --text-secondary: #7A756D;
   --text-on-accent: #FFFFFF;
 
-  /* Semantic colors */
-  --accent: #4A7A74;
-  --accent-subtle: #E8F0EF;
-  --human: #9A7840;
-  --human-subtle: #F5EDE0;
-  --danger: #A25248;
-  --danger-subtle: #FAEAE8;
+  /* ── Accent & semantic hues ── */
+  --color-accent: #4A7A74;
+  --color-accent-subtle: #E8F0EF;
+  --color-human: #9A7840;
+  --color-human-subtle: #F5EDE0;
+  --color-danger: #A25248;
+  --color-danger-subtle: #FAEAE8;
+  --color-success: #5A8A6A;
+  --color-success-subtle: #ECF3ED;
+  --color-warning: #B8863B;
+  --color-warning-subtle: #F7EFE1;
 
-  /* Radii */
+  /* ── Borders (rgba for natural surface blending) ── */
+  --border-strong: rgba(36, 33, 29, 0.18);
+  --border-default: rgba(36, 33, 29, 0.14);
+  --border-subtle: rgba(36, 33, 29, 0.09);
+  --border-accent: rgba(74, 122, 116, 0.34);
+  --border-human: rgba(154, 120, 64, 0.28);
+  --border-danger: rgba(162, 82, 72, 0.28);
+  --border-success: rgba(90, 138, 106, 0.28);
+  --border-warning: rgba(184, 134, 59, 0.30);
+
+  /* ── Semantic aliases (--hal-* namespace) ── */
+  --hal-canvas: var(--surface-base);
+  --hal-panel: var(--surface-raised);
+  --hal-float: var(--surface-elevated);
+  --hal-inset: var(--surface-inset);
+
+  --hal-text: var(--text-primary);
+  --hal-text-muted: var(--text-secondary);
+
+  --hal-live: var(--color-accent);
+  --hal-live-subtle: var(--color-accent-subtle);
+  --hal-human: var(--color-human);
+  --hal-human-subtle: var(--color-human-subtle);
+  --hal-danger: var(--color-danger);
+  --hal-danger-subtle: var(--color-danger-subtle);
+  --hal-success: var(--color-success);
+  --hal-success-subtle: var(--color-success-subtle);
+  --hal-warning: var(--color-warning);
+  --hal-warning-subtle: var(--color-warning-subtle);
+
+  --hal-divider: var(--border-default);
+  --hal-divider-subtle: var(--border-subtle);
+  --hal-focus-ring: rgba(74, 122, 116, 0.22);
+  --hal-selection: rgba(74, 122, 116, 0.18);
+  --hal-evidence-seam: rgba(74, 122, 116, 0.34);
+
+  /* ── Typography scale ── */
+  --type-heading-size: 18px;
+  --type-heading-line: 24px;
+  --type-heading-weight: 600;
+
+  --type-subheading-size: 15px;
+  --type-subheading-line: 20px;
+  --type-subheading-weight: 600;
+
+  --type-body-size: 14px;
+  --type-body-line: 20px;
+  --type-body-weight: 400;
+
+  --type-meta-size: 12px;
+  --type-meta-line: 16px;
+  --type-meta-weight: 500;
+
+  --type-caption-size: 11px;
+  --type-caption-line: 14px;
+  --type-caption-weight: 500;
+
+  /* ── Elevation (shadow) ── */
+  --shadow-sm: 0 1px 2px rgba(36, 33, 29, 0.06);
+  --shadow-popover: 0 6px 18px rgba(36, 33, 29, 0.10);
+
+  /* ── Radius ── */
   --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
-  /* Transitions */
-  --duration-fast: 120ms;
+  /* ── Motion ── */
+  --duration-fast: 100ms;
   --duration-normal: 180ms;
+  --duration-slow: 300ms;
+  --ease-standard: ease-out;
+
+  /* ── Evidence seam ── */
+  --turn-seam-width: 2px;
+  --turn-seam-color: var(--hal-evidence-seam);
+  --turn-seam-active: rgba(74, 122, 116, 0.52);
+
 }
 
 /* ──────────────────────────────────────────────
@@ -58,8 +127,8 @@
 
   body {
     min-height: 100vh;
-    background-color: var(--bg);
-    color: var(--text);
+    background-color: var(--hal-canvas);
+    color: var(--hal-text);
     font-family: var(--font-sans);
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -71,7 +140,7 @@
   }
 
   ::selection {
-    background: rgba(74, 122, 116, 0.18);
-    color: var(--text);
+    background: var(--hal-selection);
+    color: var(--hal-text);
   }
 }
