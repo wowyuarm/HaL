@@ -98,8 +98,8 @@ export function sessionDisplayState(
     case "ended":
       return {
         label: "briefed",
-        dotClass: "bg-emerald-600",
-        textClass: "text-emerald-700",
+        dotClass: "bg-success",
+        textClass: "text-success",
       };
     case "dropped":
       return {

@@ -81,7 +81,7 @@ export function Composer({
             disabled={disabled}
             rows={MIN_ROWS}
             placeholder={placeholder}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-hal-primary outline-none placeholder:text-hal-muted disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full resize-none bg-transparent text-body text-hal-primary outline-none placeholder:text-hal-muted disabled:cursor-not-allowed disabled:opacity-60"
           />
         </div>
 
@@ -92,7 +92,7 @@ export function Composer({
           onClick={handleSend}
           className={cn(
             "inline-flex shrink-0 items-center gap-2 rounded-md bg-accent px-4 py-2",
-            "text-sm font-medium text-white",
+            "text-body font-medium text-white",
             "transition-colors duration-fast ease-standard",
             "hover:brightness-95",
             "disabled:cursor-not-allowed disabled:opacity-50",

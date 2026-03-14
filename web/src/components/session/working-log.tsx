@@ -650,7 +650,7 @@ function MarkdownBlock({
   return (
     <div
       className={cn(
-        "prose prose-mineral max-w-none text-sm",
+        "prose prose-mineral max-w-none text-body",
         muted && "opacity-70",
       )}
     >

@@ -241,19 +241,19 @@ export default function App() {
       <main className="flex min-w-0 flex-col bg-hal-canvas">
         <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-subtle px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <h1 className="truncate text-sm font-semibold text-hal-primary">
+            <h1 className="truncate text-subheading text-hal-primary">
               {activeThread?.name ?? "HaL"}
             </h1>
             {activeThread?.scope && (
-              <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 font-mono text-[11px] text-hal-muted">
+              <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 font-mono text-caption text-hal-muted">
                 {activeThread.scope}
               </span>
             )}
-            <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 text-[11px] font-medium text-hal-muted">
+            <span className="rounded-sm border border-border bg-hal-float px-1.5 py-0.5 text-caption text-hal-muted">
               {selectedSession ? `socket ${socketState}` : "select a session"}
             </span>
             {(loadingThreads || loadingThread || loadingSession) && (
-              <span className="rounded-sm bg-hal-panel px-1.5 py-0.5 text-[11px] font-medium text-hal-muted">
+              <span className="rounded-sm bg-hal-panel px-1.5 py-0.5 text-caption text-hal-muted">
                 loading
               </span>
             )}
@@ -263,7 +263,7 @@ export default function App() {
               type="button"
               onClick={toggleBriefPanel}
               className={cn(
-                "rounded-md border px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide",
+                "rounded-md border px-2.5 py-1 text-caption uppercase tracking-wide",
                 "transition-colors duration-normal ease-standard",
                 briefPanelOpen
                   ? "border-accent bg-accent-subtle text-accent"
@@ -353,7 +353,7 @@ function NavigationSidebar({
             type="button"
             onClick={onOpenScopeDialog}
             disabled={threads.length === 0 || creatingSession}
-            className="rounded-md border border-border bg-hal-float px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-hal-primary transition-colors duration-fast ease-standard hover:bg-hal-canvas disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-border bg-hal-float px-2.5 py-1 text-caption uppercase tracking-wide text-hal-primary transition-colors duration-fast ease-standard hover:bg-hal-canvas disabled:cursor-not-allowed disabled:opacity-50"
           >
             Scope
           </button>
@@ -408,7 +408,7 @@ function ThreadRail({
               title={thread.name}
               aria-label={thread.name}
               className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase",
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-caption uppercase",
                 "transition-colors duration-normal ease-standard",
                 isActive
                   ? "border border-accent bg-accent text-white"
@@ -427,7 +427,7 @@ function ThreadRail({
           disabled={threads.length === 0 || creatingSession}
           title="Create scoped session"
           aria-label="Create scoped session"
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-subtle bg-hal-float text-[11px] font-medium text-hal-muted transition-colors duration-normal ease-standard hover:border-border hover:text-hal-primary disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-subtle bg-hal-float text-caption text-hal-muted transition-colors duration-normal ease-standard hover:border-border hover:text-hal-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
           +
         </button>
@@ -447,7 +447,7 @@ function BriefPanel({ briefMarkdown }: { briefMarkdown: string | null }) {
         <h2 className="text-xs font-medium uppercase tracking-widest text-hal-muted">Brief</h2>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="prose prose-mineral max-w-none text-sm">
+        <div className="prose prose-mineral max-w-none text-body">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {briefMarkdown || "_This thread does not have a brief yet._"}
           </ReactMarkdown>
