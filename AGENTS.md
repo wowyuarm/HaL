@@ -6,13 +6,13 @@
 Keep source and tests in matching paths.
 
 ## Architecture North Star
-- Read `DESIGN.md` first — it defines the five invariants that constrain all implementation decisions.
+- Read `DESIGN.md` first — it defines invariants and collaboration architecture.
 - Keep semantic layers separate from mechanisms:
   `Thread`, `Episode`, `Memory`, `Skill`, and `Artifact` are domain objects; event bus / loop / hooks are runtime mechanisms; providers / channels / Milvus are infra.
-- Prefer stable working-set layers over repeated dynamic reinjection:
-  stable prefix -> session baseline -> frozen checkpoints -> live tail.
+- Session-first: `session_id` is the engine's sole identity key. Context is compiled fresh every turn — no frozen baselines.
 - `Thread` and `Skill` may share loading infrastructure, but they are not the same semantic type.
 - Prefer explicit workspace/repository abstractions over ad hoc `Path` reads and writes inside engine logic when refactoring persistent state flows.
+- For frontend work, read `docs/specs/design-system.md` and use the `hal-design` skill.
 
 ## Build, Test, and Development Commands
 - `pip install -e ".[dev]"`: editable install with test/lint dependencies.

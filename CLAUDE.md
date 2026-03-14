@@ -23,27 +23,31 @@ ruff format hal/
 
 ## Architecture Overview
 
-HaL is a stateful collaboration system — see `DESIGN.md` for foundational invariants.
+HaL is a stateful collaboration system — see `DESIGN.md` for invariants and
+collaboration architecture, `docs/specs/design-system.md` for frontend design.
 
-Async, bus-driven: channels send inbound messages to a shared `MessageBus`; the engine consumes, runs the LLM/tool loop, and publishes outbound messages.
+Session-first, async, event-driven: the engine uses `session_id` as its sole
+identity key. IM channels are adapters; the native web server bridges directly.
 
 ```
-Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider
-                                   -> ToolRegistry
+Telegram (adapter) ──→ MessageBus ──→ AgentEngine ──→ LLMProvider
+                                          ↑             ToolRegistry
+Native web (SessionBridge) ──────────────┘             SessionEventPublisher
 ```
 
 ### System Layers
 
 | Layer | Package | Responsibility |
 |-------|---------|----------------|
-| Domain | `hal/domain/` | Semantic types: ContextUnit, ports, metadata |
+| Domain | `hal/domain/` | Semantic types: ContextUnit, SessionManifest, SessionEvent, EventPublisher |
 | Context | `hal/context/` | Context compilation: builder, compiler, registry, baseline |
 | Runtime | `hal/runtime/` | Orchestration: engine, loop, subagent, session lifecycle |
-| Memory | `hal/memory/` | MemoryManager, event log, search, vector store |
-| Workspace | `hal/workspace/` | Persistence: layout, repos (threads, episodes, sessions) |
+| Memory | `hal/memory/` | MemoryManager, search, vector store |
+| Workspace | `hal/workspace/` | Persistence: layout, repos (threads, episodes, sessions, thread refs) |
 | Capabilities | `hal/capabilities/` | Tools and skills |
 | Bus | `hal/bus/` | MessageBus, typed events |
-| Channels | `hal/channels/` | Telegram integration |
+| Web | `hal/web/` | Native web server: SessionBridge, REST + WebSocket |
+| Channels | `hal/channels/` | Telegram adapter |
 | CLI | `hal/cli/` | CLI commands, factory |
 | Infra | `hal/infra/` | Config, LLM providers |
 
@@ -77,7 +81,7 @@ Channel (Telegram) -> MessageBus -> AgentEngine -> LLMProvider
 ### Context System (`hal/context/`)
 
 - `builder.py`: ContextBuilder — assembles system prompt and message sequence.
-- `compiler.py`: ContextCompiler — frozen baseline reuse across turns.
+- `compiler.py`: ContextCompiler — per-turn fresh compilation (no frozen baseline).
 - `registry.py`: ContextRegistry — unified skill/thread discovery + related expansion.
 - `baseline.py`: baseline planning (recall, thread selection, related expansion).
 - `message_building.py`: message construction helpers (assistant, tool, session baseline, sequences).
@@ -102,9 +106,11 @@ Pydantic-based strict config (`extra="forbid"`):
 ### Memory (`hal/memory/`)
 
 `MemoryManager` coordinates:
-- event recording (`events.jsonl` via `EventLogRepository`)
 - long-term memory (`MemoryRepository` for `MEMORY.md`)
 - optional semantic memory search stack (`search.py`, `store.py`, `chunker.py`)
+
+Per-session event recording is handled by `SessionEventPublisher` → `working-log.jsonl`,
+not by the memory system.
 
 Memory-search imports are optional so base memory usage works without extras installed.
 
@@ -131,21 +137,22 @@ hal/
 ├── cli/
 │   ├── commands/
 │   └── factory.py
-├── context/          # Context compilation (read path)
-├── domain/           # Semantic types (ContextUnit, ports, metadata)
+├── context/          # Context compilation (read path, per-turn fresh)
+├── domain/           # Semantic types: ContextUnit, SessionManifest, SessionEvent, EventPublisher
 ├── infra/
 │   ├── config/
 │   └── providers/
 ├── memory/           # MemoryManager, search, store
 ├── runtime/
 │   ├── bootstrap/    # Gateway wiring
-│   ├── engine/       # AgentEngine and components
+│   ├── engine/       # AgentEngine (session-first) and components
 │   ├── subagent/     # SubagentManager
 │   ├── loop.py       # Shared tool-calling loop
-│   ├── session.py    # Session lifecycle, state, snapshot, checkpoint
+│   ├── session.py    # Session compaction utilities
 │   └── brief.py      # Session brief worker and thread helpers
 ├── utils/            # Generic helpers
-├── workspace/        # Persistence (layout, repos)
+├── web/              # Native web server: bridge, server, protocol
+├── workspace/        # Persistence (layout, repos, session store, thread refs)
 └── bridge/
     └── anyrouter_bridge.mjs
 ```
@@ -155,10 +162,10 @@ hal/
 ```text
 ~/.hal/
   system/             # SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml
-  work/threads/       # Thread dirs (BRIEF.md + THREAD.yaml + episodes/)
-  work/inbox/         # Unrouted items
-  runtime/logs/       # events.jsonl
-  runtime/sessions/   # Session snapshots
+  work/threads/       # Thread dirs (BRIEF.md + THREAD.yaml + episodes/ + refs/)
+  work/sessions/      # Session dirs (manifest.json + working-log.jsonl)
+  runtime/resume/     # Engine session checkpoints
+  runtime/logs/       # Operational logs
   runtime/metrics/    # context_metrics.jsonl
   capabilities/skills/ # Skill packages
   data/vectors/       # Vector index
