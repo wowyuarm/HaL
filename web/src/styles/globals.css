@@ -86,20 +86,20 @@
   --type-subheading-line: 20px;
   --type-subheading-weight: 600;
 
-  --type-body-size: 14px;
-  --type-body-line: 20px;
+  --type-body-size: 15px;
+  --type-body-line: 23px;
   --type-body-weight: 400;
 
-  --type-reading-size: 15px;
-  --type-reading-line: 24px;
+  --type-reading-size: 16px;
+  --type-reading-line: 26px;
   --type-reading-weight: 400;
 
-  --type-meta-size: 12px;
-  --type-meta-line: 16px;
+  --type-meta-size: 13px;
+  --type-meta-line: 18px;
   --type-meta-weight: 500;
 
-  --type-caption-size: 11px;
-  --type-caption-line: 14px;
+  --type-caption-size: 12px;
+  --type-caption-line: 16px;
   --type-caption-weight: 500;
 
   /* ── Elevation (shadow) ── */

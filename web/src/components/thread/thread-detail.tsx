@@ -1,18 +1,9 @@
 /**
- * ThreadDetailPanel -- Main-canvas thread detail view.
- *
- * Shows thread name, description, scope tag, BRIEF.md prose rendering,
- * metadata (updated timestamp, session count), and session list below.
- * The thread detail stays on the shared workspace canvas with the BRIEF
- * centered for reading comfort instead of wrapping the whole view in a card.
+ * ThreadDetailPanel -- Compact thread overview with sessions below.
  */
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-
 import { SessionList } from "@/components/session/session-list";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { formatCount, formatTimestamp } from "@/lib/runtime";
+import { Button } from "@/components/ui/button";
 import type { ThreadDetail } from "@/lib/types";
 
 interface ThreadDetailProps {
@@ -20,6 +11,7 @@ interface ThreadDetailProps {
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onCreateSession: () => void;
+  onToggleBriefPanel: () => void;
   creatingSession?: boolean;
 }
 
@@ -28,72 +20,57 @@ export function ThreadDetailPanel({
   selectedSessionId,
   onSelectSession,
   onCreateSession,
+  onToggleBriefPanel,
   creatingSession = false,
 }: ThreadDetailProps) {
   if (!thread) {
     return (
       <section className="flex h-full items-center justify-center rounded-md border border-dashed border-border p-6 text-body text-hal-muted">
-        Select a thread to inspect its brief and sessions.
+        Select a thread to inspect its sessions.
       </section>
     );
   }
 
-  const totalSessions =
-    (thread.session_counts.active ?? 0) +
-    (thread.session_counts.briefing ?? 0) +
-    (thread.session_counts.ended ?? 0) +
-    (thread.session_counts.dropped ?? 0);
-  const updatedAt = thread.updated_at ?? thread.sessions[0]?.created_at ?? null;
-
   return (
     <section className="flex h-full min-h-0 flex-col">
-      <header className="mx-auto w-full max-w-6xl">
-        <div className="hal-paper hal-sheet rounded-lg border border-border px-5 py-6 md:px-7 md:py-7">
-          <p className="hal-rule-label">Thread</p>
-          <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <h2 className="truncate font-serif text-title tracking-[-0.03em] text-hal-primary">
+      <header className="shrink-0 border-b border-subtle">
+        <div className="mx-auto flex w-full max-w-6xl items-start justify-between gap-4 px-5 py-4 md:px-6">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h2 className="truncate text-subheading font-semibold text-hal-primary">
                 {thread.name}
               </h2>
-              <p className="mt-4 max-w-3xl text-reading text-hal-muted">
-                {thread.description || "No description."}
-              </p>
+              {thread.status ? (
+                <span
+                  className={
+                    thread.status === "active"
+                      ? "text-meta text-accent"
+                      : "text-meta text-hal-muted"
+                  }
+                >
+                  {thread.status}
+                </span>
+              ) : null}
             </div>
-            <div className="pt-1">
-              <StatusBadge state={thread.status === "active" ? "live" : "muted"}>
-                {thread.status || "thread"}
-              </StatusBadge>
-            </div>
+            <p className="mt-1 truncate text-meta text-hal-muted">
+              {thread.description || "No description."}
+            </p>
           </div>
-
-          <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-subtle pt-4 text-meta text-hal-muted">
-            <span>{updatedAt ? `Updated ${formatTimestamp(updatedAt)}` : "No update stamp yet"}</span>
-            <span>{formatCount(totalSessions)} sessions</span>
-            <span className="font-mono">{thread.slug}</span>
-          </div>
+          <Button variant="ghost" size="sm" onClick={onToggleBriefPanel}>
+            Thread brief
+          </Button>
         </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-6">
-          <section className="hal-paper hal-sheet rounded-lg border border-border px-5 py-6 md:px-7 md:py-7">
-            <p className="hal-rule-label">BRIEF.md</p>
-            <div className="prose prose-mineral mt-5 max-w-none text-reading text-hal-primary">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {thread.brief_markdown || "_This thread does not have a brief yet._"}
-              </ReactMarkdown>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-subtle bg-hal-paper px-4 py-5 md:px-5 md:py-6">
-            <SessionList
-              sessions={thread.sessions}
-              selectedSessionId={selectedSessionId}
-              onSelect={onSelectSession}
-              onCreate={onCreateSession}
-              creating={creatingSession}
-            />
-          </section>
+        <div className="mx-auto w-full max-w-6xl px-5 py-6 md:px-6">
+          <SessionList
+            sessions={thread.sessions}
+            selectedSessionId={selectedSessionId}
+            onSelect={onSelectSession}
+            onCreate={onCreateSession}
+            creating={creatingSession}
+          />
         </div>
       </div>
     </section>

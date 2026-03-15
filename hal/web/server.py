@@ -32,6 +32,8 @@ _FRONTEND_ASSETS_ROUTE = f"/{_FRONTEND_ASSETS_DIR}/{{asset_path:.*}}"
 _FRONTEND_MISSING_MESSAGE = (
     "HaL web frontend bundle not found. Run `npm run build` in ./web before starting `hal web`."
 )
+_FRONTEND_INDEX_CACHE_CONTROL = "no-store, max-age=0"
+_FRONTEND_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 class WebServer:
@@ -93,7 +95,10 @@ class WebServer:
 
     async def _serve_frontend_index(self, request: web.Request) -> web.FileResponse:
         frontend_dist = self._require_frontend_dist()
-        return web.FileResponse(frontend_dist / _FRONTEND_INDEX)
+        return self._frontend_file_response(
+            frontend_dist / _FRONTEND_INDEX,
+            cache_control=_FRONTEND_INDEX_CACHE_CONTROL,
+        )
 
     async def _serve_frontend_asset(self, request: web.Request) -> web.FileResponse:
         frontend_dist = self._require_frontend_dist()
@@ -104,7 +109,10 @@ class WebServer:
         )
         if not asset_path.is_file():
             raise web.HTTPNotFound(text=f"Unknown frontend asset: {request.path}")
-        return web.FileResponse(asset_path)
+        return self._frontend_file_response(
+            asset_path,
+            cache_control=_FRONTEND_ASSET_CACHE_CONTROL,
+        )
 
     async def _serve_favicon(self, request: web.Request) -> web.StreamResponse:
         if self._frontend_dist is None:
@@ -334,3 +342,9 @@ class WebServer:
         except ValueError as exc:
             raise web.HTTPNotFound(text="Invalid frontend asset path") from exc
         return candidate
+
+    @staticmethod
+    def _frontend_file_response(path: Path, *, cache_control: str) -> web.FileResponse:
+        response = web.FileResponse(path)
+        response.headers["Cache-Control"] = cache_control
+        return response

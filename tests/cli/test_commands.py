@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -131,7 +132,9 @@ def test_browser_url_maps_wildcard_bind_host_to_loopback() -> None:
 def test_try_open_browser_uses_system_browser(monkeypatch: pytest.MonkeyPatch) -> None:
     opened: list[str] = []
 
-    monkeypatch.setattr(web_command.webbrowser, "open_new_tab", lambda url: opened.append(url) or True)
+    monkeypatch.setattr(
+        web_command.webbrowser, "open_new_tab", lambda url: opened.append(url) or True
+    )
 
     web_command._try_open_browser("localhost", 8765)
 
@@ -178,6 +181,7 @@ def test_web_command_opens_browser_after_server_start(
         "hal.runtime.bootstrap.gateway.build_gateway_runtime",
         lambda cfg: SimpleNamespace(agent=FakeAgent(), memory_search=None),
     )
+    monkeypatch.setattr(web_command, "_ensure_frontend_bundle_current", lambda: False)
     monkeypatch.setattr("hal.web.SessionBridge", lambda agent: ("bridge", agent))
     monkeypatch.setattr("hal.web.WebServer", FakeServer)
     monkeypatch.setattr(web_command.asyncio, "to_thread", fake_to_thread)
@@ -194,9 +198,7 @@ def test_web_command_opens_browser_after_server_start(
     assert opened == [("0.0.0.0", 4173)]
 
 
-def test_web_command_respects_no_open_flag(
-    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_web_command_respects_no_open_flag(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = Config()
     opened = False
 
@@ -231,6 +233,7 @@ def test_web_command_respects_no_open_flag(
         "hal.runtime.bootstrap.gateway.build_gateway_runtime",
         lambda cfg: SimpleNamespace(agent=FakeAgent(), memory_search=None),
     )
+    monkeypatch.setattr(web_command, "_ensure_frontend_bundle_current", lambda: False)
     monkeypatch.setattr("hal.web.SessionBridge", lambda agent: ("bridge", agent))
     monkeypatch.setattr("hal.web.WebServer", FakeServer)
     monkeypatch.setattr(web_command.asyncio, "to_thread", fake_to_thread)
@@ -239,3 +242,59 @@ def test_web_command_respects_no_open_flag(
 
     assert result.exit_code == 0
     assert opened is False
+
+
+def test_frontend_bundle_needs_build_when_sources_are_newer(tmp_path: Path) -> None:
+    web_dir = tmp_path / "web"
+    src_dir = web_dir / "src"
+    dist_dir = web_dir / "dist"
+    src_dir.mkdir(parents=True)
+    dist_dir.mkdir(parents=True)
+
+    source_path = src_dir / "App.tsx"
+    dist_path = dist_dir / "index.html"
+    source_path.write_text("export default function App() { return null; }\n", encoding="utf-8")
+    dist_path.write_text("<!doctype html>\n", encoding="utf-8")
+
+    os.utime(dist_path, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(source_path, ns=(2_000_000_000, 2_000_000_000))
+
+    assert web_command._frontend_bundle_needs_build(web_dir) is True
+
+
+def test_ensure_frontend_bundle_current_runs_npm_build_for_stale_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    web_dir = tmp_path / "web"
+    src_dir = web_dir / "src"
+    dist_dir = web_dir / "dist"
+    src_dir.mkdir(parents=True)
+    dist_dir.mkdir(parents=True)
+
+    source_path = src_dir / "App.tsx"
+    dist_path = dist_dir / "index.html"
+    source_path.write_text("export default function App() { return null; }\n", encoding="utf-8")
+    dist_path.write_text("<!doctype html>\n", encoding="utf-8")
+
+    os.utime(dist_path, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(source_path, ns=(2_000_000_000, 2_000_000_000))
+
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(web_command.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def fake_run(cmd, cwd=None, check=None):
+        called["cmd"] = cmd
+        called["cwd"] = cwd
+        called["check"] = check
+        return _FakeRunResult()
+
+    monkeypatch.setattr(web_command.subprocess, "run", fake_run)
+
+    rebuilt = web_command._ensure_frontend_bundle_current(web_dir)
+
+    assert rebuilt is True
+    assert called["cmd"] == ["/usr/bin/npm", "run", "build"]
+    assert called["cwd"] == web_dir
+    assert called["check"] is True

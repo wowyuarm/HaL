@@ -257,7 +257,7 @@ def _record_user_turn(*, engine: Any, msg: Any, session_id: str, session_state: 
         spawn_tool.set_session_id(session_id)
 
 
-async def _start_turn(*, msg: Any, session_state: Any) -> str:
+async def _start_turn(*, msg: Any, session_state: Any, trigger: str = "message") -> str:
     """Increment turn counter and emit turn/user events."""
     session_state.manifest.turn_count += 1
     turn_id = build_turn_id(session_state.manifest.turn_count)
@@ -270,7 +270,7 @@ async def _start_turn(*, msg: Any, session_state: Any) -> str:
             "primary_thread": session_state.primary_thread,
             "mounted_threads": mounted_threads,
         },
-        payload={"status": session_state.manifest.status},
+        payload={"status": session_state.manifest.status, "trigger": trigger},
     )
     await session_state.event_publisher.emit(
         USER_MESSAGE,
@@ -463,7 +463,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             _record_user_turn(
                 engine=engine, msg=msg, session_id=session_id, session_state=session_state
             )
-            turn_id = await _start_turn(msg=msg, session_state=session_state)
+            turn_id = await _start_turn(msg=msg, session_state=session_state, trigger="command")
             return await _handle_brief_command(
                 engine=engine,
                 session_state=session_state,
@@ -478,7 +478,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             _record_user_turn(
                 engine=engine, msg=msg, session_id=session_id, session_state=session_state
             )
-            turn_id = await _start_turn(msg=msg, session_state=session_state)
+            turn_id = await _start_turn(msg=msg, session_state=session_state, trigger="command")
             return await _handle_drop_command(
                 engine=engine,
                 session_state=session_state,

@@ -7,7 +7,6 @@
 
 import { MessagePrimitive, useMessage } from "@assistant-ui/react";
 
-import { StatusBadge } from "@/components/ui/status-badge";
 import { formatRelativeTime, formatTimestamp } from "@/lib/runtime";
 
 export function HalSystemMessage() {
@@ -18,7 +17,6 @@ export function HalSystemMessage() {
   });
   const ts = createdAt?.toISOString() ?? "";
 
-  // Derive badge state from content keywords.
   const badgeState = firstText.startsWith("Scope")
     ? "warning"
     : firstText.startsWith("Brief")
@@ -31,9 +29,16 @@ export function HalSystemMessage() {
       ? "Brief"
       : "System";
 
+  const titleClass =
+    badgeState === "warning"
+      ? "text-warning font-semibold"
+      : badgeState === "success"
+        ? "text-success font-semibold"
+        : "text-hal-muted font-semibold";
+
   return (
-    <MessagePrimitive.Root className="flex items-center gap-2 rounded-md border border-subtle bg-hal-paper px-3 py-2">
-      <StatusBadge state={badgeState}>{title}</StatusBadge>
+    <MessagePrimitive.Root className="flex items-center gap-2 rounded-md border border-subtle bg-hal-paper px-3 py-1.5">
+      <span className={`text-caption ${titleClass}`}>{title}</span>
       <span className="min-w-0 flex-1 truncate text-meta text-hal-muted">{firstText}</span>
       {ts && (
         <span

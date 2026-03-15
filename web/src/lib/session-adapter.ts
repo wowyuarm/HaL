@@ -68,6 +68,7 @@ export interface HalMessageMeta {
   turnId?: string;
   turnState?: "running" | "completed" | "failed";
   origin?: "interactive" | "background_resume";
+  isCommand?: boolean;
   evidenceCounts?: EvidenceCounts;
   toolSummaries?: Array<{ name: string; status: string }>;
 }
@@ -196,6 +197,8 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
       : "running";
 
   const origin = deriveTurnOrigin(startedEvent);
+  const trigger = getString(startedEvent?.payload ?? {}, "trigger");
+  const isCommand = trigger === "command";
 
   // Collect evidence counts for halMeta.
   const evidenceCounts = countEvidence(sorted);
@@ -210,7 +213,7 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
       turnId,
       createdAt: new Date(userEvent.ts),
       content: [{ type: "text", text: content }],
-      halMeta: { origin },
+      halMeta: { origin, isCommand },
     });
   }
 
@@ -277,6 +280,7 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
         turnId,
         turnState,
         origin,
+        isCommand,
         evidenceCounts: hasEvidence(evidenceCounts) ? evidenceCounts : undefined,
         toolSummaries: toolSummaries.length > 0 ? toolSummaries : undefined,
       },

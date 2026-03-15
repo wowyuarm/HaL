@@ -115,6 +115,8 @@ export default function App() {
     selectSession(sessionId);
   };
 
+  const handleBack = () => selectSession(null);
+
   const handleCreateSession = async () => {
     if (!activeThreadSlug) return;
     setError(null);
@@ -200,12 +202,9 @@ export default function App() {
         {/* Sidebar */}
         <Sidebar
           threads={threads}
-          threadDetails={threadDetails}
           activeThreadSlug={activeThreadSlug}
-          selectedSessionId={selectedSessionId}
           collapsed={sidebarCollapsed}
           onSelectThread={handleSelectThread}
-          onSelectSession={handleSelectSession}
           onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
           onNewSession={() => setScopeDialogOpen(true)}
         />
@@ -223,8 +222,8 @@ export default function App() {
               session={selectedSession}
               threadName={activeThread?.name ?? null}
               socketState={socketState}
-              eventsCount={events.length}
               briefPanelOpen={briefPanelOpen}
+              onBack={handleBack}
               onEditScope={handleOpenScopeEditor}
               onBrief={handleBrief}
               onDrop={handleDrop}
@@ -238,13 +237,14 @@ export default function App() {
                 onSelectSession={handleSelectSession}
                 onCreateSession={handleCreateSession}
                 creatingSession={creatingSession}
+                onToggleBriefPanel={toggleBriefPanel}
               />
             </div>
           )}
         </main>
 
         {/* External review panel */}
-        {hasSession && <ReviewPanel briefMarkdown={activeThread?.brief_markdown ?? null} />}
+        <ReviewPanel briefMarkdown={activeThread?.brief_markdown ?? null} />
 
         {/* Dialogs */}
         <SessionScopeDialog

@@ -98,11 +98,6 @@ Both paths trigger the same event pipeline.
 The send button uses an icon only (arrow), no label text. `Enter` sends,
 `Shift+Enter` for newline.
 
-### 3.5 State Is Always Legible
-
-Important state is always visible, but in restrained form. Prefer dots, seams,
-badges, and inline labels over banners and toast-heavy patterns.
-
 ---
 
 ## 4. Layout System
@@ -112,14 +107,15 @@ content area. The navigation panel may collapse to an icon rail for focus.
 
 ### 4.1 Navigation Panel
 
-Provides thread and session discovery. Shows threads as expandable groups
-with their sessions nested underneath. Collapses to icon rail when the
-user is focused on a session.
+Provides orientation and primary navigation across the collaboration space.
+It should privilege the most stable object in view, remain scannable at a
+glance, and collapse cleanly to an icon rail when focus is needed.
 
 ### 4.2 Main Content Area
 
-Displays either thread detail (BRIEF + session list) or session
-conversation (message flow + actions), depending on selection state.
+Displays the currently selected level of work. It may show an overview,
+a focused activity surface, or a reading-oriented artifact, but should
+always preserve a clear single focal object.
 
 ### 4.3 Overlay Panels
 
@@ -510,15 +506,16 @@ clipped ledger headers, inset record wells — not generic SaaS widgets.
 ### Thread Navigation
 
 The thread list reads like an **index of filed folders**. Each item shows the
-thread name, a compact activity indicator, and session count. Threads expand
-to show their sessions. No heavy decoration. Selected items use subtle
+thread name, a compact activity indicator, and only the minimum supporting
+metadata needed for scanning. No heavy decoration. Selected items use subtle
 background or border differentiation.
 
 ### Session Header
 
 Reads like a **clipped ledger header** at the top of the conversation.
-Shows session status (dot + label), mounted thread tags, and contextual
-lifecycle actions. Keep it compact. Status dot uses state colors.
+Shows current context, restrained state signaling, and only the actions that
+matter for the object in focus. Keep it compact and avoid turning it into a
+toolbar.
 
 ### Message Cards
 
@@ -526,6 +523,7 @@ Messages are the core collaboration objects:
 - `--radius-md` (8px) for message containers
 - Human messages carry `--hal-human` left border accent
 - Assistant messages carry `--hal-live` / `--border-accent` left border
+- Operational command input/output may render as inline rows rather than full cards
 - Tool results render as compact inline rows (`meta`-sized text)
 - Failures use `--hal-danger` border accent
 
@@ -541,12 +539,14 @@ individual event rows. Timestamps in `caption` size.
 - Most actions read as contextual text buttons or icon buttons.
 - Primary accent buttons are rare — only for the most important action in view.
 - Avoid heavy button bars at page scope.
+- Default control radius should feel restrained (`--radius-md` or tighter), not pill-like.
 
 ### Status Badge
 
 - Compact, `meta`-sized text.
 - Border or subtle fill before saturated background.
 - Stronger fills reserved for warning/danger that need immediate attention.
+- Use sparingly; inline labels or dots are usually preferable.
 
 ### Composer
 

@@ -85,6 +85,8 @@ async def test_frontend_routes_serve_index_and_assets(tmp_path, bridge) -> None:
     assert isinstance(asset_response, web.FileResponse)
     assert index_response._path == index_path  # type: ignore[attr-defined]
     assert asset_response._path == asset_path  # type: ignore[attr-defined]
+    assert index_response.headers["Cache-Control"] == "no-store, max-age=0"
+    assert asset_response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
 
 
 @pytest.mark.asyncio

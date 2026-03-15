@@ -1,20 +1,10 @@
 /**
- * SessionList -- Thread-detail session list with design system primitives.
- *
- * Each session item uses StatusDot, StatusBadge, and design system tokens
- * for a consistent, restrained visual style.
+ * SessionList -- Spacious thread-detail session list.
  */
 
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { StatusDot } from "@/components/ui/status-dot";
-import type { SessionManifest, SessionStatus } from "@/lib/types";
-import {
-  formatRelativeTime,
-  formatTimestamp,
-  sessionDisplayState,
-  summarizeSession,
-} from "@/lib/runtime";
+import type { SessionManifest } from "@/lib/types";
+import { formatTimestamp, sessionDisplayState } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 
 interface SessionListProps {
@@ -51,84 +41,54 @@ export function SessionList({
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border bg-hal-float px-4 py-5 text-body text-hal-muted">
             No sessions yet for this thread.
           </div>
         ) : (
-          sessions.map((session) => {
-            const isSelected = session.session_id === selectedSessionId;
-            return (
-              <button
-                key={session.session_id}
-                type="button"
-                onClick={() => onSelect(session.session_id)}
-                className={cn(
-                  "w-full rounded-lg border px-4 py-4 text-left transition-all duration-fast ease-standard",
-                  isSelected
-                    ? "border-accent bg-hal-float shadow-sm"
-                    : "border-subtle bg-hal-paper hover:-translate-y-px hover:border-border hover:bg-hal-float",
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <StatusDot state={sessionDotState(session.status)} />
-                      <span className="truncate font-mono text-meta text-hal-primary">
-                        {session.session_id}
-                      </span>
+          <div className="divide-y divide-subtle">
+            {sessions.map((session) => {
+              const isSelected = session.session_id === selectedSessionId;
+              const status = sessionDisplayState(session.status);
+              const extraThreads = session.mounted_threads.filter(
+                (slug) => slug !== session.primary_thread,
+              );
+
+              return (
+                <button
+                  key={session.session_id}
+                  type="button"
+                  onClick={() => onSelect(session.session_id)}
+                  className={cn(
+                    "w-full px-1 py-4 text-left transition-colors duration-fast ease-standard",
+                    isSelected ? "bg-hal-panel" : "hover:bg-hal-float",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta">
+                        <span className="text-hal-primary">{formatTimestamp(session.created_at)}</span>
+                        <span className="text-hal-muted">
+                          {session.turn_count} turn{session.turn_count === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      {extraThreads.length > 0 ? (
+                        <p className="mt-1 truncate text-meta text-hal-muted">
+                          {extraThreads.join(", ")}
+                        </p>
+                      ) : null}
                     </div>
-                    <p className="mt-3 text-meta leading-6 text-hal-primary">
-                      {summarizeSession(session)}
-                    </p>
+                    <span className={cn("shrink-0 text-meta font-medium", status.textClass)}>
+                      {status.label}
+                    </span>
                   </div>
-                  <StatusBadge state={sessionBadgeState(session.status)}>
-                    {sessionDisplayState(session.status).label}
-                  </StatusBadge>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-4 text-caption text-hal-muted">
-                  <span>{formatRelativeTime(session.created_at)}</span>
-                  <span>{formatTimestamp(session.created_at)}</span>
-                </div>
-              </button>
-            );
-          })
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </section>
   );
-}
-
-// ---------------------------------------------------------------------------
-// State mapping helpers
-// ---------------------------------------------------------------------------
-
-type DotState = "live" | "success" | "warning" | "danger" | "idle" | "muted";
-type BadgeState = "live" | "success" | "warning" | "danger" | "muted";
-
-function sessionDotState(status: SessionStatus): DotState {
-  switch (status) {
-    case "active":
-      return "live";
-    case "briefing":
-      return "idle";
-    case "ended":
-      return "success";
-    case "dropped":
-      return "muted";
-  }
-}
-
-function sessionBadgeState(status: SessionStatus): BadgeState {
-  switch (status) {
-    case "active":
-      return "live";
-    case "briefing":
-      return "warning";
-    case "ended":
-      return "success";
-    case "dropped":
-      return "muted";
-  }
 }

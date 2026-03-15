@@ -3,16 +3,31 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 import webbrowser
-
-from loguru import logger
+from pathlib import Path
 
 import typer
+from loguru import logger
 
 from .gateway import _configure_logging
 from .root import app, console
 
 _BROWSER_LOCAL_HOSTS = {"0.0.0.0", "::"}
+_FRONTEND_WORKSPACE_DIR = Path(__file__).resolve().parents[3] / "web"
+_FRONTEND_DIST_DIRNAME = "dist"
+_FRONTEND_SOURCE_DIRNAME = "src"
+_FRONTEND_BUILD_COMMAND = ("npm", "run", "build")
+_FRONTEND_BUILD_INPUTS = (
+    "index.html",
+    "package.json",
+    "vite.config.ts",
+    "tailwind.config.ts",
+    "postcss.config.js",
+    "tsconfig.json",
+    "tsconfig.node.json",
+)
 
 
 def _browser_url(host: str, port: int) -> str:
@@ -33,6 +48,67 @@ def _try_open_browser(host: str, port: int) -> None:
 
     if not opened:
         console.print(f"[yellow]Browser did not open automatically.[/yellow] Visit {url}")
+
+
+def _iter_frontend_source_files(web_dir: Path) -> list[Path]:
+    source_files: list[Path] = []
+    src_dir = web_dir / _FRONTEND_SOURCE_DIRNAME
+    if src_dir.is_dir():
+        source_files.extend(path for path in src_dir.rglob("*") if path.is_file())
+    source_files.extend(
+        path for relative in _FRONTEND_BUILD_INPUTS if (path := web_dir / relative).is_file()
+    )
+    return source_files
+
+
+def _iter_frontend_dist_files(web_dir: Path) -> list[Path]:
+    dist_dir = web_dir / _FRONTEND_DIST_DIRNAME
+    if not dist_dir.is_dir():
+        return []
+    return [path for path in dist_dir.rglob("*") if path.is_file()]
+
+
+def _latest_mtime_ns(paths: list[Path]) -> int:
+    if not paths:
+        return 0
+    return max(path.stat().st_mtime_ns for path in paths)
+
+
+def _frontend_bundle_needs_build(web_dir: Path) -> bool:
+    dist_files = _iter_frontend_dist_files(web_dir)
+    if not dist_files:
+        return True
+    source_files = _iter_frontend_source_files(web_dir)
+    if not source_files:
+        return False
+    return _latest_mtime_ns(source_files) > _latest_mtime_ns(dist_files)
+
+
+def _build_frontend_bundle(web_dir: Path) -> None:
+    npm = shutil.which(_FRONTEND_BUILD_COMMAND[0])
+    if npm is None:
+        raise RuntimeError(
+            "Frontend bundle is missing or stale, but `npm` is not available. "
+            "Install Node.js and run `npm run build` in ./web."
+        )
+
+    console.print("[cyan]Frontend sources changed; rebuilding web bundle...[/cyan]")
+    try:
+        subprocess.run([npm, *_FRONTEND_BUILD_COMMAND[1:]], cwd=web_dir, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Frontend rebuild failed. Run `npm run build` in ./web to inspect the error."
+        ) from exc
+
+
+def _ensure_frontend_bundle_current(web_dir: Path | None = None) -> bool:
+    resolved_web_dir = web_dir or _FRONTEND_WORKSPACE_DIR
+    if not resolved_web_dir.is_dir():
+        return False
+    if not _frontend_bundle_needs_build(resolved_web_dir):
+        return False
+    _build_frontend_bundle(resolved_web_dir)
+    return True
 
 
 @app.command()
@@ -61,8 +137,16 @@ def web(
     if port is not None:
         config.web.port = port
 
+    try:
+        frontend_rebuilt = _ensure_frontend_bundle_current()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
     effective_host = config.web.host
     effective_port = config.web.port
+    if frontend_rebuilt:
+        console.print("[green]\u2713[/green] Frontend rebuilt")
     console.print(
         f"{__logo__} Starting HaL native web runtime on {effective_host}:{effective_port}..."
     )

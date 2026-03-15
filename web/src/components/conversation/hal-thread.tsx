@@ -26,8 +26,8 @@ interface HalThreadProps {
   session: SessionManifest;
   threadName: string | null;
   socketState: SocketState;
-  eventsCount: number;
   briefPanelOpen: boolean;
+  onBack: () => void;
   onEditScope: () => void;
   onBrief: () => void;
   onDrop: () => void;
@@ -42,8 +42,8 @@ export function HalThread({
   session,
   threadName,
   socketState,
-  eventsCount,
   briefPanelOpen,
+  onBack,
   onEditScope,
   onBrief,
   onDrop,
@@ -57,8 +57,8 @@ export function HalThread({
         session={session}
         threadName={threadName}
         socketState={socketState}
-        eventsCount={eventsCount}
         briefPanelOpen={briefPanelOpen}
+        onBack={onBack}
         onEditScope={onEditScope}
         onBrief={onBrief}
         onDrop={onDrop}

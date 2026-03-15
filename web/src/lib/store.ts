@@ -283,9 +283,9 @@ export const useHalStore = create<HalStore>((set, get) => ({
   lastError: null,
 
   selectThread: (slug) =>
-    set((state) => ({
+    set(() => ({
       activeThreadSlug: slug,
-      selectedSessionId: state.selectedSessionId,
+      selectedSessionId: null,
       reviewPanel: null,
     })),
   selectSession: (sessionId) => set({ selectedSessionId: sessionId, reviewPanel: null }),
@@ -357,9 +357,11 @@ export const useHalStore = create<HalStore>((set, get) => ({
             detail.sessions.some((session) => session.session_id === state.selectedSessionId);
           nextState.selectedSessionId = focusExists
             ? focusSessionId
-            : selectedStillExists
-              ? state.selectedSessionId
-              : (detail.sessions[0]?.session_id ?? null);
+            : state.selectedSessionId === null
+              ? null
+              : selectedStillExists
+                ? state.selectedSessionId
+                : null;
           if (nextState.selectedSessionId !== state.selectedSessionId) {
             nextState.reviewPanel = null;
           }
