@@ -49,6 +49,8 @@
   --hal-canvas: var(--surface-base);
   --hal-panel: var(--surface-raised);
   --hal-float: var(--surface-elevated);
+  --hal-paper: var(--surface-paper);
+  --hal-veil: var(--surface-veil);
   --hal-inset: var(--surface-inset);
 
   --hal-text: var(--text-primary);
@@ -72,6 +74,10 @@
   --hal-evidence-seam: rgba(74, 122, 116, 0.34);
 
   /* ── Typography scale ── */
+  --type-title-size: 24px;
+  --type-title-line: 28px;
+  --type-title-weight: 600;
+
   --type-heading-size: 18px;
   --type-heading-line: 24px;
   --type-heading-weight: 600;
@@ -83,6 +89,10 @@
   --type-body-size: 14px;
   --type-body-line: 20px;
   --type-body-weight: 400;
+
+  --type-reading-size: 15px;
+  --type-reading-line: 24px;
+  --type-reading-weight: 400;
 
   --type-meta-size: 12px;
   --type-meta-line: 16px;
@@ -234,5 +244,40 @@
     letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--hal-text-muted);
+  }
+
+  .hal-scroll-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .hal-scroll-hidden::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hal-side-sheet-body {
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .hal-side-sheet-body > * {
+    min-width: 0;
+  }
+
+  .hal-side-sheet-content {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .hal-side-sheet-content pre {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .hal-side-sheet-content pre::-webkit-scrollbar {
+    display: none;
   }
 }

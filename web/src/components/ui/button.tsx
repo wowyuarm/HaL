@@ -24,7 +24,7 @@ const buttonVariants = cva(
         primary:
           "border-accent bg-accent text-white shadow-sm hover:brightness-95",
         secondary:
-          "border-border bg-[rgba(255,255,255,0.45)] text-hal-primary hover:bg-hal-panel",
+          "border-border bg-hal-paper text-hal-primary hover:bg-hal-panel",
         danger: "border-danger bg-danger text-white hover:brightness-95",
         ghost: "border-transparent bg-transparent text-hal-primary hover:border-subtle hover:bg-hal-panel",
       },

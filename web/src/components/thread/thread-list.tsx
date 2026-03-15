@@ -2,8 +2,8 @@
  * ThreadList -- Sidebar thread navigation list.
  *
  * Renders thread entries plus compact session counters for the
- * session-first working-log runtime. Uses design system tokens
- * for active state, typography, and metadata.
+ * session-first runtime. Uses design system tokens for active
+ * state, typography, and metadata.
  */
 
 import { formatRelativeTime } from "@/lib/runtime";
@@ -38,9 +38,9 @@ export function ThreadList({ threads, activeThread, onSelect, className }: Threa
             onClick={() => onSelect(thread.slug)}
             aria-current={isActive ? "page" : undefined}
             className={cn(
-              "group relative flex w-full flex-col overflow-hidden rounded-[18px] border px-4 py-3.5 text-left",
+              "group relative flex w-full flex-col overflow-hidden rounded-md border px-4 py-3.5 text-left",
               "transition-all duration-fast ease-standard",
-              "bg-[rgba(255,255,255,0.28)] hover:-translate-y-px hover:border-border hover:bg-hal-float",
+              "bg-hal-paper hover:-translate-y-px hover:border-border hover:bg-hal-float",
               isActive && "border-accent bg-hal-float shadow-sm",
             )}
           >
@@ -55,7 +55,7 @@ export function ThreadList({ threads, activeThread, onSelect, className }: Threa
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   {hasActiveSessions ? <StatusDot state="live" /> : null}
-                  <span className="truncate font-serif text-[18px] font-semibold tracking-[-0.02em] text-hal-primary">
+                  <span className="truncate font-serif text-heading tracking-[-0.02em] text-hal-primary">
                     {thread.name}
                   </span>
                 </div>

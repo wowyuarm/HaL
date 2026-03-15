@@ -1,6 +1,3 @@
-/** Derived workspace layout mode for the main application shell. */
-export type LayoutMode = "navigation" | "working" | "review";
-
 /** Session lifecycle states persisted by the backend. */
 export type SessionStatus = "active" | "briefing" | "ended" | "dropped";
 
@@ -103,34 +100,3 @@ export type SessionClientEnvelope =
   | SubmitTurnEnvelope
   | EndSessionEnvelope
   | UpdateScopeEnvelope;
-
-/** Legacy chat-adjacent types retained for existing generic render helpers. */
-export interface ContextSummaryData {
-  tokens: number;
-  tools: number;
-  history: number;
-}
-
-export type ToolCallStatus = "completed" | "failed" | "running";
-
-export interface ToolCall {
-  id: string;
-  name: string;
-  args_summary: string;
-  status: ToolCallStatus;
-  error?: string;
-}
-
-export interface MessageMetadata {
-  tool_calls?: ToolCall[];
-}
-
-export type MessageRole = "user" | "assistant";
-
-export interface Message {
-  id: string;
-  role: MessageRole;
-  content: string;
-  ts: string;
-  metadata?: MessageMetadata;
-}

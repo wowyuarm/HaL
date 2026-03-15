@@ -1,10 +1,10 @@
 /**
- * ThreadDetailPanel -- Navigation-mode thread detail view.
+ * ThreadDetailPanel -- Main-canvas thread detail view.
  *
  * Shows thread name, description, scope tag, BRIEF.md prose rendering,
  * metadata (updated timestamp, session count), and session list below.
- * Navigation mode stays on the shared canvas with the BRIEF centered for
- * reading comfort instead of wrapping the whole detail view in a card.
+ * The thread detail stays on the shared workspace canvas with the BRIEF
+ * centered for reading comfort instead of wrapping the whole view in a card.
  */
 
 import ReactMarkdown from "react-markdown";
@@ -48,14 +48,14 @@ export function ThreadDetailPanel({
   return (
     <section className="flex h-full min-h-0 flex-col">
       <header className="mx-auto w-full max-w-6xl">
-        <div className="hal-paper hal-sheet rounded-[24px] border border-border px-5 py-6 md:px-7 md:py-7">
+        <div className="hal-paper hal-sheet rounded-lg border border-border px-5 py-6 md:px-7 md:py-7">
           <p className="hal-rule-label">Thread</p>
           <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
-              <h2 className="truncate font-serif text-[32px] leading-none tracking-[-0.03em] text-hal-primary md:text-[38px]">
+              <h2 className="truncate font-serif text-title tracking-[-0.03em] text-hal-primary">
                 {thread.name}
               </h2>
-              <p className="mt-4 max-w-3xl text-[15px] leading-7 text-hal-muted">
+              <p className="mt-4 max-w-3xl text-reading text-hal-muted">
                 {thread.description || "No description."}
               </p>
             </div>
@@ -76,16 +76,16 @@ export function ThreadDetailPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 py-6">
-          <section className="hal-paper hal-sheet rounded-[24px] border border-border px-5 py-6 md:px-7 md:py-7">
+          <section className="hal-paper hal-sheet rounded-lg border border-border px-5 py-6 md:px-7 md:py-7">
             <p className="hal-rule-label">BRIEF.md</p>
-            <div className="prose prose-mineral mt-5 max-w-none text-[15px] leading-7 text-hal-primary">
+            <div className="prose prose-mineral mt-5 max-w-none text-reading text-hal-primary">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {thread.brief_markdown || "_This thread does not have a brief yet._"}
               </ReactMarkdown>
             </div>
           </section>
 
-          <section className="rounded-[24px] border border-subtle bg-[rgba(255,255,255,0.34)] px-4 py-5 md:px-5 md:py-6">
+          <section className="rounded-lg border border-subtle bg-hal-paper px-4 py-5 md:px-5 md:py-6">
             <SessionList
               sessions={thread.sessions}
               selectedSessionId={selectedSessionId}

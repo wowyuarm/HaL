@@ -1,6 +1,6 @@
 # HaL Design System
 
-**Date:** 2026-03-14
+**Date:** 2026-03-15
 **Status:** Active
 
 ---
@@ -107,41 +107,35 @@ badges, and inline labels over banners and toast-heavy patterns.
 
 ## 4. Layout System
 
-HaL uses a **mode-adaptive layout**, not a fixed three-column shell.
+HaL uses a **two-region layout**: a persistent navigation panel and a main
+content area. The navigation panel may collapse to an icon rail for focus.
 
-### 4.1 Navigation Mode
+### 4.1 Navigation Panel
 
-*Browsing and orienting across threads.*
+Provides thread and session discovery. Shows threads as expandable groups
+with their sessions nested underneath. Collapses to icon rail when the
+user is focused on a session.
 
-- Left: thread list (~240px)
-- Main: large thread detail view (BRIEF.md centered, sessions below)
-- No working log visible
+### 4.2 Main Content Area
 
-### 4.2 Working Mode
+Displays either thread detail (BRIEF + session list) or session
+conversation (message flow + actions), depending on selection state.
 
-*Active collaboration inside a session.*
+### 4.3 Overlay Panels
 
-- Left: collapsed thread rail (icon-only, ~48px)
-- Main: working log fills the canvas
-- BRIEF: pull-out side panel (toggle or shortcut), not a permanent column
-
-### 4.3 Review Mode
-
-*Reading a completed session or episode.*
-
-- Same structure as Working Mode
-- Composer removed entirely (not disabled — absent)
-- Reduced live-state emphasis; archival feel, not gray-out
+BRIEF and Evidence Inspector are overlay panels that slide in from the
+right edge, triggered on demand. They use elevated surfaces and
+`--shadow-popover`.
 
 ### 4.4 Surface Rules
 
 - The main workspace shares one base surface field
 - Layout regions separate by spacing, width, and a hairline border
   (`1px solid var(--border-subtle)`) — not contrasting background color
-- In Working/Review modes, the sidebar sits on the **same base surface** as the
-  main canvas
-- In Navigation mode, a very subtle tonal distinction for the thread list is
-  acceptable
+- Sidebar sits on the **same base surface** as the main canvas, with a
+  subtle veil (`--surface-veil`) for glass-like depth
+- Composer is only present for interactive sessions — absent (not
+  disabled) otherwise
 
 ---
 
@@ -164,6 +158,8 @@ added as components are built and patterns stabilize.
   --surface-raised: #EFECE6;
   --surface-elevated: #FFFFFF;
   --surface-inset: #E8E4DD;
+  --surface-paper: rgba(255, 255, 255, 0.72);
+  --surface-veil: rgba(255, 252, 247, 0.58);
 
   /* Text */
   --text-primary: #24211D;
@@ -203,6 +199,8 @@ added as components are built and patterns stabilize.
   /* Workspace surfaces */
   --hal-canvas: var(--surface-base);
   --hal-panel: var(--surface-raised);
+  --hal-paper: var(--surface-paper);
+  --hal-veil: var(--surface-veil);
   --hal-float: var(--surface-elevated);
   --hal-inset: var(--surface-inset);
 
@@ -257,6 +255,10 @@ added as components are built and patterns stabilize.
 
 ```css
 :root {
+  --type-title-size: 24px;
+  --type-title-line: 28px;
+  --type-title-weight: 600;
+
   --type-heading-size: 18px;
   --type-heading-line: 24px;
   --type-heading-weight: 600;
@@ -268,6 +270,10 @@ added as components are built and patterns stabilize.
   --type-body-size: 14px;
   --type-body-line: 20px;
   --type-body-weight: 400;
+
+  --type-reading-size: 15px;
+  --type-reading-line: 24px;
+  --type-reading-weight: 400;
 
   --type-meta-size: 12px;
   --type-meta-line: 16px;
@@ -281,9 +287,11 @@ added as components are built and patterns stabilize.
 
 | Role | Size | Weight | Line Height | Use |
 |------|------|--------|-------------|-----|
-| **heading** | 18px | 600 | 24px | Thread titles, major section headers |
-| **subheading** | 15px | 600 | 20px | Session headings, turn headers, BRIEF sections |
-| **body** | 14px | 400 | 20px | Prose, log entries, BRIEF body |
+| **title** | 24px | 600 | 28px | Session title, primary page heading |
+| **heading** | 18px | 600 | 24px | Thread names, section headers |
+| **subheading** | 15px | 600 | 20px | Turn headers, BRIEF section headings |
+| **body** | 14px | 400 | 20px | Prose, log entries, default UI text |
+| **reading** | 15px | 400 | 24px | BRIEF prose, long-form content — optimized for reading comfort |
 | **meta** | 12px | 500 | 16px | Timestamps, state labels, thread metadata |
 | **caption** | 11px | 500 | 14px | Evidence labels, technical annotations |
 
@@ -326,9 +334,11 @@ Depth is expressed through **surface contrast and borders**. Shadow is rare.
 | Surface | Color | Use |
 |---------|-------|-----|
 | `base` | `#F7F4EF` | Main canvas, page field |
-| `raised` | `#EFECE6` | Grouped containers, navigation-mode thread items |
+| `raised` | `#EFECE6` | Grouped containers, navigation items |
 | `elevated` | `#FFFFFF` | Popovers, floating BRIEF panel, menus |
 | `inset` | `#E8E4DD` | Composer textarea, code blocks, evidence wells |
+| `paper` | `rgba(255, 255, 255, 0.72)` | Translucent overlay on cards and containers |
+| `veil` | `rgba(255, 252, 247, 0.58)` | Subtle frosted glass for sidebar backdrop |
 
 ### 8.2 Border Rules
 
@@ -428,67 +438,67 @@ Prefer earlier forms; escalate only when needed:
 
 ## 12. Signature Elements
 
-### 12.1 Evidence Seam
+### 12.1 Evidence Indicator
 
-The signature visual element. Exists at **turn level only** (for now).
+HaL's signature design element is the **evidence indicator** — a compact
+visual marker on messages or turns that signals diagnostic data is
+available for inspection.
 
-Each turn may display a slim vertical seam along its leading edge:
-
-- At rest: a quiet line indicating evidence exists, without forcing disclosure.
-  May include small ticks hinting at event density.
-- On expand: the seam becomes the anchor for the Evidence layer.
+The indicator should be quiet at rest but clearly actionable. On
+interaction, it opens the Evidence Inspector — a dedicated panel for
+diagnostic events.
 
 ```css
 :root {
-  --turn-seam-width: 2px;
-  --turn-seam-color: var(--hal-evidence-seam);
-  --turn-seam-active: rgba(74, 122, 116, 0.52);
+  --hal-evidence-seam: rgba(74, 122, 116, 0.34);
 }
 ```
 
-The seam is a structural signifier of evidence, not a brand flourish. It should
-remain quiet until the user asks for detail.
+Evidence indicators are structural signifiers, not decorative. They answer:
+"Did something happen here that I might want to examine?"
 
 ### 12.2 BRIEF as Compiled Context
 
 BRIEF is not a generic detail drawer. It is a compiled working artifact:
 
 - Feels authored and durable, not generated.
-- Uses elevated or raised surface depending on mode.
-- Maintains strong typographic readability at lower density than the working log.
+- Uses elevated or raised surface.
+- Maintains strong typographic readability (`text-reading`) at lower
+  density than the message flow.
 
 ---
 
-## 13. Working Log: Dual Layer
+## 13. Information Architecture: Activity + Evidence
 
-### 13.1 Activity Layer (default)
+Session content separates into two tiers. This is a **principle**, not a
+specific UI pattern — implementations may vary.
 
-Optimized for scanning and momentum:
+### 13.1 Activity (Primary View)
+
+What the user needs for scanning and momentum:
 
 - Human prompts and direction
 - HaL responses and key outputs
 - Tool result summaries (not raw payloads)
-- Turn-level state markers
-- Failure summaries
+- State markers and failure summaries
 
-System events (`context.compiled`, `loop.iteration`) are **not shown** in this
-layer.
+System internals (`context.compiled`, `loop.iteration`) are **not shown**
+in the activity view.
 
-### 13.2 Evidence Layer (expanded)
+### 13.2 Evidence (On-Demand)
 
-Revealed per-turn via the evidence seam:
+Diagnostic detail available through explicit user action:
 
 - Full event list with timestamps
 - Tool inputs and outputs
-- File change details
 - Execution traces and diagnostics
 - Uses inset surfaces and monospace text
 
-### 13.3 Escalation Rules
+### 13.3 Rules
 
-- Evidence is entered through explicit expansion, never auto-expanded.
-- During an active turn, light hints show evidence accumulating.
-- When collapsed, a compact indicator conveys what kind of evidence exists.
+- Evidence is entered through explicit interaction, never auto-expanded.
+- When available, a compact indicator conveys what kind of evidence exists.
+- Evidence does not interrupt the primary reading flow.
 
 ---
 
@@ -497,36 +507,33 @@ Revealed per-turn via the evidence seam:
 Components should feel like objects on the archival worktable — paper cards,
 clipped ledger headers, inset record wells — not generic SaaS widgets.
 
-### Thread List Item
+### Thread Navigation
 
 The thread list reads like an **index of filed folders**. Each item shows the
-thread name, a compact activity indicator, and session count. No heavy
-decoration. In Navigation mode, the selected item uses `--border-default` left
-accent; in Working mode (collapsed rail), only an icon with a dot state.
+thread name, a compact activity indicator, and session count. Threads expand
+to show their sessions. No heavy decoration. Selected items use subtle
+background or border differentiation.
 
 ### Session Header
 
-Reads like a **clipped ledger header** pinned to the top of the working log.
-Shows session status (dot + label), mounted thread tags, and contextual lifecycle
-actions. Keep it single-line or two-line max. Status dot uses state colors.
+Reads like a **clipped ledger header** at the top of the conversation.
+Shows session status (dot + label), mounted thread tags, and contextual
+lifecycle actions. Keep it compact. Status dot uses state colors.
 
-### Turn Container
+### Message Cards
 
-The core collaboration object in the working log.
-`--radius-md` (8px) default. Evidence seam on the leading edge when evidence
-exists. Local actions appear on hover/focus, not as persistent chrome.
+Messages are the core collaboration objects:
+- `--radius-md` (8px) for message containers
+- Human messages carry `--hal-human` left border accent
+- Assistant messages carry `--hal-live` / `--border-accent` left border
+- Tool results render as compact inline rows (`meta`-sized text)
+- Failures use `--hal-danger` border accent
 
-### Activity Row
+### Evidence Inspector
 
-A single entry in the Activity layer. Human entries may carry a subtle
-`--hal-human` left border accent. HaL entries use default text on base surface.
-Tool summaries use `meta`-sized text. Failures use `--hal-danger` border accent.
-
-### Evidence Block
-
-Reads like an **inset record well** — a recessed area of precise, inspectable
-data. Uses `--surface-inset` background, monospace text, `--radius-sm` (4px).
-Timestamps in `caption` size. Event type labels as low-contrast badges.
+An **inset record well** presented as a slide-out panel. Uses
+`--surface-inset` background, monospace text, `--radius-sm` (4px) for
+individual event rows. Timestamps in `caption` size.
 
 ### Buttons and Controls
 
@@ -534,13 +541,6 @@ Timestamps in `caption` size. Event type labels as low-contrast badges.
 - Most actions read as contextual text buttons or icon buttons.
 - Primary accent buttons are rare — only for the most important action in view.
 - Avoid heavy button bars at page scope.
-
-### Turn Container
-
-- The core collaboration object in the working log.
-- `--radius-md` (8px) default.
-- Evidence seam on the leading edge when evidence exists.
-- Local actions appear on hover/focus, not as persistent chrome.
 
 ### Status Badge
 
@@ -550,10 +550,9 @@ Timestamps in `caption` size. Event type labels as low-contrast badges.
 
 ### Composer
 
-- Belongs to Working mode only. Absent in Review mode (not disabled — removed).
+- Present only for interactive sessions — absent (not disabled) otherwise.
 - Minimal: textarea + icon send button.
-- Slash command autocomplete is the only "smart" affordance.
-- Inset surface (`--surface-inset`) for the textarea.
+- `--radius-md` (8px) container, `--surface-inset` for the textarea.
 
 ### Dialogs and Popovers
 

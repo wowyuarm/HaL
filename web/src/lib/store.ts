@@ -8,7 +8,6 @@ import {
   updateSessionScope,
 } from "@/lib/api";
 import type {
-  LayoutMode,
   SessionEvent,
   SessionManifest,
   SessionStatus,
@@ -17,6 +16,11 @@ import type {
   ThreadSummary,
 } from "@/lib/types";
 
+export type ReviewPanelState =
+  | { kind: "brief" }
+  | { kind: "evidence"; turnId: string }
+  | null;
+
 interface HalStore {
   threads: ThreadSummary[];
   threadDetails: Record<string, ThreadDetail>;
@@ -24,7 +28,7 @@ interface HalStore {
   sessionEvents: Record<string, SessionEvent[]>;
   activeThreadSlug: string | null;
   selectedSessionId: string | null;
-  briefPanelOpen: boolean;
+  reviewPanel: ReviewPanelState;
   socketState: SocketState;
   loadingThreads: boolean;
   loadingThreadSlug: string | null;
@@ -37,6 +41,8 @@ interface HalStore {
   selectThread: (slug: string) => void;
   selectSession: (sessionId: string | null) => void;
   toggleBriefPanel: () => void;
+  closeReviewPanel: () => void;
+  openInspector: (turnId: string) => void;
   setSocketState: (state: SocketState) => void;
   setError: (message: string | null) => void;
 
@@ -257,17 +263,6 @@ function sessionScopeSlugs(manifest: SessionManifest): string[] {
   return [...slugs].sort();
 }
 
-/** Derive layout mode from current selection state. Pure, no store dependency. */
-export function deriveLayoutMode(
-  selectedSessionId: string | null,
-  sessionManifest: SessionManifest | null,
-): LayoutMode {
-  if (!selectedSessionId || !sessionManifest) return "navigation";
-  if (sessionManifest.status === "active" || sessionManifest.status === "briefing")
-    return "working";
-  return "review";
-}
-
 let nextThreadLoadRequestId = 0;
 
 export const useHalStore = create<HalStore>((set, get) => ({
@@ -277,7 +272,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
   sessionEvents: {},
   activeThreadSlug: null,
   selectedSessionId: null,
-  briefPanelOpen: false,
+  reviewPanel: null,
   socketState: "disconnected",
   loadingThreads: false,
   loadingThreadSlug: null,
@@ -291,9 +286,21 @@ export const useHalStore = create<HalStore>((set, get) => ({
     set((state) => ({
       activeThreadSlug: slug,
       selectedSessionId: state.selectedSessionId,
+      reviewPanel: null,
     })),
-  selectSession: (sessionId) => set({ selectedSessionId: sessionId }),
-  toggleBriefPanel: () => set((state) => ({ briefPanelOpen: !state.briefPanelOpen })),
+  selectSession: (sessionId) => set({ selectedSessionId: sessionId, reviewPanel: null }),
+  toggleBriefPanel: () =>
+    set((state) => ({
+      reviewPanel: state.reviewPanel?.kind === "brief" ? null : { kind: "brief" },
+    })),
+  closeReviewPanel: () => set({ reviewPanel: null }),
+  openInspector: (turnId) =>
+    set((state) => ({
+      reviewPanel:
+        state.reviewPanel?.kind === "evidence" && state.reviewPanel.turnId === turnId
+          ? null
+          : { kind: "evidence", turnId },
+    })),
   setSocketState: (state) => set({ socketState: state }),
   setError: (message) => set({ lastError: message }),
 
@@ -353,6 +360,9 @@ export const useHalStore = create<HalStore>((set, get) => ({
             : selectedStillExists
               ? state.selectedSessionId
               : (detail.sessions[0]?.session_id ?? null);
+          if (nextState.selectedSessionId !== state.selectedSessionId) {
+            nextState.reviewPanel = null;
+          }
           nextState.loadingThreadSlug = null;
         }
         return nextState as Partial<HalStore>;
@@ -475,10 +485,12 @@ export const useHalStore = create<HalStore>((set, get) => ({
         ...state.sessionEvents,
         [manifest.session_id]: [...events].sort((a, b) => a.seq - b.seq),
       };
+      const sessionChanged = state.selectedSessionId !== manifest.session_id;
       return {
         sessionEvents,
         ...mergeManifestIntoState(state, manifest),
         selectedSessionId: manifest.session_id,
+        reviewPanel: sessionChanged ? null : state.reviewPanel,
       };
     }),
 
@@ -502,16 +514,6 @@ export const useHalStore = create<HalStore>((set, get) => ({
 // ---------------------------------------------------------------------------
 // Derived selector hooks
 // ---------------------------------------------------------------------------
-
-/** Derived layout mode — recomputes only when selection or manifest status changes. */
-export function useLayoutMode(): LayoutMode {
-  return useHalStore((s) => {
-    const manifest = s.selectedSessionId
-      ? s.sessionManifests[s.selectedSessionId]
-      : null;
-    return deriveLayoutMode(s.selectedSessionId, manifest ?? null);
-  });
-}
 
 /** ThreadDetail for the currently active thread, or null. */
 export function useCurrentThread(): ThreadDetail | null {

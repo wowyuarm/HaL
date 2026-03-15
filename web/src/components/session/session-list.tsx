@@ -53,7 +53,7 @@ export function SessionList({
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {sessions.length === 0 ? (
-          <div className="rounded-[18px] border border-dashed border-border bg-hal-float px-4 py-5 text-body text-hal-muted">
+          <div className="rounded-lg border border-dashed border-border bg-hal-float px-4 py-5 text-body text-hal-muted">
             No sessions yet for this thread.
           </div>
         ) : (
@@ -65,10 +65,10 @@ export function SessionList({
                 type="button"
                 onClick={() => onSelect(session.session_id)}
                 className={cn(
-                  "w-full rounded-[18px] border px-4 py-4 text-left transition-all duration-fast ease-standard",
+                  "w-full rounded-lg border px-4 py-4 text-left transition-all duration-fast ease-standard",
                   isSelected
                     ? "border-accent bg-hal-float shadow-sm"
-                    : "border-subtle bg-[rgba(255,255,255,0.3)] hover:-translate-y-px hover:border-border hover:bg-hal-float",
+                    : "border-subtle bg-hal-paper hover:-translate-y-px hover:border-border hover:bg-hal-float",
                 )}
               >
                 <div className="flex items-start justify-between gap-3">

@@ -1,0 +1,114 @@
+/**
+ * HalThread — root conversation component using assistant-ui primitives.
+ *
+ * Assembles the session header, message list (with auto-scroll),
+ * and composer into a full conversation view. This replaces
+ * the 807-line WorkingLog component.
+ */
+
+import { ThreadPrimitive } from "@assistant-ui/react";
+
+import { HalAssistantMessage } from "@/components/conversation/hal-assistant-message";
+import { HalComposer } from "@/components/conversation/hal-composer";
+import { SessionHeader } from "@/components/conversation/session-header";
+import { HalSystemMessage } from "@/components/conversation/hal-system-message";
+import { HalUserMessage } from "@/components/conversation/hal-user-message";
+import { Panel } from "@/components/ui/panel";
+import { isInteractiveSession } from "@/lib/runtime";
+import { useHalStore } from "@/lib/store";
+import type { SessionManifest, SocketState } from "@/lib/types";
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+interface HalThreadProps {
+  session: SessionManifest;
+  threadName: string | null;
+  socketState: SocketState;
+  eventsCount: number;
+  briefPanelOpen: boolean;
+  onEditScope: () => void;
+  onBrief: () => void;
+  onDrop: () => void;
+  onToggleBriefPanel: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function HalThread({
+  session,
+  threadName,
+  socketState,
+  eventsCount,
+  briefPanelOpen,
+  onEditScope,
+  onBrief,
+  onDrop,
+  onToggleBriefPanel,
+}: HalThreadProps) {
+  const interactive = isInteractiveSession(session.status);
+
+  return (
+    <section className="flex h-full min-h-0 flex-col overflow-hidden">
+      <SessionHeader
+        session={session}
+        threadName={threadName}
+        socketState={socketState}
+        eventsCount={eventsCount}
+        briefPanelOpen={briefPanelOpen}
+        onEditScope={onEditScope}
+        onBrief={onBrief}
+        onDrop={onDrop}
+        onToggleBriefPanel={onToggleBriefPanel}
+      />
+
+      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
+        <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-1 py-4 md:px-2 md:py-5">
+          <ThreadPrimitive.Empty>
+            <EmptyState />
+          </ThreadPrimitive.Empty>
+
+          <div className="mx-auto max-w-5xl space-y-3">
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage: HalUserMessage,
+                AssistantMessage: HalAssistantMessage,
+                SystemMessage: HalSystemMessage,
+              }}
+            />
+          </div>
+
+          <ThreadPrimitive.ViewportFooter className="h-4" />
+        </ThreadPrimitive.Viewport>
+
+        {interactive && <HalComposer />}
+      </ThreadPrimitive.Root>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
+
+function EmptyState() {
+  return (
+    <div className="mx-auto max-w-5xl">
+      <Panel
+        surface="base"
+        border
+        className="hal-paper hal-sheet rounded-md border-dashed px-5 py-6 text-body text-hal-muted"
+      >
+        <p className="hal-rule-label">Working Log</p>
+        <p className="mt-4 max-w-xl text-reading text-hal-muted">
+          No observable events have been recorded for this session yet. If this is an
+          active run, the log will fill in as the event stream reconnects or new turns
+          begin.
+        </p>
+      </Panel>
+    </div>
+  );
+}

@@ -10,6 +10,8 @@ const config: Config = {
         hal: {
           canvas: "var(--hal-canvas)",
           panel: "var(--hal-panel)",
+          paper: "var(--hal-paper)",
+          veil: "var(--hal-veil)",
           float: "var(--hal-float)",
           inset: "var(--hal-inset)",
           primary: "var(--hal-text)",
@@ -59,6 +61,10 @@ const config: Config = {
         popover: "var(--shadow-popover)",
       },
       fontSize: {
+        title: [
+          "var(--type-title-size)",
+          { lineHeight: "var(--type-title-line)", fontWeight: "var(--type-title-weight)" },
+        ],
         heading: [
           "var(--type-heading-size)",
           { lineHeight: "var(--type-heading-line)", fontWeight: "var(--type-heading-weight)" },
@@ -73,6 +79,10 @@ const config: Config = {
         body: [
           "var(--type-body-size)",
           { lineHeight: "var(--type-body-line)", fontWeight: "var(--type-body-weight)" },
+        ],
+        reading: [
+          "var(--type-reading-size)",
+          { lineHeight: "var(--type-reading-line)", fontWeight: "var(--type-reading-weight)" },
         ],
         meta: [
           "var(--type-meta-size)",
