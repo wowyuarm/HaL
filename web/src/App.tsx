@@ -13,7 +13,6 @@ import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { HalThread } from "@/components/conversation/hal-thread";
 import { Sidebar } from "@/components/layout/sidebar";
 import { ReviewPanel } from "@/components/session/review-panel";
-import { SessionScopeDialog } from "@/components/session/session-scope-dialog";
 import { SessionMountedThreadsDialog } from "@/components/session/session-mounted-threads-dialog";
 import { ThreadDetailPanel } from "@/components/thread/thread-detail";
 import { endSession } from "@/lib/api";
@@ -27,7 +26,6 @@ import { useSessionSocket } from "@/lib/ws";
 // ---------------------------------------------------------------------------
 
 export default function App() {
-  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
   const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
   const [scopeEditorSessionId, setScopeEditorSessionId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -53,7 +51,6 @@ export default function App() {
   const selectThread = useHalStore((s) => s.selectThread);
   const selectSession = useHalStore((s) => s.selectSession);
   const createSessionForThread = useHalStore((s) => s.createSessionForThread);
-  const createScopedSession = useHalStore((s) => s.createScopedSession);
   const updateSessionScope = useHalStore((s) => s.updateSessionScope);
   const toggleBriefPanel = useHalStore((s) => s.toggleBriefPanel);
   const setError = useHalStore((s) => s.setError);
@@ -121,15 +118,6 @@ export default function App() {
     if (!activeThreadSlug) return;
     setError(null);
     await createSessionForThread(activeThreadSlug);
-  };
-
-  const handleCreateScopedSession = async (input: {
-    primaryThread: string;
-    mountedThreads: string[];
-  }) => {
-    setError(null);
-    const manifest = await createScopedSession(input);
-    if (manifest) setScopeDialogOpen(false);
   };
 
   const closeScopeEditor = () => {
@@ -206,7 +194,6 @@ export default function App() {
           collapsed={sidebarCollapsed}
           onSelectThread={handleSelectThread}
           onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-          onNewSession={() => setScopeDialogOpen(true)}
         />
 
         {/* Main area */}
@@ -247,14 +234,6 @@ export default function App() {
         <ReviewPanel briefMarkdown={activeThread?.brief_markdown ?? null} />
 
         {/* Dialogs */}
-        <SessionScopeDialog
-          open={scopeDialogOpen}
-          threads={threads}
-          initialPrimarySlug={activeThreadSlug}
-          creating={creatingSession}
-          onClose={() => setScopeDialogOpen(false)}
-          onSubmit={handleCreateScopedSession}
-        />
         <SessionMountedThreadsDialog
           open={scopeEditorOpen}
           session={scopeEditorSession}

@@ -95,3 +95,26 @@ async def test_update_scope_mutates_manifest_and_streams_event(bridge, thread_re
     assert updated.mounted_threads == ["auth", "memory"]
     assert live_event.type == SESSION_SCOPE_UPDATED
     assert live_event.payload["added_threads"] == ["memory"]
+
+
+@pytest.mark.asyncio
+async def test_removed_scope_thread_no_longer_lists_session_even_if_touched(
+    bridge,
+    engine,
+    thread_repo,
+) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    _create_thread(thread_repo, "memory", "Memory")
+    manifest = await bridge.create_session(primary_thread="auth", mounted_threads=["memory"])
+
+    engine._mark_threads_touched(manifest.session_id, {"memory"})
+    updated = await bridge.update_scope(manifest.session_id, remove_threads=["memory"])
+
+    memory_thread = bridge.get_thread("memory")
+    thread_summaries = bridge.list_threads()
+    memory_summary = next(thread for thread in thread_summaries if thread["slug"] == "memory")
+
+    assert updated.mounted_threads == ["auth"]
+    assert updated.touched_threads == ["memory"]
+    assert memory_thread["sessions"] == []
+    assert memory_summary["session_counts"] == {}

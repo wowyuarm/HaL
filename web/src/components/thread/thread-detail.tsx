@@ -65,6 +65,7 @@ export function ThreadDetailPanel({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-6xl px-5 py-6 md:px-6">
           <SessionList
+            currentThreadSlug={thread.slug}
             sessions={thread.sessions}
             selectedSessionId={selectedSessionId}
             onSelect={onSelectSession}

@@ -112,6 +112,22 @@ class TestSessionStore:
         assert len(results) == 1
         assert results[0].session_id == "s_auth"
 
+    def test_list_sessions_ignores_touched_threads_for_thread_membership(
+        self, store: SessionStore
+    ) -> None:
+        store.create("s_auth")
+        store.write_manifest(
+            "s_auth",
+            SessionManifest(
+                session_id="s_auth",
+                primary_thread="auth",
+                mounted_threads=["auth"],
+                touched_threads=["memory"],
+            ),
+        )
+
+        assert store.list_sessions(thread_slug="memory") == []
+
     def test_delete(self, store: SessionStore) -> None:
         sid = "s_delete_me"
         store.create(sid)

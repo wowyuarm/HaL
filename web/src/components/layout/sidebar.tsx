@@ -5,7 +5,7 @@
  * thread detail panel in the main area. Supports collapse to icon rail.
  */
 
-import { PanelLeftClose, PanelLeft, Plus } from "lucide-react";
+import { PanelLeftClose, PanelLeft } from "lucide-react";
 
 import { StatusDot } from "@/components/ui/status-dot";
 import type { ThreadSummary } from "@/lib/types";
@@ -21,7 +21,6 @@ interface SidebarProps {
   collapsed: boolean;
   onSelectThread: (slug: string) => void;
   onToggleCollapse: () => void;
-  onNewSession: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +33,6 @@ export function Sidebar({
   collapsed,
   onSelectThread,
   onToggleCollapse,
-  onNewSession,
 }: SidebarProps) {
   if (collapsed) {
     return (
@@ -46,15 +44,6 @@ export function Sidebar({
           aria-label="Expand sidebar"
         >
           <PanelLeft className="h-4 w-4" />
-        </button>
-
-        <button
-          type="button"
-          onClick={onNewSession}
-          className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl border border-subtle text-hal-muted transition-colors hover:border-border hover:text-hal-primary"
-          aria-label="New session"
-        >
-          <Plus className="h-4 w-4" />
         </button>
 
         <div className="flex flex-1 flex-col items-center gap-2 overflow-y-auto px-2 py-2">
@@ -87,25 +76,14 @@ export function Sidebar({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-subtle px-4 py-3">
         <span className="hal-meta-kicker">Threads</span>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onNewSession}
-            className="flex h-8 items-center gap-1 rounded-lg border border-subtle px-2.5 text-caption text-hal-muted transition-colors hover:border-border hover:text-hal-primary"
-            title="New session"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>New</span>
-          </button>
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-hal-muted transition-colors hover:text-hal-primary"
-            aria-label="Collapse sidebar"
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-hal-muted transition-colors hover:text-hal-primary"
+          aria-label="Collapse sidebar"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
       </div>
 
       {/* Thread list */}

@@ -8,6 +8,7 @@ import { formatTimestamp, sessionDisplayState } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 
 interface SessionListProps {
+  currentThreadSlug: string;
   sessions: SessionManifest[];
   selectedSessionId: string | null;
   onSelect: (sessionId: string) => void;
@@ -16,6 +17,7 @@ interface SessionListProps {
 }
 
 export function SessionList({
+  currentThreadSlug,
   sessions,
   selectedSessionId,
   onSelect,
@@ -51,9 +53,13 @@ export function SessionList({
             {sessions.map((session) => {
               const isSelected = session.session_id === selectedSessionId;
               const status = sessionDisplayState(session.status);
-              const extraThreads = session.mounted_threads.filter(
-                (slug) => slug !== session.primary_thread,
-              );
+              const scopeThreads = new Set(session.mounted_threads);
+              if (session.primary_thread) {
+                scopeThreads.add(session.primary_thread);
+              }
+              const otherThreads = [...scopeThreads]
+                .filter((slug) => slug !== currentThreadSlug)
+                .sort();
 
               return (
                 <button
@@ -72,12 +78,12 @@ export function SessionList({
                         <span className="text-hal-muted">
                           {session.turn_count} turn{session.turn_count === 1 ? "" : "s"}
                         </span>
+                        {otherThreads.map((slug) => (
+                          <span key={slug} className="font-mono text-caption text-hal-muted">
+                            +{slug}
+                          </span>
+                        ))}
                       </div>
-                      {extraThreads.length > 0 ? (
-                        <p className="mt-1 truncate text-meta text-hal-muted">
-                          {extraThreads.join(", ")}
-                        </p>
-                      ) : null}
                     </div>
                     <span className={cn("shrink-0 text-meta font-medium", status.textClass)}>
                       {status.label}

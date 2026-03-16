@@ -106,7 +106,7 @@ class SessionStore:
         thread_slug: str | None = None,
         status: str | None = None,
     ) -> list[SessionManifest]:
-        """List session manifests, optionally filtered by thread or status.
+        """List session manifests, optionally filtered by current thread scope or status.
 
         Directories are sorted lexicographically, which produces chronological
         order because session IDs embed a timestamp prefix.
@@ -130,7 +130,7 @@ class SessionStore:
 
 
 def _matches_thread(manifest: SessionManifest, slug: str) -> bool:
-    """Check whether a manifest references the given thread in any scope."""
+    """Check whether a manifest is currently mounted on the given thread."""
     if manifest.primary_thread == slug:
         return True
-    return slug in manifest.mounted_threads or slug in manifest.touched_threads
+    return slug in manifest.mounted_threads

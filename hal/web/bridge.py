@@ -212,7 +212,7 @@ class SessionBridge:
         ]
 
     def get_thread(self, slug: str) -> dict[str, Any]:
-        """Return thread detail, BRIEF.md, and associated sessions."""
+        """Return thread detail, BRIEF.md, and currently mounted sessions."""
         entry = self._require_thread_entry(slug)
         brief = self._threads.read_state(slug) or ""
         sessions = self.list_sessions(thread_slug=slug)
@@ -235,7 +235,6 @@ class SessionBridge:
             slugs = set(manifest.mounted_threads)
             if manifest.primary_thread:
                 slugs.add(manifest.primary_thread)
-            slugs.update(manifest.touched_threads)
             for slug in slugs:
                 counts[slug][manifest.status] += 1
         return counts

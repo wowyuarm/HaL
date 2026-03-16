@@ -52,10 +52,6 @@ interface HalStore {
     options?: { adoptSelection?: boolean; focusSessionId?: string | null },
   ) => Promise<void>;
   refreshActiveThread: () => Promise<void>;
-  createScopedSession: (input: {
-    primaryThread: string;
-    mountedThreads?: string[];
-  }) => Promise<SessionManifest | null>;
   createSessionForThread: (slug: string) => Promise<SessionManifest | null>;
   updateSessionScope: (
     sessionId: string,
@@ -122,11 +118,7 @@ function patchManifestFromEvent(
 }
 
 function sessionBelongsToThread(manifest: SessionManifest, slug: string): boolean {
-  return (
-    manifest.primary_thread === slug ||
-    manifest.mounted_threads.includes(slug) ||
-    manifest.touched_threads.includes(slug)
-  );
+  return manifest.primary_thread === slug || manifest.mounted_threads.includes(slug);
 }
 
 function reconcileManifestInThreadDetails(
@@ -253,14 +245,6 @@ function mergeManifestIntoState(
     threadDetails,
     threads: syncThreadSummaries(baseThreads, threadDetails),
   };
-}
-
-function sessionScopeSlugs(manifest: SessionManifest): string[] {
-  const slugs = new Set<string>(manifest.mounted_threads);
-  if (manifest.primary_thread) {
-    slugs.add(manifest.primary_thread);
-  }
-  return [...slugs].sort();
 }
 
 let nextThreadLoadRequestId = 0;
@@ -390,29 +374,19 @@ export const useHalStore = create<HalStore>((set, get) => ({
     await get().loadThread(slug);
   },
 
-  createScopedSession: async ({ primaryThread, mountedThreads }) => {
+  createSessionForThread: async (slug) => {
     set({ creatingSession: true, lastError: null });
     try {
       const manifest = await createSession({
-        primary_thread: primaryThread,
-        mounted_threads: mountedThreads,
+        primary_thread: slug,
       });
       set((state) => ({
         ...mergeManifestIntoState(state, manifest),
       }));
       await get().loadThreads();
-      const activeThreadSlug = get().activeThreadSlug;
-      await Promise.all(
-        sessionScopeSlugs(manifest).map(async (slug) => {
-          await get().loadThread(slug, {
-            adoptSelection: slug === activeThreadSlug,
-            focusSessionId:
-              slug === primaryThread && activeThreadSlug === primaryThread
-                ? manifest.session_id
-                : null,
-          });
-        }),
-      );
+      await get().loadThread(slug, {
+        focusSessionId: manifest.session_id,
+      });
       set({ creatingSession: false });
       return manifest;
     } catch (error) {
@@ -422,10 +396,6 @@ export const useHalStore = create<HalStore>((set, get) => ({
       });
       return null;
     }
-  },
-
-  createSessionForThread: async (slug) => {
-    return await get().createScopedSession({ primaryThread: slug });
   },
 
   updateSessionScope: async (sessionId, { addThreads, removeThreads }) => {
