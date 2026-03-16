@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import type { ThreadSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +48,7 @@ export function SessionScopeDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-hal-canvas/80 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-xl border border-border bg-hal-panel shadow-2xl">
+      <div className="w-full max-w-2xl rounded-xl border border-border bg-hal-panel shadow-popover">
         <header className="border-b border-border px-5 py-4">
           <h2 className="text-subheading text-hal-primary">New Scoped Session</h2>
           <p className="mt-1 text-body text-hal-muted">
@@ -84,7 +85,7 @@ export function SessionScopeDialog({
                   key={thread.slug}
                   className={cn(
                     "flex items-start gap-4 rounded-lg border px-4 py-3 transition-colors duration-fast ease-standard",
-                    isPrimary ? "border-accent bg-accent-subtle" : "border-border bg-hal-canvas hover:bg-hal-float",
+                    isPrimary ? "border-accent bg-accent-subtle" : "border-border bg-hal-canvas hover:bg-hal-hover",
                   )}
                 >
                   <input
@@ -146,14 +147,9 @@ export function SessionScopeDialog({
             Primary is always mounted. You can add extra threads now and adjust scope later.
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={creating}
-              className="rounded-md border border-border bg-hal-canvas px-3 py-1.5 text-body text-hal-primary transition-colors duration-fast ease-standard hover:bg-hal-float disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
+              <Button variant="secondary" size="sm" onClick={onClose} disabled={creating}>
+                Cancel
+              </Button>
             <button
               type="button"
               onClick={() => void handleSubmit()}

@@ -15,7 +15,7 @@ const panelVariants = cva("rounded-md", {
     surface: {
       base: "bg-hal-canvas",
       raised: "bg-hal-panel",
-      elevated: "bg-hal-float shadow-sm",
+      elevated: "bg-hal-float",
       inset: "bg-hal-inset",
     },
     border: {

@@ -22,11 +22,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "border-accent bg-accent text-white shadow-sm hover:brightness-95",
+          "border-accent bg-accent text-hal-on-accent hover:brightness-95",
         secondary:
           "border-border bg-hal-paper text-hal-primary hover:bg-hal-panel",
-        danger: "border-danger bg-danger text-white hover:brightness-95",
-        ghost: "border-transparent bg-transparent text-hal-primary hover:border-subtle hover:bg-hal-panel",
+        danger: "border-danger bg-danger text-hal-on-accent hover:brightness-95",
+        ghost: "border-transparent bg-transparent text-hal-muted hover:text-hal-primary",
       },
       size: {
         sm: "px-3 py-1.5 text-meta",

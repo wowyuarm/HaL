@@ -47,7 +47,7 @@ export function SessionList({
             No sessions yet for this thread.
           </div>
         ) : (
-          <div className="divide-y divide-subtle">
+          <div className="space-y-0.5">
             {sessions.map((session) => {
               const isSelected = session.session_id === selectedSessionId;
               const status = sessionDisplayState(session.status);
@@ -61,8 +61,8 @@ export function SessionList({
                   type="button"
                   onClick={() => onSelect(session.session_id)}
                   className={cn(
-                    "w-full px-1 py-4 text-left transition-colors duration-fast ease-standard",
-                    isSelected ? "bg-hal-panel" : "hover:bg-hal-float",
+                    "w-full rounded-md px-3 py-3.5 text-left transition-colors duration-fast ease-standard",
+                    isSelected ? "bg-hal-selection" : "hover:bg-hal-hover",
                   )}
                 >
                   <div className="flex items-start justify-between gap-4">

@@ -100,38 +100,18 @@ The send button uses an icon only (arrow), no label text. `Enter` sends,
 
 ---
 
-## 4. Layout System
+## 4. Layout
 
-HaL uses a **two-region layout**: a persistent navigation panel and a main
-content area. The navigation panel may collapse to an icon rail for focus.
+Two-region layout: a collapsible navigation panel and a main content area.
+Overlay panels (BRIEF, Evidence Inspector) slide in from the right edge on
+demand, using elevated surface and `--shadow-popover`.
 
-### 4.1 Navigation Panel
-
-Provides orientation and primary navigation across the collaboration space.
-It should privilege the most stable object in view, remain scannable at a
-glance, and collapse cleanly to an icon rail when focus is needed.
-
-### 4.2 Main Content Area
-
-Displays the currently selected level of work. It may show an overview,
-a focused activity surface, or a reading-oriented artifact, but should
-always preserve a clear single focal object.
-
-### 4.3 Overlay Panels
-
-BRIEF and Evidence Inspector are overlay panels that slide in from the
-right edge, triggered on demand. They use elevated surfaces and
-`--shadow-popover`.
-
-### 4.4 Surface Rules
-
-- The main workspace shares one base surface field
-- Layout regions separate by spacing, width, and a hairline border
-  (`1px solid var(--border-subtle)`) — not contrasting background color
-- Sidebar sits on the **same base surface** as the main canvas, with a
-  subtle veil (`--surface-veil`) for glass-like depth
-- Composer is only present for interactive sessions — absent (not
-  disabled) otherwise
+Surface rules:
+- Layout regions separate by spacing, width, and a hairline border — not
+  contrasting background color
+- The navigation panel uses `--surface-veil` for glass-like depth on the
+  shared base surface
+- Composer is present only for interactive sessions — absent otherwise
 
 ---
 
@@ -156,6 +136,7 @@ added as components are built and patterns stabilize.
   --surface-inset: #E8E4DD;
   --surface-paper: rgba(255, 255, 255, 0.72);
   --surface-veil: rgba(255, 252, 247, 0.58);
+  --surface-hover: rgba(36, 33, 29, 0.06);
 
   /* Text */
   --text-primary: #24211D;
@@ -220,6 +201,7 @@ added as components are built and patterns stabilize.
   --hal-divider: var(--border-default);
   --hal-divider-subtle: var(--border-subtle);
   --hal-focus-ring: rgba(74, 122, 116, 0.22);
+  --hal-hover: var(--surface-hover);
   --hal-selection: rgba(74, 122, 116, 0.18);
   --hal-evidence-seam: rgba(74, 122, 116, 0.34);
 }
@@ -335,6 +317,7 @@ Depth is expressed through **surface contrast and borders**. Shadow is rare.
 | `inset` | `#E8E4DD` | Composer textarea, code blocks, evidence wells |
 | `paper` | `rgba(255, 255, 255, 0.72)` | Translucent overlay on cards and containers |
 | `veil` | `rgba(255, 252, 247, 0.58)` | Subtle frosted glass for sidebar backdrop |
+| `hover` | `rgba(36, 33, 29, 0.06)` | Inline hover micro-step for rows and controls |
 
 ### 8.2 Border Rules
 
@@ -355,7 +338,7 @@ Borders are the **primary depth and grouping device**.
 ```
 
 - Default components: **no shadow**
-- Elevated cards: `--shadow-sm` only when border alone is insufficient
+- Scroll-anchored elements (e.g. composer): `--shadow-sm` when sitting above scrolling content
 - Floating elements (popovers, menus, pull-out BRIEF): `--shadow-popover`
 
 ---
@@ -498,68 +481,92 @@ Diagnostic detail available through explicit user action:
 
 ---
 
-## 14. Component Guidance
+## 14. Control Grammar
 
-Components should feel like objects on the archival worktable — paper cards,
-clipped ledger headers, inset record wells — not generic SaaS widgets.
+Components feel like objects on an archival worktable — paper cards, clipped
+ledger headers, inset record wells — not generic SaaS widgets.
 
-### Thread Navigation
+### 14.1 Control Families
 
-The thread list reads like an **index of filed folders**. Each item shows the
-thread name, a compact activity indicator, and only the minimum supporting
-metadata needed for scanning. No heavy decoration. Selected items use subtle
-background or border differentiation.
+#### Contextual Controls
+Controls subordinate to content: navigation toggles, inline actions, sheet
+close buttons, icon buttons.
 
-### Session Header
+- Rest: transparent background, `--hal-text-muted`, optional hairline border
+  (`--border-subtle`)
+- Hover: text promotes to `--hal-text`, border promotes to `--border-default`.
+  **No background change.**
+- These controls are furniture — present and reachable, never attention-seeking.
 
-Reads like a **clipped ledger header** at the top of the conversation.
-Shows current context, restrained state signaling, and only the actions that
-matter for the object in focus. Keep it compact and avoid turning it into a
-toolbar.
+#### Primary Action
+`--color-accent` fill, `--text-on-accent` text. **No shadow.** Maximum one per
+visible context. Reserved for the single most important action in scope.
 
-### Message Cards
+#### Secondary Action
+Bordered, `--surface-paper` fill. Clearly bounded as a button without being
+loud. Appropriate for Cancel, Scope, and similar supporting actions. When a
+view toggle sits beside a primary action in a button group, secondary is
+acceptable for visual cohesion.
 
-Messages are the core collaboration objects:
-- `--radius-md` (8px) for message containers
-- Human messages carry `--hal-human` left border accent
-- Assistant messages carry `--hal-live` / `--border-accent` left border
-- Operational command input/output may render as inline rows rather than full cards
-- Tool results render as compact inline rows (`meta`-sized text)
-- Failures use `--hal-danger` border accent
+#### Destructive Ghost
+Transparent at rest (same as contextual). Hover reveals `--color-danger` accent
+— color escalation is the warning signal.
 
-### Evidence Inspector
+### 14.2 Selectable Rows
 
-An **inset record well** presented as a slide-out panel. Uses
-`--surface-inset` background, monospace text, `--radius-sm` (4px) for
-individual event rows. Timestamps in `caption` size.
+Thread rows, session rows, and dialog choice rows share a common interaction
+grammar:
 
-### Buttons and Controls
+| State    | Background                      | Text         | Marker                |
+|----------|---------------------------------|--------------|-----------------------|
+| Rest     | transparent                     | muted        | —                     |
+| Hover    | `--surface-hover` (micro-step)  | primary      | —                     |
+| Selected | `--hal-selection` (accent tint) | primary      | left accent seam 2 px |
 
-- Controls are quiet and local.
-- Most actions read as contextual text buttons or icon buttons.
-- Primary accent buttons are rare — only for the most important action in view.
-- Avoid heavy button bars at page scope.
-- Default control radius should feel restrained (`--radius-md` or tighter), not pill-like.
+Rules:
+- Hover and selected **must** be visually distinguishable.
+- Hover is lighter than selected — transient suggestion, not commitment.
+- `--surface-elevated` / `--hal-float` is **not** appropriate for hover or
+  selected backgrounds — reserved for floating UI.
 
-### Status Badge
+### 14.3 Interactive Surface Hierarchy
 
-- Compact, `meta`-sized text.
-- Border or subtle fill before saturated background.
-- Stronger fills reserved for warning/danger that need immediate attention.
-- Use sparingly; inline labels or dots are usually preferable.
+For inline interactive elements (rows, list items, toggles):
 
-### Composer
+1. Rest — inherits parent surface (transparent)
+2. Hover — one micro-step above parent via `--surface-hover`
+3. Selected — one clear step with accent tint via `--hal-selection`
 
-- Present only for interactive sessions — absent (not disabled) otherwise.
-- Minimal: textarea + icon send button.
-- `--radius-md` (8px) container, `--surface-inset` for the textarea.
+`--surface-elevated` is reserved for floating UI (popovers, menus, sheets).
+It must not appear as a hover or selected surface for inline elements.
 
-### Dialogs and Popovers
+### 14.4 Shadow Rules
 
-- `--radius-lg` (12px) for floating elements.
-- `--shadow-popover` for depth.
-- Elevated surface.
-- Header / body / footer structure.
+| Object               | Shadow             | Rationale                            |
+|----------------------|--------------------|--------------------------------------|
+| Buttons (any variant)| none               | Fill and border are sufficient       |
+| Inline rows and cards| none               | Border is the primary depth device   |
+| Scroll-anchored elements (composer) | `--shadow-sm` | Sits above scrolling content |
+| Floating UI (popovers, dialogs, sheets) | `--shadow-popover` | True floating layer |
+
+Shadow on `--surface-base` or `--surface-raised` without a floating context
+is a design error.
+
+### 14.5 Do / Don't
+
+**Do:**
+- Use transparent backgrounds for controls subordinate to content
+- Express hover through text/border promotion before reaching for background
+- Keep exactly one primary (accent fill) button per visible scope
+- Use left-border accent seam as the signature for selected state
+- Reserve shadow for truly floating elements
+
+**Don't:**
+- Use `--surface-elevated` / `--hal-float` as a hover or selected surface
+- Add shadow to buttons — fill color is the signal
+- Make hover visually heavier than selected
+- Use identical visual treatment for hover and selected on the same element
+- Apply `--shadow-popover` to non-floating elements
 
 ---
 

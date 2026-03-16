@@ -69,7 +69,7 @@ export function Sidebar({
                 className={cn(
                   "flex h-10 w-10 items-center justify-center rounded-lg border text-caption font-semibold uppercase tracking-[0.12em] transition-colors",
                   isActive
-                    ? "border-accent bg-hal-float text-hal-primary shadow-sm"
+                    ? "border-accent bg-hal-float text-hal-primary"
                     : "border-subtle text-hal-muted hover:border-border hover:text-hal-primary",
                 )}
               >
@@ -125,10 +125,10 @@ export function Sidebar({
                   onClick={() => onSelectThread(thread.slug)}
                   title={thread.name}
                   className={cn(
-                    "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+                    "flex w-full min-w-0 items-center gap-2 rounded-lg border-l-2 border-l-transparent px-2 py-1.5 text-left transition-colors",
                     isActive
-                      ? "bg-hal-float text-hal-primary"
-                      : "text-hal-muted hover:bg-hal-float hover:text-hal-primary",
+                      ? "border-l-accent bg-hal-selection text-hal-primary"
+                      : "text-hal-muted hover:bg-hal-hover hover:text-hal-primary",
                   )}
                 >
                   <StatusDot state={hasActiveSessions ? "live" : "muted"} />

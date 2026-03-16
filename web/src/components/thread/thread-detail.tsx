@@ -56,7 +56,7 @@ export function ThreadDetailPanel({
               {thread.description || "No description."}
             </p>
           </div>
-          <Button variant="ghost" size="sm" onClick={onToggleBriefPanel}>
+          <Button variant="secondary" size="sm" onClick={onToggleBriefPanel}>
             Thread brief
           </Button>
         </div>

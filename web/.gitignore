@@ -11,6 +11,7 @@ npm-debug.log*
 
 # TypeScript build artifacts
 *.tsbuildinfo
+.tsbuild/
 tailwind.config.d.ts
 tailwind.config.js
 vite.config.d.ts

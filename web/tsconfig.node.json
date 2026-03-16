@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "composite": true,
+    "outDir": ".tsbuild/node",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

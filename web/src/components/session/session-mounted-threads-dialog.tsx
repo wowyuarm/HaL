@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import type { SessionManifest, ThreadSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +44,7 @@ export function SessionMountedThreadsDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-hal-canvas/80 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-xl border border-border bg-hal-panel shadow-2xl">
+      <div className="w-full max-w-2xl rounded-xl border border-border bg-hal-panel shadow-popover">
         <header className="border-b border-border px-5 py-4">
           <h2 className="text-subheading text-hal-primary">Edit Session Scope</h2>
           <p className="mt-1 text-body text-hal-muted">
@@ -72,7 +73,7 @@ export function SessionMountedThreadsDialog({
                   key={thread.slug}
                   className={cn(
                     "flex cursor-pointer items-start gap-4 rounded-lg border px-4 py-3 transition-colors duration-fast ease-standard",
-                    checked ? "border-accent bg-accent-subtle" : "border-border bg-hal-canvas hover:bg-hal-float",
+                    checked ? "border-accent bg-accent-subtle" : "border-border bg-hal-canvas hover:bg-hal-hover",
                   )}
                 >
                   <input
@@ -127,14 +128,9 @@ export function SessionMountedThreadsDialog({
             Scope updates emit durable events and apply to the next turn's fresh context compilation.
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="rounded-md border border-border bg-hal-canvas px-3 py-1.5 text-body text-hal-primary transition-colors duration-fast ease-standard hover:bg-hal-float disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancel
-            </button>
+              <Button variant="secondary" size="sm" onClick={onClose} disabled={submitting}>
+                Cancel
+              </Button>
             <button
               type="button"
               onClick={() => void handleSubmit()}

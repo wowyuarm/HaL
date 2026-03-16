@@ -93,7 +93,7 @@ export function HalAssistantMessage() {
         <button
           type="button"
           onClick={() => openInspector(custom.turnId!)}
-          className="group mt-3 flex w-full items-stretch overflow-hidden rounded-md border border-subtle bg-hal-paper text-left transition-all duration-fast ease-standard hover:border-accent hover:bg-hal-float"
+          className="group mt-3 flex w-full items-stretch overflow-hidden rounded-md border border-subtle bg-hal-paper text-left transition-all duration-fast ease-standard hover:border-accent hover:bg-hal-hover"
         >
           <span className="w-[3px] shrink-0 bg-[color:var(--turn-seam-color)] transition-colors duration-fast ease-standard group-hover:bg-[color:var(--turn-seam-active)]" />
           <span className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2.5">
