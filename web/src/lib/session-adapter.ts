@@ -104,6 +104,7 @@ export const EVIDENCE_EVENTS = new Set([
   "tool.call_started",
   "assistant.message_started",
   "hook.injected",
+  "message.injected",
   "subagent.spawned",
   "brief.started",
 ]);
@@ -457,6 +458,7 @@ function countEvidence(events: SessionEvent[]): EvidenceCounts {
         counts.tool++;
         break;
       case "hook.injected":
+      case "message.injected":
         counts.injection++;
         break;
       case "subagent.spawned":

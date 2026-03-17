@@ -1,4 +1,4 @@
-"""Dynamic working-set context rendering for session baselines and turn prompts."""
+"""Dynamic context rendering helpers for prompt-time thread and memory blocks."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def build_dynamic_context_block(
     recall_max_per_item_tokens: int,
     token_model: str | None,
 ) -> str:
-    """Build the XML dynamic context block for a session baseline or live turn."""
+    """Build the XML dynamic context block for prompt-time thread and memory state."""
     parts = build_dynamic_context_meta(channel=channel, chat_id=chat_id)
     active_threads_block = render_active_threads_block(
         active_threads,

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from hal.context.baseline import compile_baseline_plan
+from hal.context.message_injects import MessageInject, build_turn_context_inject
+from hal.context.recall import collect_recalled_thread_slugs, prefetch_memory_results
 
 if TYPE_CHECKING:
     from hal.context.builder import ContextBuilder
@@ -18,11 +19,10 @@ class CompiledSessionContext:
     """Compiled working-set inputs for one turn."""
 
     messages: list[dict[str, object]]
-    session_baseline: str
     search_results: list[object]
     recalled_thread_slugs: set[str]
-    baseline_thread_slugs: set[str]
-    baseline_created: bool
+    scope_thread_slugs: set[str]
+    injected_messages: list[MessageInject] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,55 +67,42 @@ class ContextCompiler:
         self,
         request: SessionTurnRequest,
     ) -> CompiledSessionContext:
-        """Compile one session turn into prompt messages and baseline metadata."""
-        baseline = await compile_baseline_plan(
-            context_builder=self._context_builder,
+        """Compile one session turn into prompt messages and replayable injects."""
+        search_results = await prefetch_memory_results(
+            memory_search=self._memory_search,
             current_message=request.current_message,
+            top_k=self._auto_inject_top_k,
+            min_score=self._recall_min_score,
+        )
+        recalled_thread_slugs = collect_recalled_thread_slugs(search_results)
+        scope_thread_slugs = {slug for slug in (request.mounted_threads or set()) if slug}
+        turn_context = build_turn_context_inject(
             channel=request.channel,
             chat_id=request.chat_id,
-            token_model=request.token_model,
+            mounted_threads=sorted(scope_thread_slugs),
+            memory_search_results=search_results or None,
             recall_max_total_tokens=request.recall_max_total_tokens,
             recall_max_per_item_tokens=request.recall_max_per_item_tokens,
-            mounted_threads=request.mounted_threads,
-            memory_search=self._memory_search,
-            auto_inject_top_k=self._auto_inject_top_k,
-            recall_min_score=self._recall_min_score,
-            thread_snapshot=self._context_registry.thread_snapshot(),
-            active_thread_entries=self._context_registry.active_thread_entry_snapshot(),
-            related_lookup=self._context_registry.related_unit_keys,
-            related_hops=self._context_registry.related_thread_hops,
-            max_active_threads=_resolve_baseline_active_thread_limit(self._context_builder),
+            token_model=request.token_model,
         )
+        history = list(request.history)
+        history.append(turn_context.as_history_message())
         messages = self._context_builder.build_messages(
-            history=request.history,
+            history=history,
             current_message=request.current_message,
             media=request.media,
             channel=request.channel,
             chat_id=request.chat_id,
-            memory_search_results=baseline.search_results or None,
             memory_budget_tokens=request.memory_budget_tokens,
             recall_max_total_tokens=request.recall_max_total_tokens,
             recall_max_per_item_tokens=request.recall_max_per_item_tokens,
             token_model=request.token_model,
-            session_baseline=baseline.session_baseline,
             prepend_dynamic_context_to_current=False,
         )
         return CompiledSessionContext(
             messages=messages,
-            session_baseline=baseline.session_baseline,
-            search_results=baseline.search_results,
-            recalled_thread_slugs=baseline.recalled_thread_slugs,
-            baseline_thread_slugs=baseline.baseline_thread_slugs,
-            baseline_created=baseline.baseline_created,
+            search_results=search_results,
+            recalled_thread_slugs=recalled_thread_slugs,
+            scope_thread_slugs=scope_thread_slugs,
+            injected_messages=[turn_context],
         )
-
-
-def _resolve_baseline_active_thread_limit(context_builder: object) -> int:
-    """Resolve baseline active-thread cap from context builder with test-safe fallback."""
-    raw = getattr(context_builder, "baseline_max_active_threads", 0)
-    if isinstance(raw, int):
-        return max(raw, 0)
-    try:
-        return max(int(str(raw)), 0)
-    except Exception:
-        return 0

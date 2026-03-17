@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from hal.context.message_building import build_session_baseline_message
 from hal.runtime.session import build_persisted_session_history
 
 
-def test_build_persisted_session_history_strips_session_baseline() -> None:
+def test_build_persisted_session_history_keeps_replayable_injects() -> None:
     working_set_messages = [
         {"role": "system", "content": "sys"},
-        build_session_baseline_message("<context>baseline</context>"),
+        {"role": "user", "content": "[HaL Turn Context]\nkind: turn_context\nsource: engine"},
         {"role": "user", "content": "current"},
     ]
 
@@ -18,6 +17,7 @@ def test_build_persisted_session_history_strips_session_baseline() -> None:
     )
 
     assert history == [
+        {"role": "user", "content": "[HaL Turn Context]\nkind: turn_context\nsource: engine"},
         {"role": "user", "content": "current"},
         {"role": "assistant", "content": "done"},
     ]

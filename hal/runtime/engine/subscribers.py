@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from hal.bus.events import MessageInjectEvent, ReminderEvent, SubagentCompleteEvent, ToolCallEvent
+from hal.context.message_injects import KIND_USER_FOLLOW_UP
 from hal.context.token_budget import trim_text_to_token_budget
 from hal.domain.events import MESSAGE_INJECTED, SUBAGENT_COMPLETED, TOOL_CALL_COMPLETED
 from hal.runtime.brief import extract_touched_threads
@@ -187,8 +188,11 @@ class _MessageInjectSubscriber:
                     turn_id=event.turn_id,
                     actor="user",
                     payload={
+                        "kind": KIND_USER_FOLLOW_UP,
+                        "source": "user",
                         "sender_id": event.message.sender_id,
-                        "content": event.message.content,
+                        "content": event.prefixed_content,
+                        "raw_content": event.message.content,
                         "prefixed_content": event.prefixed_content,
                         "origin": event.message.origin,
                     },

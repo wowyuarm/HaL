@@ -119,3 +119,9 @@ ephemeral runtime artifacts. Threads and sessions are linked via
 
 See `docs/specs/design-system.md` for the interface design system:
 tokens, layout modes, component guidance, and the design checklist.
+
+### Prompt-side message injects
+
+See `docs/specs/message-injects.md` for the durable prompt-input contract used
+for thread snapshots, per-turn context, and runtime injections that must remain
+replayable across turns.

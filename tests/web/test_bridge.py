@@ -8,6 +8,7 @@ from hal.domain.events import (
     ASSISTANT_MESSAGE_COMPLETED,
     CONTEXT_COMPILED,
     LOOP_STARTED,
+    MESSAGE_INJECTED,
     SESSION_CREATED,
     SESSION_SCOPE_UPDATED,
     TURN_COMPLETED,
@@ -32,7 +33,7 @@ async def test_create_session_emits_session_created(bridge, engine, thread_repo)
 
     assert manifest.primary_thread == "auth"
     assert manifest.mounted_threads == ["auth"]
-    assert [event.type for event in events] == [SESSION_CREATED]
+    assert [event.type for event in events] == [SESSION_CREATED, MESSAGE_INJECTED]
 
 
 @pytest.mark.asyncio
@@ -53,9 +54,11 @@ async def test_submit_turn_uses_explicit_session_id_and_persists_turn_events(
     assert manifest.turn_count == 1
     assert event_types == [
         SESSION_CREATED,
+        MESSAGE_INJECTED,
         TURN_STARTED,
         USER_MESSAGE,
         CONTEXT_COMPILED,
+        MESSAGE_INJECTED,
         LOOP_STARTED,
         ASSISTANT_MESSAGE_COMPLETED,
         TURN_COMPLETED,
@@ -63,7 +66,9 @@ async def test_submit_turn_uses_explicit_session_id_and_persists_turn_events(
 
 
 @pytest.mark.asyncio
-async def test_submit_turn_queues_intervention_for_active_session(bridge, engine, thread_repo) -> None:
+async def test_submit_turn_queues_intervention_for_active_session(
+    bridge, engine, thread_repo
+) -> None:
     _create_thread(thread_repo, "auth", "Auth")
     manifest = await bridge.create_session(primary_thread="auth")
     engine._set_session_active(manifest.session_id, True)

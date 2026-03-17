@@ -14,6 +14,15 @@ from hal.context.token_counter import (
 from hal.domain.message_payloads import estimate_content_chars
 
 
+def _compiled_scope_thread_slugs(compiled: Any) -> list[str]:
+    scope_threads = getattr(compiled, "scope_thread_slugs", None)
+    return sorted(str(slug) for slug in (scope_threads or set()) if str(slug))
+
+
+def _compiled_injected_messages(compiled: Any) -> list[Any]:
+    return list(getattr(compiled, "injected_messages", None) or [])
+
+
 def _estimate_messages_tokens(model: str, messages: list[dict[str, Any]]) -> int:
     """Estimate token count for a list of messages."""
     return count_messages_tokens(messages, model=model)
@@ -133,6 +142,9 @@ async def build_context_inspection(
 
     sys_chars = estimate_content_chars(messages[0].get("content", "")) if messages else 0
 
+    scope_thread_slugs = _compiled_scope_thread_slugs(compiled)
+    injected_messages = _compiled_injected_messages(compiled)
+
     return {
         "channel": channel,
         "chat_id": chat_id,
@@ -146,8 +158,8 @@ async def build_context_inspection(
         "history_tokens": history_tokens,
         "recall_count": len(recall_items),
         "recall_items": recall_items,
-        "baseline_created": compiled.baseline_created,
-        "baseline_thread_slugs": sorted(compiled.baseline_thread_slugs),
+        "scope_thread_slugs": scope_thread_slugs,
+        "message_inject_count": len(injected_messages),
         "recalled_thread_slugs": sorted(compiled.recalled_thread_slugs),
         "system_prompt_chars": sys_chars,
         "system_prompt_tokens": system_prompt_tokens,

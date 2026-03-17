@@ -13,11 +13,18 @@ from hal.bus.queue import MessageBus
 from hal.context.builder import ContextBuilder
 from hal.context.compiler import ContextCompiler
 from hal.context.message_building import add_assistant_message, add_tool_result
+from hal.context.message_injects import (
+    KIND_PRIMARY_THREAD_SNAPSHOT,
+    KIND_SCOPE_ADD_SNAPSHOT,
+    MessageInject,
+    build_scope_remove_inject,
+    build_thread_snapshot_inject,
+)
 from hal.context.metrics import MetricsCollector
-from hal.context.thread_mentions import detect_thread_mentions
 from hal.domain.event_sink import SessionEventPublisher, SessionEventSink
 from hal.domain.events import (
     BRIEF_STARTED,
+    MESSAGE_INJECTED,
     SESSION_CREATED,
     SESSION_ENDED,
     SESSION_SCOPE_UPDATED,
@@ -154,11 +161,6 @@ class AgentEngine:
             workspace,
             memory_manager=self.memory,
             max_thread_registry_size=self._history_config.max_thread_registry_size,
-            baseline_max_active_threads=self._history_config.baseline_max_active_threads,
-            baseline_active_threads_max_total_tokens=(
-                self._history_config.baseline_active_threads_max_total_tokens
-            ),
-            baseline_active_thread_max_tokens=self._history_config.baseline_active_thread_max_tokens,
             related_thread_hops=self._history_config.related_thread_hops,
         )
         self.context_registry = self.context.registry
@@ -428,6 +430,10 @@ class AgentEngine:
                 "chat_id": state.manifest.chat_id,
             },
         )
+        await self._append_session_message_injects(
+            session_id,
+            self._build_session_start_injects(state),
+        )
 
         # Write thread-to-session refs at creation time so sessions appear in
         # thread indexes even if the later brief step fails.
@@ -478,6 +484,24 @@ class AgentEngine:
                 "removed_threads": removed,
             },
         )
+        injects: list[MessageInject] = []
+        for slug in added:
+            inject = self._build_thread_snapshot_inject(
+                slug,
+                kind=KIND_SCOPE_ADD_SNAPSHOT,
+                source="user_scope_edit",
+            )
+            if inject is not None:
+                injects.append(inject)
+        if removed:
+            injects.append(
+                build_scope_remove_inject(
+                    removed_threads=removed,
+                    mounted_threads=sorted(state.mounted_threads),
+                    source="user_scope_edit",
+                )
+            )
+        await self._append_session_message_injects(session_id, injects)
         return state.manifest
 
     # -- session state accessors (session_id-based) --------------------------
@@ -497,10 +521,6 @@ class AgentEngine:
             return
         for slug in thread_slugs:
             state.touch_thread(slug)
-
-    def _detect_thread_mentions(self, text: str) -> set[str]:
-        """Best-effort thread mention detection from user-visible text."""
-        return detect_thread_mentions(text, self.context_registry.thread_snapshot())
 
     def _filter_new_context_hint_keys(self, session_id: str, keys: list[str]) -> set[str]:
         """Return keys not yet suggested in the session and mark them as seen."""
@@ -571,6 +591,90 @@ class AgentEngine:
         if state is None:
             return
         state.replay_history = list(history)
+
+    def _build_thread_snapshot_inject(
+        self,
+        thread_slug: str,
+        *,
+        kind: str,
+        source: str,
+    ) -> MessageInject | None:
+        brief_markdown = self.thread_repository.read_state(thread_slug)
+        if not brief_markdown:
+            return None
+        return build_thread_snapshot_inject(
+            kind=kind,
+            thread_slug=thread_slug,
+            brief_markdown=brief_markdown,
+            source=source,
+        )
+
+    def _build_session_start_injects(self, state: SessionRuntimeState) -> list[MessageInject]:
+        injects: list[MessageInject] = []
+        primary = state.primary_thread
+        if primary:
+            inject = self._build_thread_snapshot_inject(
+                primary,
+                kind=KIND_PRIMARY_THREAD_SNAPSHOT,
+                source="session_create",
+            )
+            if inject is not None:
+                injects.append(inject)
+        for slug in sorted(state.mounted_threads):
+            if slug == primary:
+                continue
+            inject = self._build_thread_snapshot_inject(
+                slug,
+                kind=KIND_SCOPE_ADD_SNAPSHOT,
+                source="session_create",
+            )
+            if inject is not None:
+                injects.append(inject)
+        return injects
+
+    async def _append_session_message_injects(
+        self,
+        session_id: str,
+        injects: list[MessageInject],
+    ) -> None:
+        """Persist standalone session-level injects into history, log, and snapshot."""
+        if not injects:
+            return
+        state = self._sessions.get(session_id)
+        if state is None:
+            return
+        for inject in injects:
+            state.replay_history.append(inject.as_history_message())
+            refs = {
+                "primary_thread": state.primary_thread,
+                "mounted_threads": sorted(state.mounted_threads),
+            }
+            refs.update(inject.refs)
+            await state.event_publisher.emit(
+                MESSAGE_INJECTED,
+                actor=inject.actor,  # type: ignore[arg-type]
+                refs=refs,
+                payload={
+                    "kind": inject.kind,
+                    "source": inject.source,
+                    "content": inject.content,
+                },
+            )
+        self._refresh_session_snapshot(session_id)
+
+    def _refresh_session_snapshot(self, session_id: str) -> None:
+        """Refresh detached session snapshot after out-of-turn history changes."""
+        transport = self._transport_context_for_session(session_id)
+        channel = transport.channel if transport else "unknown"
+        chat_id = transport.chat_id if transport else "unknown"
+        snapshot_messages = self._build_session_snapshot_messages(session_id=session_id)
+        self._store_session_snapshot(
+            session_id=session_id,
+            channel=channel,
+            chat_id=chat_id,
+            messages=snapshot_messages,
+            final_content=None,
+        )
 
     def _build_session_snapshot_messages(
         self,

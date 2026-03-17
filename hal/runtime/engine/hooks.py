@@ -15,8 +15,13 @@ from hal.bus.events import (
     ToolCallEvent,
 )
 from hal.context.message_building import add_assistant_message as append_assistant_message
+from hal.context.message_injects import (
+    KIND_CONTEXT_HINT,
+    KIND_SYSTEM_REMINDER,
+    KIND_USER_FOLLOW_UP,
+    build_runtime_inject,
+)
 from hal.domain.events import (
-    HOOK_INJECTED,
     LLM_REQUEST_STARTED,
     LLM_RESPONSE_COMPLETED,
     LOOP_ITERATION_STARTED,
@@ -121,7 +126,6 @@ class _EngineLoopHooks:
     """Thin adapter that translates loop callbacks into bus events."""
 
     _REMINDER = (
-        "[System Reminder]\n"
         "Step back. Is the current direction correct? Is there a better approach?\n"
         "If unsure, pause and reassess or ask the user before continuing.\n"
         "Do not respond to this reminder — it is automatic."
@@ -186,7 +190,13 @@ class _EngineLoopHooks:
         self, messages: list[dict[str, Any]], pending_msgs: list[InboundMessage]
     ) -> None:
         for pending in pending_msgs:
-            prefixed = f"[User follow-up while you are working] {pending.content}"
+            prefixed = build_runtime_inject(
+                kind=KIND_USER_FOLLOW_UP,
+                source="user",
+                body=pending.content,
+                metadata={"origin": getattr(pending, "origin", "user")},
+                actor="user",
+            ).content
             messages.append({"role": "user", "content": prefixed})
             await self._engine.bus.emit(
                 MessageInjectEvent(
@@ -351,13 +361,19 @@ class _EngineLoopHooks:
     async def _append_pending_reminders(self, messages: list[dict[str, Any]]) -> None:
         """Append reminder events as synthetic user messages."""
         for reminder in self._event_subscribers.pop_pending_reminders():
-            self._append_user_messages(messages, [reminder.content])
+            rendered = build_runtime_inject(
+                kind=KIND_SYSTEM_REMINDER,
+                source="engine",
+                body=reminder.content,
+            ).content
+            self._append_user_messages(messages, [rendered])
             await self._emit_session_event(
-                HOOK_INJECTED,
+                MESSAGE_INJECTED,
                 actor="engine",
                 payload={
-                    "kind": "system_reminder",
-                    "content": reminder.content,
+                    "kind": KIND_SYSTEM_REMINDER,
+                    "source": "engine",
+                    "content": rendered,
                 },
             )
 
@@ -372,6 +388,7 @@ class _EngineLoopHooks:
                 actor="worker",
                 payload={
                     "kind": "subagent_runtime",
+                    "source": "worker",
                     "content": injection,
                 },
             )
@@ -381,13 +398,19 @@ class _EngineLoopHooks:
         if not self._pending_context_hints:
             return
         for hint in self._pending_context_hints:
-            messages.append({"role": "user", "content": hint})
+            rendered = build_runtime_inject(
+                kind=KIND_CONTEXT_HINT,
+                source="engine",
+                body=hint,
+            ).content
+            messages.append({"role": "user", "content": rendered})
             await self._emit_session_event(
-                HOOK_INJECTED,
+                MESSAGE_INJECTED,
                 actor="engine",
                 payload={
-                    "kind": "context_hint",
-                    "content": hint,
+                    "kind": KIND_CONTEXT_HINT,
+                    "source": "engine",
+                    "content": rendered,
                 },
             )
         self._pending_context_hints.clear()

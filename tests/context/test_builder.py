@@ -13,7 +13,6 @@ from hal.context.builder import ContextBuilder
 from hal.context.message_building import (
     add_assistant_message,
     add_tool_result,
-    is_session_baseline_content,
 )
 
 # ---------------------------------------------------------------------------
@@ -212,7 +211,7 @@ class TestBuildSystemPrompt:
 
         prompt = cc.build_system_prompt()
         assert "# Threads" in prompt
-        assert "GitHub Actions [active]" in prompt
+        assert "- github-actions" in prompt
         assert "threads/github-actions/BRIEF.md" in prompt
 
 
@@ -299,16 +298,16 @@ class TestBuildMessages:
         msgs = builder.build_messages([], "Hello", media=[str(txt)])
         assert "Hello" in msgs[-1]["content"]
 
-    def test_session_baseline_inserted_once_before_history(self, builder: ContextBuilder) -> None:
+    def test_history_is_preserved_before_current_user_message(
+        self, builder: ContextBuilder
+    ) -> None:
         msgs = builder.build_messages(
             [{"role": "assistant", "content": "older"}],
             "current",
-            session_baseline="<context><channel>telegram</channel></context>",
             prepend_dynamic_context_to_current=False,
         )
-        assert msgs[1]["role"] == "user"
-        assert is_session_baseline_content(msgs[1]["content"])
-        assert msgs[2]["content"] == "older"
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["content"] == "older"
         assert msgs[-1]["content"] == "current"
 
 
@@ -499,5 +498,5 @@ class TestDynamicContext:
             cc = ContextBuilder(workspace, max_thread_registry_size=1)
 
         prompt = cc.build_system_prompt()
-        assert "Active [active]" in prompt
-        assert "Inactive [inactive]" not in prompt
+        assert "- active-thread" in prompt
+        assert "- inactive-thread" not in prompt

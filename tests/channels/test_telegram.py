@@ -137,8 +137,8 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
             "history_tokens": 8,
             "recall_count": 0,
             "recall_items": [],
-            "baseline_created": False,
-            "baseline_thread_slugs": ["hal-architecture", "context-system"],
+            "scope_thread_slugs": ["hal-architecture", "context-system"],
+            "message_inject_count": 1,
             "recalled_thread_slugs": [],
             "system_prompt_chars": 5000,
             "system_prompt_tokens": 950,
@@ -170,9 +170,9 @@ def test_format_context_report_compacts_system_prompt_by_default() -> None:
     assert "<b>Budget</b>" in report
     assert "input_tokens    1,000" in report
     assert "system          950" in report
-    assert "baseline        compiled fresh this turn" in report
+    assert "replay          append-only until compaction" in report
     assert "<b>Risk</b>" in report
-    assert "working set compiled fresh for this inspection" in report
+    assert "turn context shown as replayable injects for this inspection" in report
     assert "system prompt dominates current token budget" in report
     assert "roles           system 1, user 1" in report
     assert "largest         [0] system 800t" in report
@@ -191,8 +191,8 @@ def test_format_context_report_compact_tolerates_non_dict_summary_entries() -> N
             "history_tokens": 0,
             "recall_count": 0,
             "recall_items": [],
-            "baseline_created": True,
-            "baseline_thread_slugs": [],
+            "scope_thread_slugs": [],
+            "message_inject_count": 0,
             "recalled_thread_slugs": [],
             "system_prompt_chars": 10,
             "system_prompt_tokens": 3,

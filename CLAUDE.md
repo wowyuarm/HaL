@@ -24,7 +24,8 @@ ruff format hal/
 ## Architecture Overview
 
 HaL is a stateful collaboration system — see `DESIGN.md` for invariants and
-collaboration architecture, `docs/specs/design-system.md` for frontend design.
+collaboration architecture, `docs/specs/message-injects.md` for prompt/replay
+inject semantics, and `docs/specs/design-system.md` for frontend design.
 
 Session-first, async, event-driven: the engine uses `session_id` as its sole
 identity key. IM channels are adapters; the native web server bridges directly.
@@ -35,12 +36,22 @@ Telegram (adapter) ──→ MessageBus ──→ AgentEngine ──→ LLMProvi
 Native web (SessionBridge) ──────────────┘             SessionEventPublisher
 ```
 
+### Key Domain Concepts
+
+| Concept | Role |
+|---------|------|
+| **Thread** | Long-lived collaboration container for an ongoing concern |
+| **Session** | Focused work run, producing durable evidence via events |
+| **Episode** | Immutable compaction of a session's contribution to a thread |
+| **Brief** | Compiled synthesis of a thread's current state (`BRIEF.md`) |
+| **ContextUnit** | Shared loading protocol for skills and threads |
+
 ### System Layers
 
 | Layer | Package | Responsibility |
 |-------|---------|----------------|
 | Domain | `hal/domain/` | Semantic types: ContextUnit, SessionManifest, SessionEvent, EventPublisher |
-| Context | `hal/context/` | Context compilation: builder, compiler, registry, baseline |
+| Context | `hal/context/` | Context compilation: builder, compiler, registry, message injects |
 | Runtime | `hal/runtime/` | Orchestration: engine, loop, subagent, session lifecycle |
 | Memory | `hal/memory/` | MemoryManager, search, vector store |
 | Workspace | `hal/workspace/` | Persistence: layout, repos (threads, episodes, sessions, thread refs) |
@@ -51,69 +62,6 @@ Native web (SessionBridge) ──────────────┘        
 | CLI | `hal/cli/` | CLI commands, factory |
 | Infra | `hal/infra/` | Config, LLM providers |
 
-### Agent Engine (`hal/runtime/engine/`)
-
-`AgentEngine` lives in a package:
-- `__init__.py`: engine wiring and public methods.
-- `processing.py`: main `process_message()` path + `execute_loop()` entry point.
-- `hooks.py`: per-loop hook adapter (`_EngineLoopHooks`) + progress formatting.
-- `subscribers.py`: event subscribers for tool/memory/subagent injections.
-- `background_resume.py`: background subagent completion continuation.
-- `inspect.py`: context inspection payload builder.
-- `subagent_injection.py`: parse/build subagent metadata injections.
-- `session_compaction.py`: in-session history splitting.
-- `context_advisor.py`: worker model hint generation.
-
-### Runtime Loop (`hal/runtime/loop.py`)
-
-`run_tool_loop()` is the shared hook-based loop for both main engine and subagents.
-- Tracks `LoopMetadata` (iterations, usage, side effects, tool counts, skipped calls).
-- Supports caller hooks (`before_llm_call`, `on_tool_calls_start`, `on_tool_result`, etc.).
-- Executes tool calls in parallel and records side-effect metadata.
-
-### Subagent System (`hal/runtime/subagent/`)
-
-- `manager.py`: `SubagentManager` sync/background execution and event emission.
-- `hooks.py`: loop hooks with repeated-error recovery nudges.
-- `results.py`: status classification, artifact extraction, JSONL execution logs.
-- `prompt.py`: focused subagent system prompt and skills injection.
-
-### Context System (`hal/context/`)
-
-- `builder.py`: ContextBuilder — assembles system prompt and message sequence.
-- `compiler.py`: ContextCompiler — per-turn fresh compilation (no frozen baseline).
-- `registry.py`: ContextRegistry — unified skill/thread discovery + related expansion.
-- `baseline.py`: baseline planning (recall, thread selection, related expansion).
-- `message_building.py`: message construction helpers (assistant, tool, session baseline, sequences).
-- `dynamic_context.py`: XML context block rendering.
-- `prompt_layers.py`: system-prompt layer rendering (identity, bootstrap, skills, situation).
-- `units.py`: ContextUnit wrappers for skills and threads.
-- `history.py`: history loading from session.
-- `token_budget.py`: token estimation and text trimming.
-- `metrics.py`: context metrics collection.
-- `thread_mentions.py`: thread mention detection in messages.
-
-### Message Bus (`hal/bus/`)
-
-Typed events: `InboundMessage`, `OutboundMessage`, `ToolCallEvent`, `ReminderEvent`, `MessageInjectEvent`, `SubagentCompleteEvent`.
-
-### Configuration (`hal/infra/config/`)
-
-Pydantic-based strict config (`extra="forbid"`):
-- `~/.hal/system/config.yaml`: non-secret settings
-- `~/.hal/system/auth.yaml`: secrets (API keys/tokens)
-
-### Memory (`hal/memory/`)
-
-`MemoryManager` coordinates:
-- long-term memory (`MemoryRepository` for `MEMORY.md`)
-- optional semantic memory search stack (`search.py`, `store.py`, `chunker.py`)
-
-Per-session event recording is handled by `SessionEventPublisher` → `working-log.jsonl`,
-not by the memory system.
-
-Memory-search imports are optional so base memory usage works without extras installed.
-
 ## Code Conventions
 
 - Python >= 3.11, async-first.
@@ -121,55 +69,3 @@ Memory-search imports are optional so base memory usage works without extras ins
 - Tests use `pytest` + `pytest-asyncio` (`asyncio_mode = auto`).
 - Add module-level constants for non-trivial thresholds/limits; avoid magic numbers in flow logic.
 - Register new tools/providers through existing registries/factories (`hal/runtime/tool_factory.py`, provider registry).
-
-## Directory Structure
-
-```text
-hal/
-├── bus/              # MessageBus, typed events
-├── capabilities/
-│   ├── skills/       # Skill loader
-│   └── tools/        # Tool implementations (fs, exec, web, spawn, etc.)
-├── channels/
-│   ├── base.py
-│   ├── manager.py
-│   └── telegram/
-├── cli/
-│   ├── commands/
-│   └── factory.py
-├── context/          # Context compilation (read path, per-turn fresh)
-├── domain/           # Semantic types: ContextUnit, SessionManifest, SessionEvent, EventPublisher
-├── infra/
-│   ├── config/
-│   └── providers/
-├── memory/           # MemoryManager, search, store
-├── runtime/
-│   ├── bootstrap/    # Gateway wiring
-│   ├── engine/       # AgentEngine (session-first) and components
-│   ├── subagent/     # SubagentManager
-│   ├── loop.py       # Shared tool-calling loop
-│   ├── session.py    # Session compaction utilities
-│   └── brief.py      # Session brief worker and thread helpers
-├── utils/            # Generic helpers
-├── web/              # Native web server: bridge, server, protocol
-├── workspace/        # Persistence (layout, repos, session store, thread refs)
-└── bridge/
-    └── anyrouter_bridge.mjs
-```
-
-## Workspace Layout (`~/.hal/`)
-
-```text
-~/.hal/
-  system/             # SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml
-  work/threads/       # Thread dirs (BRIEF.md + THREAD.yaml + episodes/ + refs/)
-  work/sessions/      # Session dirs (manifest.json + working-log.jsonl)
-  runtime/resume/     # Engine session checkpoints
-  runtime/logs/       # Operational logs
-  runtime/metrics/    # context_metrics.jsonl
-  capabilities/skills/ # Skill packages
-  data/vectors/       # Vector index
-  data/artifacts/     # Outputs, subagent reports
-  data/media/         # Media files
-  projects/           # Project files
-```

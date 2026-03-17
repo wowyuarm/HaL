@@ -65,10 +65,6 @@ def engine(bus, mock_provider, workspace):
         ]
         builder_instance.build_system_prompt.return_value = "You are a test agent."
         builder_instance.build_dynamic_context_block.return_value = "<context>ctx</context>"
-        builder_instance.build_session_baseline_message.side_effect = lambda baseline: {
-            "role": "user",
-            "content": f"[Session Baseline Context]\n{baseline}",
-        }
         builder_instance.registry = MagicMock()
         builder_instance.registry.thread_snapshot.return_value = []
         builder_instance.registry.skill_snapshot.return_value = []
@@ -319,10 +315,6 @@ class TestDispatch:
             ]
             builder_instance.build_system_prompt.return_value = "You are a test agent."
             builder_instance.build_dynamic_context_block.return_value = "<context>ctx</context>"
-            builder_instance.build_session_baseline_message.side_effect = lambda baseline: {
-                "role": "user",
-                "content": f"[Session Baseline Context]\n{baseline}",
-            }
             builder_instance.registry = MagicMock()
             builder_instance.registry.thread_snapshot.return_value = []
             builder_instance.registry.skill_snapshot.return_value = []
@@ -368,15 +360,10 @@ class TestDispatch:
         )
         engine.memory.get_conversation_history.assert_not_called()
 
-    async def test_session_baseline_recompiled_each_turn(self, engine):
+    async def test_turn_context_injects_are_replayed_each_turn(self, engine):
         engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
-            lambda *, history, current_message, session_baseline=None, **kwargs: [
+            lambda *, history, current_message, **kwargs: [
                 {"role": "system", "content": "sys"},
-                *(
-                    [{"role": "user", "content": f"[Session Baseline Context]\n{session_baseline}"}]
-                    if session_baseline
-                    else []
-                ),
                 *history,
                 {"role": "user", "content": current_message},
             ]
@@ -392,14 +379,11 @@ class TestDispatch:
         await engine.process(msg)
         await engine.process(msg)
 
-        assert engine.context.build_dynamic_context_block.call_count == 2
         second_turn_messages = engine._execute_loop.await_args_list[1].args[0]
-        baseline_messages = [
-            m
-            for m in second_turn_messages
-            if str(m.get("content", "")).startswith("[Session Baseline Context]")
+        inject_messages = [
+            m for m in second_turn_messages if "[HaL Turn Context]" in str(m.get("content", ""))
         ]
-        assert len(baseline_messages) == 1
+        assert len(inject_messages) == 2
 
     async def test_brief_command_starts_background_worker(self, engine):
         """Sending /brief records events, creates a brief_task, and returns ack."""
@@ -607,20 +591,7 @@ class TestRequestReplaySlimming:
 
 
 class TestThreadTouching:
-    def test_detect_thread_mentions_matches_slug_and_title(self, engine):
-        engine.context_registry.thread_snapshot.return_value = [  # type: ignore[method-assign]
-            {
-                "slug": "github-actions",
-                "name": "GitHub Actions",
-                "status": "active",
-                "description": "workflow work",
-                "state_path": "threads/github-actions/BRIEF.md",
-            }
-        ]
-
-        assert engine._detect_thread_mentions("Actions that one, continue it") == {"github-actions"}
-
-    async def test_active_baseline_threads_marked_touched_after_substantive_work(self, engine):
+    async def test_scope_threads_marked_touched_after_substantive_work(self, engine):
         engine.context_registry.thread_snapshot.return_value = [  # type: ignore[method-assign]
             {
                 "slug": "github-actions",
@@ -632,6 +603,11 @@ class TestThreadTouching:
         ]
         engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
             return_value=("done", LoopMetadata(tools_used=["fs"]), [])
+        )
+        engine.create_session(
+            channel="telegram",
+            chat_id="c1",
+            primary_thread="github-actions",
         )
 
         msg = InboundMessage(
@@ -662,7 +638,7 @@ class TestBackgroundResume:
 
         messages = [
             {"role": "system", "content": "sys"},
-            {"role": "user", "content": "[Session Baseline Context]\n<context>ctx</context>"},
+            {"role": "user", "content": "[HaL Turn Context]\nkind: turn_context\nsource: engine"},
             {"role": "user", "content": "work on it"},
             {"role": "assistant", "content": "done"},
         ]
@@ -676,9 +652,7 @@ class TestBackgroundResume:
         )
 
         history = engine._get_session_history(session_id)
-        assert all(
-            "[Session Baseline Context]" not in str(item.get("content", "")) for item in history
-        )
+        assert any("[HaL Turn Context]" in str(item.get("content", "")) for item in history)
         assert history[-1]["content"] == "background reply"
         event_types = [event.type for event in engine._session_store.read_events(session_id)]
         assert event_types[-2:] == ["assistant.message_completed", "turn.completed"]
@@ -1130,7 +1104,7 @@ class TestMidLoopInjection:
         injected_user_msgs = [
             m
             for m in second_call_msgs
-            if m.get("role") == "user" and "[User follow-up" in m.get("content", "")
+            if m.get("role") == "user" and "kind: user_follow_up" in m.get("content", "")
         ]
         assert len(injected_user_msgs) == 1
 
@@ -1336,7 +1310,8 @@ class TestMidLoopInjection:
 
         second_call_msgs = mock_provider.chat.await_args_list[1].kwargs["messages"]
         assert any(
-            "[Background subagent 'bg-task' completed]" in m.get("content", "")
+            "kind: subagent_runtime" in m.get("content", "")
+            and "label: bg-task" in m.get("content", "")
             for m in second_call_msgs
             if m.get("role") == "user"
         )

@@ -22,7 +22,6 @@ from hal.capabilities.skills.loader import SkillsLoader
 from hal.context.dynamic_context import build_dynamic_context_block
 from hal.context.message_building import (
     assemble_message_sequence,
-    build_session_baseline_message,
     build_system_message,
     build_user_message_content,
 )
@@ -51,6 +50,8 @@ class ContextBuilder:
     # Bootstrap files loaded into Layer 1 (personality/instructions).
     # INSTRUCTIONS.md is the primary instructions source.
     BOOTSTRAP_FILES = ["SOUL.md", "INSTRUCTIONS.md"]
+    _ACTIVE_THREADS_MAX_TOTAL_TOKENS = 4000
+    _ACTIVE_THREAD_MAX_TOKENS = 1200
 
     def __init__(
         self,
@@ -58,9 +59,6 @@ class ContextBuilder:
         memory_manager: "MemoryManager | None" = None,
         max_thread_registry_size: int = 20,
         related_thread_hops: int = 1,
-        baseline_max_active_threads: int = 3,
-        baseline_active_threads_max_total_tokens: int = 4000,
-        baseline_active_thread_max_tokens: int = 1200,
     ):
         self.workspace = workspace
         self._memory_manager = memory_manager
@@ -68,22 +66,12 @@ class ContextBuilder:
         self.system = SystemRepository(workspace)
         self._max_thread_registry_size = max(1, max_thread_registry_size)
         self._related_thread_hops = max(1, related_thread_hops)
-        self._baseline_max_active_threads = max(1, baseline_max_active_threads)
-        self._baseline_active_threads_max_total_tokens = max(
-            0, baseline_active_threads_max_total_tokens
-        )
-        self._baseline_active_thread_max_tokens = max(0, baseline_active_thread_max_tokens)
         self.registry = ContextRegistry.from_workspace(
             workspace=workspace,
             skills_loader=self.skills,
             max_thread_registry_size=self._max_thread_registry_size,
             related_thread_hops=self._related_thread_hops,
         )
-
-    @property
-    def baseline_max_active_threads(self) -> int:
-        """Return max number of active threads auto-loaded into one session baseline."""
-        return self._baseline_max_active_threads
 
     # ------------------------------------------------------------------
     # Public API
@@ -123,7 +111,6 @@ class ContextBuilder:
         recall_max_total_tokens: int = 500,
         recall_max_per_item_tokens: int = 125,
         token_model: str | None = None,
-        session_baseline: str | None = None,
         prepend_dynamic_context_to_current: bool = True,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call.
@@ -142,9 +129,6 @@ class ContextBuilder:
                 token_model=token_model,
             ),
             history=history,
-            session_baseline=(
-                build_session_baseline_message(session_baseline) if session_baseline else None
-            ),
             user_message=self._build_user_message(
                 current_message=current_message,
                 media=media,
@@ -306,8 +290,8 @@ class ContextBuilder:
             channel=channel,
             chat_id=chat_id,
             active_threads=active_threads or self.registry.active_thread_entry_snapshot(),
-            active_threads_max_total_tokens=self._baseline_active_threads_max_total_tokens,
-            active_thread_max_tokens=self._baseline_active_thread_max_tokens,
+            active_threads_max_total_tokens=self._ACTIVE_THREADS_MAX_TOTAL_TOKENS,
+            active_thread_max_tokens=self._ACTIVE_THREAD_MAX_TOKENS,
             memory_search_results=memory_search_results,
             recall_max_total_tokens=recall_max_total_tokens,
             recall_max_per_item_tokens=recall_max_per_item_tokens,

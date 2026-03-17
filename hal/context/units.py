@@ -118,10 +118,7 @@ def render_thread_unit_registry_markdown(manifests: list[ContextUnitManifest]) -
         "",
     ]
     for manifest in manifests:
-        status = manifest.status or "unknown"
-        lines.append(
-            f"- {manifest.name} [{status}]: {manifest.description} (state: {manifest.location})"
-        )
+        lines.append(f"- {manifest.key} (state: {manifest.location})")
     return "\n".join(lines)
 
 

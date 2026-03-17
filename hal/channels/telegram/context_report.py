@@ -78,17 +78,19 @@ def _fmt_ctx_budget(data: dict[str, Any]) -> str:
 
 def _fmt_ctx_working_set(data: dict[str, Any]) -> str:
     """High-signal working-set summary for compact inspection."""
-    baseline_threads = data.get("baseline_thread_slugs") or []
+    scope_threads = data.get("scope_thread_slugs") or []
     recalled_threads = data.get("recalled_thread_slugs") or []
+    inject_count = int(data.get("message_inject_count", 0) or 0)
     lines = [
         "🧩 <b>Working Set</b>",
-        "  baseline        compiled fresh this turn",
-        (f"  threads         {len(baseline_threads)} baseline / {len(recalled_threads)} recalled"),
+        "  replay          append-only until compaction",
+        (f"  threads         {len(scope_threads)} scope / {len(recalled_threads)} recalled"),
+        f"  injects         {inject_count} this turn",
     ]
-    if baseline_threads:
-        lines.append(f"  baseline_slugs  {', '.join(str(slug) for slug in baseline_threads[:4])}")
-    if len(baseline_threads) > 4:
-        lines.append(f"  baseline_more   +{len(baseline_threads) - 4}")
+    if scope_threads:
+        lines.append(f"  scope_slugs     {', '.join(str(slug) for slug in scope_threads[:4])}")
+    if len(scope_threads) > 4:
+        lines.append(f"  scope_more      +{len(scope_threads) - 4}")
     if recalled_threads:
         lines.append(f"  recalled_slugs  {', '.join(str(slug) for slug in recalled_threads[:4])}")
     if len(recalled_threads) > 4:
@@ -109,7 +111,7 @@ def _fmt_ctx_risk(data: dict[str, Any]) -> str:
     if not isinstance(total_tokens, int):
         total_tokens = 0
 
-    risks.append("working set compiled fresh for this inspection")
+    risks.append("turn context shown as replayable injects for this inspection")
     if total_tokens and system_tokens / max(total_tokens, 1) >= 0.5:
         risks.append("system prompt dominates current token budget")
     if data.get("history_message_count", 0) == 0:

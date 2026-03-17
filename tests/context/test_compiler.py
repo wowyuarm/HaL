@@ -5,15 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hal.context.baseline import collect_active_thread_slugs, collect_recalled_thread_slugs
 from hal.context.compiler import ContextCompiler, SessionTurnRequest
+from hal.context.message_injects import KIND_TURN_CONTEXT
+from hal.context.recall import collect_active_thread_slugs, collect_recalled_thread_slugs
 
 
 @pytest.fixture()
 def builder() -> MagicMock:
     builder = MagicMock()
-    builder.baseline_max_active_threads = 3
-    builder.build_dynamic_context_block.return_value = "<context>ctx</context>"
     builder.build_messages.return_value = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "hello"},
@@ -25,38 +24,26 @@ def builder() -> MagicMock:
 def context_registry() -> MagicMock:
     registry = MagicMock()
     registry.related_thread_hops = 1
-    registry.thread_snapshot.return_value = [
-        {
-            "slug": "github-actions",
-            "name": "GitHub Actions",
-            "status": "active",
-            "description": "workflow work",
-            "state_path": "threads/github-actions/BRIEF.md",
-        }
-    ]
-    registry.active_thread_entry_snapshot.return_value = [
-        {
-            "slug": "github-actions",
-            "name": "GitHub Actions",
-            "status": "active",
-            "description": "workflow work",
-            "state_path": "threads/github-actions/BRIEF.md",
-            "state_content": "## Current State\n- Drafted workflow.",
-            "priority": 200,
-            "related_threads": (),
-        }
-    ]
+    registry.thread_snapshot.return_value = []
+    registry.active_thread_entry_snapshot.return_value = []
     registry.related_unit_keys.return_value = ()
     return registry
 
 
-async def test_compile_session_turn_builds_new_baseline(
+async def test_compile_session_turn_appends_turn_context_inject(
     builder: MagicMock,
     context_registry: MagicMock,
 ) -> None:
     memory_search = AsyncMock()
     memory_search.search.return_value = [
-        SimpleNamespace(thread="github-actions", content="episode", score=1.0)
+        SimpleNamespace(
+            thread="github-actions",
+            source="episodes/auth/e1.md",
+            heading="Recent progress",
+            content="episode",
+            score=1.0,
+            source_type="raw",
+        )
     ]
     compiler = ContextCompiler(
         context_builder=builder,
@@ -81,16 +68,21 @@ async def test_compile_session_turn_builds_new_baseline(
         )
     )
 
-    assert compiled.baseline_created is True
-    assert compiled.session_baseline == "<context>ctx</context>"
     assert compiled.recalled_thread_slugs == {"github-actions"}
-    assert compiled.baseline_thread_slugs == {"github-actions"}
-    memory_search.search.assert_awaited_once()
-    builder.build_dynamic_context_block.assert_called_once()
+    assert compiled.scope_thread_slugs == set()
+    assert len(compiled.injected_messages) == 1
+    assert compiled.injected_messages[0].kind == KIND_TURN_CONTEXT
+    assert "[HaL Turn Context]" in compiled.injected_messages[0].content
+    assert "<relevant_memories>" in compiled.injected_messages[0].content
+    memory_search.search.assert_awaited_once_with("continue", top_k=3, min_score=0.0)
     builder.build_messages.assert_called_once()
+    assert (
+        builder.build_messages.call_args.kwargs["history"][-1]["content"]
+        == compiled.injected_messages[0].content
+    )
 
 
-async def test_compile_session_turn_constrains_baseline_to_mounted_threads(
+async def test_compile_session_turn_preserves_existing_history_and_scope_threads(
     builder: MagicMock,
     context_registry: MagicMock,
 ) -> None:
@@ -104,9 +96,10 @@ async def test_compile_session_turn_constrains_baseline_to_mounted_threads(
         recall_min_score=0.0,
     )
 
+    prior_history = [{"role": "assistant", "content": "older"}]
     compiled = await compiler.compile_session_turn(
         SessionTurnRequest(
-            history=[{"role": "assistant", "content": "older"}],
+            history=prior_history,
             current_message="continue",
             media=None,
             channel="telegram",
@@ -119,207 +112,13 @@ async def test_compile_session_turn_constrains_baseline_to_mounted_threads(
         )
     )
 
-    # Baseline is always freshly compiled; mounted_threads constrains thread selection
-    assert compiled.baseline_created is True
-    assert compiled.session_baseline == "<context>ctx</context>"
-    assert compiled.baseline_thread_slugs == {"github-actions"}
-    memory_search.search.assert_awaited_once()
-    builder.build_dynamic_context_block.assert_called_once()
+    assert compiled.scope_thread_slugs == {"github-actions"}
+    assert compiled.recalled_thread_slugs == set()
     builder.build_messages.assert_called_once()
-
-
-async def test_compile_session_turn_selects_related_active_threads_for_baseline(
-    builder: MagicMock,
-) -> None:
-    context_registry = MagicMock()
-    context_registry.related_thread_hops = 1
-    context_registry.thread_snapshot.return_value = [
-        {
-            "slug": "github-actions",
-            "name": "GitHub Actions",
-            "status": "active",
-            "description": "workflow work",
-            "state_path": "threads/github-actions/BRIEF.md",
-        },
-        {
-            "slug": "hal-architecture",
-            "name": "HaL Architecture",
-            "status": "active",
-            "description": "kernel work",
-            "state_path": "threads/hal-architecture/BRIEF.md",
-        },
-        {
-            "slug": "blog",
-            "name": "Blog",
-            "status": "active",
-            "description": "content work",
-            "state_path": "threads/blog/BRIEF.md",
-        },
-    ]
-    context_registry.active_thread_entry_snapshot.return_value = [
-        {
-            "slug": "github-actions",
-            "name": "GitHub Actions",
-            "status": "active",
-            "description": "workflow work",
-            "state_path": "threads/github-actions/BRIEF.md",
-            "state_content": "workflow",
-            "priority": 200,
-            "related_threads": ("hal-architecture",),
-        },
-        {
-            "slug": "hal-architecture",
-            "name": "HaL Architecture",
-            "status": "active",
-            "description": "kernel work",
-            "state_path": "threads/hal-architecture/BRIEF.md",
-            "state_content": "architecture",
-            "priority": 200,
-            "related_threads": (),
-        },
-        {
-            "slug": "blog",
-            "name": "Blog",
-            "status": "active",
-            "description": "content work",
-            "state_path": "threads/blog/BRIEF.md",
-            "state_content": "blog",
-            "priority": 200,
-            "related_threads": (),
-        },
-    ]
-    context_registry.related_unit_keys.side_effect = lambda key: (
-        ("hal-architecture",) if key == "github-actions" else ()
-    )
-    memory_search = AsyncMock()
-    memory_search.search.return_value = [
-        SimpleNamespace(thread="github-actions", content="episode", score=1.0)
-    ]
-    compiler = ContextCompiler(
-        context_builder=builder,
-        context_registry=context_registry,
-        memory_search=memory_search,
-        auto_inject_top_k=3,
-        recall_min_score=0.0,
-    )
-
-    compiled = await compiler.compile_session_turn(
-        SessionTurnRequest(
-            history=[],
-            current_message="continue github actions",
-            media=None,
-            channel="telegram",
-            chat_id="c1",
-            token_model="test-model",
-            memory_budget_tokens=100,
-            recall_max_total_tokens=500,
-            recall_max_per_item_tokens=125,
-            mounted_threads=None,
-        )
-    )
-
-    baseline_active_threads = builder.build_dynamic_context_block.call_args.kwargs["active_threads"]
-    assert [entry["slug"] for entry in baseline_active_threads] == [
-        "github-actions",
-        "hal-architecture",
-    ]
-    assert compiled.baseline_thread_slugs == {"github-actions", "hal-architecture"}
-
-
-async def test_compile_session_turn_caps_baseline_active_threads_by_priority(
-    builder: MagicMock,
-) -> None:
-    builder.baseline_max_active_threads = 2
-    context_registry = MagicMock()
-    context_registry.related_thread_hops = 1
-    context_registry.thread_snapshot.return_value = [
-        {
-            "slug": "thread-low",
-            "name": "Low",
-            "status": "active",
-            "description": "low",
-            "state_path": "threads/thread-low/BRIEF.md",
-        },
-        {
-            "slug": "thread-high",
-            "name": "High",
-            "status": "active",
-            "description": "high",
-            "state_path": "threads/thread-high/BRIEF.md",
-        },
-        {
-            "slug": "thread-mid",
-            "name": "Mid",
-            "status": "active",
-            "description": "mid",
-            "state_path": "threads/thread-mid/BRIEF.md",
-        },
-    ]
-    context_registry.active_thread_entry_snapshot.return_value = [
-        {
-            "slug": "thread-low",
-            "name": "Low",
-            "status": "active",
-            "description": "low",
-            "state_path": "threads/thread-low/BRIEF.md",
-            "state_content": "low",
-            "priority": 200,
-            "related_threads": (),
-            "mtime": 100,
-        },
-        {
-            "slug": "thread-high",
-            "name": "High",
-            "status": "active",
-            "description": "high",
-            "state_path": "threads/thread-high/BRIEF.md",
-            "state_content": "high",
-            "priority": 260,
-            "related_threads": (),
-            "mtime": 300,
-        },
-        {
-            "slug": "thread-mid",
-            "name": "Mid",
-            "status": "active",
-            "description": "mid",
-            "state_path": "threads/thread-mid/BRIEF.md",
-            "state_content": "mid",
-            "priority": 230,
-            "related_threads": (),
-            "mtime": 200,
-        },
-    ]
-    context_registry.related_unit_keys.return_value = ()
-
-    memory_search = AsyncMock()
-    memory_search.search.return_value = []
-    compiler = ContextCompiler(
-        context_builder=builder,
-        context_registry=context_registry,
-        memory_search=memory_search,
-        auto_inject_top_k=3,
-        recall_min_score=0.0,
-    )
-
-    compiled = await compiler.compile_session_turn(
-        SessionTurnRequest(
-            history=[],
-            current_message="continue",
-            media=None,
-            channel="telegram",
-            chat_id="c1",
-            token_model="test-model",
-            memory_budget_tokens=100,
-            recall_max_total_tokens=500,
-            recall_max_per_item_tokens=125,
-            mounted_threads=None,
-        )
-    )
-
-    baseline_active_threads = builder.build_dynamic_context_block.call_args.kwargs["active_threads"]
-    assert [entry["slug"] for entry in baseline_active_threads] == ["thread-high", "thread-mid"]
-    assert compiled.baseline_thread_slugs == {"thread-high", "thread-mid"}
+    history = builder.build_messages.call_args.kwargs["history"]
+    assert history[0] == prior_history[0]
+    assert history[-1]["content"] == compiled.injected_messages[0].content
+    assert "scope: github-actions" in compiled.injected_messages[0].content
 
 
 def test_collect_recalled_thread_slugs_ignores_empty_values() -> None:

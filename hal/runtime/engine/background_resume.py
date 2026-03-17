@@ -296,6 +296,7 @@ class _EngineBackgroundResume:
                 actor="worker",
                 payload={
                     "kind": "subagent_runtime",
+                    "source": "worker",
                     "content": runtime_inject,
                     "label": event.label,
                     "status": event.status,

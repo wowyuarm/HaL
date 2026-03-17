@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from hal.context.message_injects import KIND_SUBAGENT_RUNTIME, render_inject_block
 from hal.context.token_budget import trim_text_to_token_budget
 from hal.domain.ports import SubagentArtifactMetadata, SubagentUsageMetadata
 
@@ -164,9 +165,18 @@ def _truncate_subagent_body(content: str, status: str, max_tokens: int) -> tuple
 
 def _build_subagent_header(*, label: str, status: str, background: bool, body: str) -> str:
     """Build initial human-readable injection block."""
-    if background:
-        return f"[Background subagent '{label}' {status}]\n\nResult:\n{body}"
-    return f"[Subagent Result: {label}]\n\n{body}"
+    metadata = {
+        "label": label,
+        "status": status,
+        "background": "true" if background else "false",
+    }
+    return render_inject_block(
+        "HaL Runtime",
+        kind=KIND_SUBAGENT_RUNTIME,
+        source="worker",
+        metadata=metadata,
+        body=f"Result:\n{body}",
+    )
 
 
 def _append_optional_line(lines: list[str], prefix: str, value: str | None) -> None:

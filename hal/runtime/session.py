@@ -13,7 +13,7 @@ from loguru import logger
 from hal.context.message_building import (
     assemble_message_sequence,
     build_system_message,
-    copy_history_without_session_baseline,
+    copy_replay_history,
 )
 from hal.context.token_budget import trim_text_to_token_budget
 
@@ -33,7 +33,7 @@ def build_persisted_session_history(
     include_final_assistant: bool,
 ) -> list[dict[str, object]]:
     """Build next in-memory session history from working-set messages and final output."""
-    history = copy_history_without_session_baseline(working_set_messages)
+    history = copy_replay_history(working_set_messages)
     if include_final_assistant:
         history.append({"role": "assistant", "content": final_content})
     return history
@@ -505,7 +505,6 @@ def build_session_snapshot_messages(
             )
         ),
         history=list(state.replay_history) if state else None,
-        session_baseline=None,
     )
 
 

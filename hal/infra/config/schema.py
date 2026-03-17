@@ -54,18 +54,9 @@ class HistoryConfig(_StrictModel):
     max_thread_registry_size: int = Field(
         default=20, ge=1
     )  # Max thread summaries injected into system prompt registry
-    baseline_max_active_threads: int = Field(
-        default=3, ge=1
-    )  # Max active thread STATE blocks auto-loaded into one session baseline
-    baseline_active_threads_max_total_tokens: int = Field(
-        default=4000, ge=0
-    )  # Total token budget for all auto-loaded active thread STATE blocks (0 = unlimited)
-    baseline_active_thread_max_tokens: int = Field(
-        default=1200, ge=0
-    )  # Per-thread token budget for auto-loaded active thread STATE blocks (0 = unlimited)
     related_thread_hops: int = Field(
         default=1, ge=1, le=3
-    )  # Max relation-hop depth for expanding recalled/mentioned thread context
+    )  # Max relation-hop depth for expanding related thread context
 
 
 class AgentDefaults(_StrictModel):

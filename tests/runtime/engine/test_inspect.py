@@ -21,8 +21,8 @@ async def test_build_context_inspection_uses_mounted_threads() -> None:
     compiled = SimpleNamespace(
         messages=[{"role": "system", "content": "sys"}],
         search_results=[],
-        baseline_created=False,
-        baseline_thread_slugs={"alpha-thread"},
+        scope_thread_slugs={"alpha-thread"},
+        injected_messages=[SimpleNamespace(kind="turn_context")],
         recalled_thread_slugs=set(),
     )
 
@@ -52,8 +52,8 @@ async def test_build_context_inspection_uses_mounted_threads() -> None:
 
     request = compiler.compile_session_turn.await_args.args[0]
     assert request.mounted_threads == {"alpha-thread"}
-    assert payload["baseline_created"] is False
-    assert payload["baseline_thread_slugs"] == ["alpha-thread"]
+    assert payload["scope_thread_slugs"] == ["alpha-thread"]
+    assert payload["message_inject_count"] == 1
     assert payload["recalled_thread_slugs"] == []
     assert payload["history_config"]["memory_budget_tokens"] == 0
     assert payload["history_config"]["recall_max_total_tokens"] == 500

@@ -21,6 +21,7 @@ from hal.domain.events import (
     BRIEF_STARTED,
     CONTEXT_COMPILED,
     LOOP_STARTED,
+    MESSAGE_INJECTED,
     TURN_COMPLETED,
     TURN_FAILED,
     TURN_STARTED,
@@ -41,6 +42,16 @@ _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
 
 def _message_sent_in_turn(tool: Any) -> bool:
     return bool(getattr(tool, "sent_in_turn", False))
+
+
+def _compiled_scope_thread_slugs(compiled: Any) -> set[str]:
+    scope_threads = getattr(compiled, "scope_thread_slugs", None)
+    return {str(slug) for slug in (scope_threads or set()) if str(slug)}
+
+
+def _compiled_injected_messages(compiled: Any) -> list[Any]:
+    injected = getattr(compiled, "injected_messages", None)
+    return list(injected or [])
 
 
 def _compute_recall_chars(
@@ -249,7 +260,6 @@ def _record_user_turn(*, engine: Any, msg: Any, session_id: str, session_state: 
     """Persist the inbound user turn and refresh tool context bindings."""
     preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
     logger.info(f"[engine] {msg.channel}:{msg.sender_id}: {preview}")
-    engine._mark_threads_touched(session_id, engine._detect_thread_mentions(msg.content))
     engine._update_tool_contexts(msg.channel, msg.chat_id)
     # Propagate session_id to spawn tool for background subagent event routing
     spawn_tool = engine.tools.get("spawn")
@@ -294,6 +304,8 @@ async def _record_compiled_context_event(
     estimated_input_tokens: int | None,
 ) -> None:
     """Persist one context.compiled event for working-log reconstruction."""
+    scope_thread_slugs = _compiled_scope_thread_slugs(compiled)
+    injected_messages = _compiled_injected_messages(compiled)
     await session_state.event_publisher.emit(
         CONTEXT_COMPILED,
         turn_id=turn_id,
@@ -302,13 +314,14 @@ async def _record_compiled_context_event(
             "primary_thread": session_state.primary_thread,
             "mounted_threads": sorted(session_state.mounted_threads),
             "recalled_threads": sorted(compiled.recalled_thread_slugs or []),
-            "baseline_threads": sorted(compiled.baseline_thread_slugs or []),
+            "scope_threads": sorted(scope_thread_slugs),
         },
         payload={
             "history_messages": len(history),
             "search_results": len(compiled.search_results or []),
             "working_set_messages": len(compiled.messages or []),
             "estimated_input_tokens": estimated_input_tokens,
+            "message_injects": len(injected_messages),
         },
     )
 
@@ -317,8 +330,35 @@ def _apply_compiled_turn_context(*, engine: Any, session_id: str, compiled: Any)
     """Track threads discovered during context compilation."""
     if compiled.recalled_thread_slugs:
         engine._mark_threads_touched(session_id, compiled.recalled_thread_slugs)
-    if compiled.baseline_thread_slugs:
-        engine._mark_threads_touched(session_id, compiled.baseline_thread_slugs)
+    scope_thread_slugs = _compiled_scope_thread_slugs(compiled)
+    if scope_thread_slugs:
+        engine._mark_threads_touched(session_id, scope_thread_slugs)
+
+
+async def _record_compiled_message_injections(
+    *,
+    session_state: Any,
+    turn_id: str,
+    compiled: Any,
+) -> None:
+    """Persist durable prompt inject evidence for the current turn."""
+    for injection in _compiled_injected_messages(compiled):
+        refs = {
+            "primary_thread": session_state.primary_thread,
+            "mounted_threads": sorted(session_state.mounted_threads),
+        }
+        refs.update(getattr(injection, "refs", {}) or {})
+        await session_state.event_publisher.emit(
+            MESSAGE_INJECTED,
+            turn_id=turn_id,
+            actor=getattr(injection, "actor", "engine"),
+            refs=refs,
+            payload={
+                "kind": getattr(injection, "kind", "runtime"),
+                "source": getattr(injection, "source", "engine"),
+                "content": getattr(injection, "content", ""),
+            },
+        )
 
 
 def _resolve_request_bytes_threshold(engine: Any) -> int:
@@ -513,8 +553,9 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
             # Track discovered threads
             if compiled.recalled_thread_slugs:
                 engine._mark_threads_touched(session_id, compiled.recalled_thread_slugs)
-            if compiled.baseline_thread_slugs:
-                engine._mark_threads_touched(session_id, compiled.baseline_thread_slugs)
+            scope_thread_slugs = _compiled_scope_thread_slugs(compiled)
+            if scope_thread_slugs:
+                engine._mark_threads_touched(session_id, scope_thread_slugs)
 
             compiled = await _prepare_messages_for_request(
                 engine=engine,
@@ -547,6 +588,11 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                 compiled=compiled,
                 history=history,
                 estimated_input_tokens=pre_metrics.estimated_input_tokens,
+            )
+            await _record_compiled_message_injections(
+                session_state=session_state,
+                turn_id=turn_id,
+                compiled=compiled,
             )
             await session_state.event_publisher.emit(
                 LOOP_STARTED,

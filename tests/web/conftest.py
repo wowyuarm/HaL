@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from hal.bus.queue import MessageBus
+from hal.context.message_injects import build_turn_context_inject
 from hal.infra.providers.base import LLMProvider
 from hal.runtime.engine import AgentEngine, LoopMetadata
 from hal.web import SessionBridge
@@ -47,15 +48,26 @@ def engine(workspace: Path, mock_provider: MagicMock) -> AgentEngine:
             memory_manager=mock_mem.return_value,
         )
         engine.subagents.await_pending = AsyncMock(return_value=[])
+        turn_context = build_turn_context_inject(
+            channel="web",
+            chat_id="session",
+            mounted_threads=["auth"],
+            memory_search_results=None,
+            recall_max_total_tokens=500,
+            recall_max_per_item_tokens=125,
+            token_model="test-model",
+        )
         engine.context_compiler.compile_session_turn = AsyncMock(
             return_value=SimpleNamespace(
                 messages=[
                     {"role": "system", "content": "You are HaL."},
+                    turn_context.as_history_message(),
                     {"role": "user", "content": "hello"},
                 ],
                 search_results=[],
                 recalled_thread_slugs=set(),
-                baseline_thread_slugs={"auth"},
+                scope_thread_slugs={"auth"},
+                injected_messages=[turn_context],
             )
         )
         engine._execute_loop = AsyncMock(

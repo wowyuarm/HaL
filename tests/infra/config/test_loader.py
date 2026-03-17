@@ -263,7 +263,4 @@ def test_defaults_match_original_hardcoded_values() -> None:
 
     # History / context
     assert cfg.agents.defaults.history.max_thread_registry_size == 20
-    assert cfg.agents.defaults.history.baseline_max_active_threads == 3
-    assert cfg.agents.defaults.history.baseline_active_threads_max_total_tokens == 4000
-    assert cfg.agents.defaults.history.baseline_active_thread_max_tokens == 1200
     assert cfg.agents.defaults.history.related_thread_hops == 1
