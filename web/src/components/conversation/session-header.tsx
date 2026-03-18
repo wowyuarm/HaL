@@ -51,9 +51,9 @@ export function SessionHeader({
 
   return (
     <header className="shrink-0 border-b border-subtle px-5 py-3 md:px-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex w-full items-center justify-between gap-3">
         {/* Left: navigation + context */}
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-start gap-2">
           <Button
             variant="ghost"
             size="icon"
@@ -62,16 +62,16 @@ export function SessionHeader({
           >
             <ArrowLeft />
           </Button>
-          <div className="flex min-w-0 items-center gap-2 text-meta">
-            <span className="truncate font-medium text-hal-primary">
+          <div className="min-w-0 pt-0.5">
+            <div className="truncate text-heading font-medium tracking-[-0.01em] text-hal-primary">
               {threadName ?? session.primary_thread ?? "Working log"}
-            </span>
-            <span className={cn("shrink-0 font-medium", status.textClass)}>
-              {status.label}
-            </span>
-            {showSocketState ? (
-              <span className="shrink-0 text-hal-muted">{socketLabel(socketState)}</span>
-            ) : null}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-hal-muted">
+              <span className={cn("font-medium", status.textClass)}>
+                {status.label}
+              </span>
+              {showSocketState ? <span>{socketLabel(socketState)}</span> : null}
+            </div>
           </div>
         </div>
 

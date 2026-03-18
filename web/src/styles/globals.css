@@ -76,31 +76,31 @@
   --hal-evidence-seam: rgba(74, 122, 116, 0.34);
 
   /* ── Typography scale ── */
-  --type-title-size: 24px;
-  --type-title-line: 28px;
+  --type-title-size: 23px;
+  --type-title-line: 30px;
   --type-title-weight: 600;
 
-  --type-heading-size: 18px;
-  --type-heading-line: 24px;
+  --type-heading-size: 17px;
+  --type-heading-line: 23px;
   --type-heading-weight: 600;
 
   --type-subheading-size: 15px;
-  --type-subheading-line: 20px;
+  --type-subheading-line: 21px;
   --type-subheading-weight: 600;
 
   --type-body-size: 15px;
-  --type-body-line: 23px;
+  --type-body-line: 24px;
   --type-body-weight: 400;
 
   --type-reading-size: 16px;
-  --type-reading-line: 26px;
+  --type-reading-line: 27px;
   --type-reading-weight: 400;
 
-  --type-meta-size: 13px;
+  --type-meta-size: 12.5px;
   --type-meta-line: 18px;
   --type-meta-weight: 500;
 
-  --type-caption-size: 12px;
+  --type-caption-size: 11.5px;
   --type-caption-line: 16px;
   --type-caption-weight: 500;
 
@@ -279,5 +279,310 @@
 
   .hal-side-sheet-content pre::-webkit-scrollbar {
     display: none;
+  }
+
+  .hal-markdown {
+    color: var(--hal-text);
+    font-size: var(--type-reading-size);
+    line-height: var(--type-reading-line);
+    --hal-markdown-surface:
+      color-mix(in srgb, rgba(255, 255, 255, 0.64) 72%, var(--hal-inset));
+    --hal-markdown-surface-strong:
+      color-mix(in srgb, var(--hal-inset) 74%, rgba(255, 255, 255, 0.56));
+    --hal-markdown-surface-hover:
+      color-mix(in srgb, var(--hal-paper) 76%, var(--hal-inset));
+  }
+
+  .hal-markdown > :first-child {
+    margin-top: 0 !important;
+  }
+
+  .hal-markdown > :last-child {
+    margin-bottom: 0 !important;
+  }
+
+  .hal-markdown h1,
+  .hal-markdown h2,
+  .hal-markdown h3 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    word-break: break-word;
+  }
+
+  .hal-markdown h1 {
+    letter-spacing: -0.02em;
+    font-size: 1.9rem;
+    line-height: 1.26;
+    margin-top: 1.6em;
+    margin-bottom: 0.58em;
+  }
+
+  .hal-markdown h2 {
+    letter-spacing: -0.015em;
+    font-size: 1.45rem;
+    line-height: 1.34;
+    margin-top: 1.45em;
+    margin-bottom: 0.54em;
+  }
+
+  .hal-markdown h3 {
+    font-size: 1.12rem;
+    line-height: 1.45;
+    margin-top: 1.2em;
+    margin-bottom: 0.42em;
+  }
+
+  .hal-markdown p {
+    margin-top: 0.64em;
+    margin-bottom: 0.64em;
+    line-height: var(--type-reading-line);
+  }
+
+  .hal-markdown hr {
+    height: 1px;
+    margin: 1.7rem 0 1.55rem;
+    border: 0;
+    background: var(--border-subtle);
+  }
+
+  .hal-markdown ul,
+  .hal-markdown ol {
+    padding-inline-start: 1.2em;
+    margin-top: 0.8em;
+    margin-bottom: 0.8em;
+  }
+
+  .hal-markdown ul {
+    list-style: disc;
+  }
+
+  .hal-markdown ol {
+    list-style: decimal;
+  }
+
+  .hal-markdown li {
+    margin-top: 0.28em;
+    margin-bottom: 0.28em;
+  }
+
+  .hal-markdown li::marker {
+    color: rgba(74, 122, 116, 0.48);
+  }
+
+  .hal-markdown blockquote {
+    border-left: 2px solid var(--border-accent);
+    color: var(--hal-text-muted);
+    font-style: normal;
+    padding-inline-start: 1em;
+    margin-top: 0.95em;
+    margin-bottom: 0.95em;
+  }
+
+  .hal-markdown strong {
+    color: var(--hal-text);
+    font-weight: 600;
+  }
+
+  .hal-markdown :where(code)::before,
+  .hal-markdown :where(code)::after {
+    content: none;
+  }
+
+  .hal-markdown-inline-code {
+    border: 1px solid var(--border-subtle);
+    background: var(--hal-markdown-surface);
+    color: color-mix(in srgb, var(--hal-human) 78%, var(--hal-text));
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    border-radius: var(--radius-sm);
+    padding: 0.12rem 0.44rem;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+
+  .hal-markdown-link {
+    color: var(--hal-live);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-decoration-color: color-mix(in srgb, var(--hal-live) 36%, transparent);
+    text-underline-offset: 0.18em;
+    transition:
+      color var(--duration-fast) var(--ease-standard),
+      text-decoration-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .hal-markdown-link:hover {
+    color: color-mix(in srgb, var(--hal-live) 78%, var(--hal-text));
+    text-decoration-color: color-mix(in srgb, var(--hal-live) 62%, transparent);
+  }
+
+  .hal-markdown-pre-wrap {
+    position: relative;
+    margin: 0.85rem 0 0.95rem;
+  }
+
+  .hal-markdown-copy-button {
+    position: absolute;
+    top: 0.46rem;
+    right: 0.62rem;
+    z-index: 1;
+    display: inline-grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 0;
+    background: transparent;
+    color: var(--hal-text-muted);
+    padding: 0;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard);
+  }
+
+  .hal-markdown-pre-wrap:hover .hal-markdown-copy-button,
+  .hal-markdown-pre-wrap:focus-within .hal-markdown-copy-button {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hal-markdown-copy-button:hover {
+    color: var(--hal-text);
+  }
+
+  .hal-markdown-copy-button[aria-label="Copied code"] {
+    color: color-mix(in srgb, var(--hal-live) 68%, var(--hal-text));
+  }
+
+  .hal-markdown-pre {
+    margin: 0;
+    overflow-x: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--hal-markdown-surface-strong);
+    color: var(--hal-text);
+    box-shadow: none;
+    padding: 0.68rem 2.6rem 0.68rem 0.72rem;
+    transition:
+      border-color var(--duration-fast) var(--ease-standard),
+      background-color var(--duration-fast) var(--ease-standard);
+  }
+
+  .hal-markdown-block-code {
+    display: block;
+    background: transparent;
+    color: inherit;
+    font-family: var(--font-mono);
+    font-size: var(--type-meta-size);
+    line-height: 1.76;
+    white-space: pre;
+  }
+
+  .hal-markdown-table-wrap {
+    width: 100%;
+    margin: 1.05rem 0 1.2rem;
+    overflow-x: auto;
+  }
+
+  .hal-markdown-table {
+    width: 100%;
+    min-width: 34rem;
+    max-width: 100%;
+    table-layout: auto;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    line-height: 1.68;
+    background: transparent;
+  }
+
+  .hal-markdown-table th,
+  .hal-markdown-table td {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.62rem 0.8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .hal-markdown-table th {
+    font-weight: 600;
+    color: var(--hal-text);
+    white-space: nowrap;
+    background: transparent;
+    border-bottom-color: var(--border-default);
+  }
+
+  .hal-markdown-table td {
+    color: var(--hal-text-muted);
+  }
+
+  .hal-markdown-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .hal-markdown-conversation h1 {
+    font-size: 1.78rem;
+  }
+
+  .hal-markdown-conversation h2 {
+    font-size: 1.34rem;
+  }
+
+  .hal-markdown-conversation h3 {
+    font-size: 1.08rem;
+  }
+
+  .hal-markdown-brief h1 {
+    font-size: 2rem;
+  }
+
+  .hal-markdown-brief h2 {
+    font-size: 1.5rem;
+  }
+
+  .hal-markdown-pre .hljs {
+    display: block;
+    background: transparent;
+    color: var(--hal-text);
+  }
+
+  .hal-markdown-pre .hljs-comment,
+  .hal-markdown-pre .hljs-quote {
+    color: var(--hal-text-muted);
+  }
+
+  .hal-markdown-pre .hljs-keyword,
+  .hal-markdown-pre .hljs-selector-tag,
+  .hal-markdown-pre .hljs-meta,
+  .hal-markdown-pre .hljs-doctag {
+    color: color-mix(in srgb, var(--hal-live) 72%, var(--hal-text));
+  }
+
+  .hal-markdown-pre .hljs-string,
+  .hal-markdown-pre .hljs-attr,
+  .hal-markdown-pre .hljs-regexp {
+    color: color-mix(in srgb, var(--hal-human) 74%, var(--hal-text));
+  }
+
+  .hal-markdown-pre .hljs-number,
+  .hal-markdown-pre .hljs-literal,
+  .hal-markdown-pre .hljs-symbol,
+  .hal-markdown-pre .hljs-bullet {
+    color: color-mix(in srgb, var(--hal-warning) 76%, var(--hal-text));
+  }
+
+  .hal-markdown-pre .hljs-title,
+  .hal-markdown-pre .hljs-section,
+  .hal-markdown-pre .hljs-built_in,
+  .hal-markdown-pre .hljs-type {
+    color: color-mix(in srgb, var(--hal-live) 42%, var(--hal-text));
+    font-weight: 500;
+  }
+
+  .hal-markdown-pre .hljs-variable,
+  .hal-markdown-pre .hljs-template-variable,
+  .hal-markdown-pre .hljs-params {
+    color: var(--hal-text);
   }
 }

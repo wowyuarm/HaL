@@ -1,5 +1,4 @@
 import type { Config } from "tailwindcss";
-import typography from "@tailwindcss/typography";
 
 const config: Config = {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -109,92 +108,8 @@ const config: Config = {
       transitionTimingFunction: {
         standard: "var(--ease-standard)",
       },
-      typography: {
-        mineral: {
-          css: {
-            "--tw-prose-body": "var(--hal-text)",
-            "--tw-prose-headings": "var(--hal-text)",
-            "--tw-prose-links": "var(--hal-live)",
-            "--tw-prose-code": "var(--hal-text)",
-            "--tw-prose-bold": "var(--hal-text)",
-            "--tw-prose-bullets": "rgba(74, 122, 116, 0.48)",
-            "--tw-prose-hr": "var(--border-subtle)",
-            "--tw-prose-quotes": "var(--hal-text)",
-            "--tw-prose-pre-bg": "var(--hal-inset)",
-            fontSize: "var(--type-body-size)",
-            lineHeight: "var(--type-body-line)",
-            "> :first-child": {
-              marginTop: "0",
-            },
-            "> :last-child": {
-              marginBottom: "0",
-            },
-            h1: {
-              fontFamily: "var(--font-serif)",
-              fontWeight: "600",
-              letterSpacing: "-0.02em",
-              marginTop: "0.5em",
-              marginBottom: "0.35em",
-              lineHeight: "var(--type-title-line)",
-            },
-            h2: {
-              fontFamily: "var(--font-serif)",
-              fontWeight: "600",
-              letterSpacing: "-0.015em",
-              marginTop: "0.7em",
-              marginBottom: "0.4em",
-              lineHeight: "var(--type-heading-line)",
-            },
-            h3: {
-              fontFamily: "var(--font-serif)",
-              fontWeight: "600",
-              marginTop: "0.65em",
-              marginBottom: "0.35em",
-              lineHeight: "var(--type-subheading-line)",
-            },
-            p: {
-              marginTop: "0.45em",
-              marginBottom: "0.45em",
-              lineHeight: "var(--type-body-line)",
-            },
-            ul: {
-              marginTop: "0.55em",
-              marginBottom: "0.55em",
-              paddingInlineStart: "1.2em",
-            },
-            ol: {
-              marginTop: "0.55em",
-              marginBottom: "0.55em",
-              paddingInlineStart: "1.2em",
-            },
-            li: {
-              marginTop: "0.2em",
-              marginBottom: "0.2em",
-            },
-            code: {
-              borderRadius: "var(--radius-sm)",
-              backgroundColor: "rgba(36, 33, 29, 0.05)",
-              padding: "0.18rem 0.48rem",
-              fontWeight: "500",
-            },
-            pre: {
-              border: "1px solid var(--border-subtle)",
-              borderRadius: "var(--radius-lg)",
-            },
-            blockquote: {
-              borderLeft: "2px solid var(--border-accent)",
-              color: "var(--hal-text-muted)",
-              fontStyle: "normal",
-              marginTop: "0.65em",
-              marginBottom: "0.65em",
-              paddingInlineStart: "1em",
-            },
-          },
-        },
-      },
     },
   },
-  plugins: [typography],
 };
 
 export default config;

@@ -1,7 +1,5 @@
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-
 import { ReadingPanel } from "@/components/layout/reading-panel";
+import { HalMarkdown } from "@/components/ui/hal-markdown";
 import {
   describeEvidenceEvent,
   EVIDENCE_CATEGORY_META,
@@ -40,11 +38,10 @@ export function ReviewPanel({ briefMarkdown }: ReviewPanelProps) {
         widthClassName={REVIEW_PANEL_WIDTH}
         zIndexClassName="z-30"
         onClose={closeReviewPanel}
-        contentClassName="prose prose-mineral max-w-none text-reading"
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <HalMarkdown tone="brief">
           {briefMarkdown || "_This thread does not have a brief yet._"}
-        </ReactMarkdown>
+        </HalMarkdown>
       </ReadingPanel>
     );
   }

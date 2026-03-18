@@ -7,15 +7,14 @@
  */
 
 import { MessagePrimitive, useMessage } from "@assistant-ui/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
-import { formatRelativeTime, formatTimestamp } from "@/lib/runtime";
+import { HalMarkdown } from "@/components/ui/hal-markdown";
+import { halPaperObjectVariants } from "@/components/ui/hal-patterns";
 import type { HalMessageMeta } from "@/lib/session-adapter";
 import type { TextMessagePartProps } from "@assistant-ui/react";
+import { cn } from "@/lib/utils";
 
 export function HalUserMessage() {
-  const createdAt = useMessage((s) => s.createdAt);
   const custom = useMessage(
     (s) => s.metadata?.custom as HalMessageMeta | undefined,
   );
@@ -24,49 +23,34 @@ export function HalUserMessage() {
     return part?.type === "text" ? part.text : "";
   });
   const isCommand = custom?.isCommand === true;
-  const ts = createdAt?.toISOString() ?? "";
 
   // Command messages: compact inline row, no bubble.
   if (isCommand) {
     return (
-      <MessagePrimitive.Root className="px-1 py-1">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-meta">
-            <span className="shrink-0 text-hal-muted">›</span>
-            <span className="truncate font-mono text-hal-primary">
-              {firstText || "_No content_"}
-            </span>
-          </div>
-          {ts && (
-            <span className="shrink-0 text-caption text-hal-muted" title={formatTimestamp(ts)}>
-              {formatRelativeTime(ts)}
-            </span>
-          )}
+      <MessagePrimitive.Root className="px-1 py-1.5">
+        <div className="flex min-w-0 items-center gap-2 text-meta">
+          <span className="shrink-0 text-hal-muted">›</span>
+          <span className="truncate font-mono text-hal-primary">
+            {firstText || "_No content_"}
+          </span>
         </div>
       </MessagePrimitive.Root>
     );
   }
 
   return (
-    <MessagePrimitive.Root className="rounded-md border border-border border-l-2 border-l-human bg-hal-human-subtle px-4 py-3">
-      {ts && (
-        <div className="mb-1.5 flex items-center justify-end">
-          <span className="text-caption text-hal-muted" title={formatTimestamp(ts)}>
-            {formatRelativeTime(ts)}
-          </span>
-        </div>
+    <MessagePrimitive.Root
+      className={cn(
+        halPaperObjectVariants({ surface: "panel", density: "comfortable", seam: "human" }),
       )}
+    >
       <MessagePrimitive.Content components={USER_CONTENT_COMPONENTS} />
     </MessagePrimitive.Root>
   );
 }
 
 function UserTextPart({ text }: TextMessagePartProps) {
-  return (
-    <div className="prose prose-mineral max-w-none text-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text || "_No content_"}</ReactMarkdown>
-    </div>
-  );
+  return <HalMarkdown>{text || "_No content_"}</HalMarkdown>;
 }
 
 const USER_CONTENT_COMPONENTS = { Text: UserTextPart } as const;

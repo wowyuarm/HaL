@@ -3,6 +3,7 @@
  */
 
 import { Button } from "@/components/ui/button";
+import { halPaperObjectVariants } from "@/components/ui/hal-patterns";
 import type { SessionManifest } from "@/lib/types";
 import { formatTimestamp, sessionDisplayState } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
@@ -26,12 +27,12 @@ export function SessionList({
 }: SessionListProps) {
   return (
     <section className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <p className="hal-rule-label">Sessions</p>
-          <p className="mt-2 text-meta text-hal-muted">
-            One session = one observable collaboration run.
-          </p>
+          <h3 className="mt-2.5 text-heading font-medium tracking-[-0.01em] text-hal-primary">
+            Collaboration runs
+          </h3>
         </div>
         <Button
           variant="primary"
@@ -45,11 +46,14 @@ export function SessionList({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-hal-float px-4 py-5 text-body text-hal-muted">
-            No sessions yet for this thread.
+          <div className={cn("hal-paper rounded-lg", halPaperObjectVariants({ density: "spacious" }))}>
+            <p className="text-subheading font-medium text-hal-primary">No sessions yet</p>
+            <p className="mt-1.5 max-w-xl text-meta text-hal-muted">
+              Start the first collaboration run for this thread when you are ready.
+            </p>
           </div>
         ) : (
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {sessions.map((session) => {
               const isSelected = session.session_id === selectedSessionId;
               const status = sessionDisplayState(session.status);
@@ -67,14 +71,18 @@ export function SessionList({
                   type="button"
                   onClick={() => onSelect(session.session_id)}
                   className={cn(
-                    "w-full rounded-md px-3 py-3.5 text-left transition-colors duration-fast ease-standard",
-                    isSelected ? "bg-hal-selection" : "hover:bg-hal-hover",
+                    "w-full rounded-lg border px-4 py-3.5 text-left transition-colors duration-fast ease-standard",
+                    isSelected
+                      ? "border-accent bg-hal-selection"
+                      : "border-transparent hover:bg-hal-hover",
                   )}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta">
-                        <span className="text-hal-primary">{formatTimestamp(session.created_at)}</span>
+                      <div className="text-body font-medium text-hal-primary">
+                        {formatTimestamp(session.created_at)}
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-hal-muted">
                         <span className="text-hal-muted">
                           {session.turn_count} turn{session.turn_count === 1 ? "" : "s"}
                         </span>
@@ -85,7 +93,12 @@ export function SessionList({
                         ))}
                       </div>
                     </div>
-                    <span className={cn("shrink-0 text-meta font-medium", status.textClass)}>
+                    <span
+                      className={cn(
+                        "shrink-0 pt-0.5 text-caption font-medium uppercase tracking-[0.08em]",
+                        status.textClass,
+                      )}
+                    >
                       {status.label}
                     </span>
                   </div>

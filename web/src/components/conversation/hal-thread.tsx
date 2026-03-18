@@ -13,7 +13,9 @@ import { HalComposer } from "@/components/conversation/hal-composer";
 import { SessionHeader } from "@/components/conversation/session-header";
 import { HalSystemMessage } from "@/components/conversation/hal-system-message";
 import { HalUserMessage } from "@/components/conversation/hal-user-message";
+import { HAL_READING_COLUMN_CLASS } from "@/components/ui/hal-patterns";
 import { Panel } from "@/components/ui/panel";
+import { cn } from "@/lib/utils";
 import { isInteractiveSession } from "@/lib/runtime";
 import { useHalStore } from "@/lib/store";
 import type { SessionManifest, SocketState } from "@/lib/types";
@@ -66,12 +68,12 @@ export function HalThread({
       />
 
       <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-        <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-1 py-4 md:px-2 md:py-5">
+        <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-3 py-6 md:px-5 md:py-7">
           <ThreadPrimitive.Empty>
             <EmptyState />
           </ThreadPrimitive.Empty>
 
-          <div className="mx-auto max-w-5xl space-y-3">
+          <div className={cn(HAL_READING_COLUMN_CLASS, "space-y-5")}>
             <ThreadPrimitive.Messages
               components={{
                 UserMessage: HalUserMessage,
@@ -96,7 +98,7 @@ export function HalThread({
 
 function EmptyState() {
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className={HAL_READING_COLUMN_CLASS}>
       <Panel
         surface="base"
         border

@@ -7,15 +7,14 @@
 
 import { MessagePrimitive, useMessage } from "@assistant-ui/react";
 
-import { formatRelativeTime, formatTimestamp } from "@/lib/runtime";
+import { halPaperObjectVariants } from "@/components/ui/hal-patterns";
+import { cn } from "@/lib/utils";
 
 export function HalSystemMessage() {
-  const createdAt = useMessage((s) => s.createdAt);
   const firstText = useMessage((s) => {
     const part = s.content[0];
     return part?.type === "text" ? part.text : "";
   });
-  const ts = createdAt?.toISOString() ?? "";
 
   const badgeState = firstText.startsWith("Scope")
     ? "warning"
@@ -37,17 +36,11 @@ export function HalSystemMessage() {
         : "text-hal-muted font-semibold";
 
   return (
-    <MessagePrimitive.Root className="flex items-center gap-2 rounded-md border border-subtle bg-hal-paper px-3 py-1.5">
-      <span className={`text-caption ${titleClass}`}>{title}</span>
-      <span className="min-w-0 flex-1 truncate text-meta text-hal-muted">{firstText}</span>
-      {ts && (
-        <span
-          className="ml-auto shrink-0 text-caption text-hal-muted"
-          title={formatTimestamp(ts)}
-        >
-          {formatRelativeTime(ts)}
-        </span>
-      )}
+    <MessagePrimitive.Root
+      className={cn(halPaperObjectVariants(), "flex items-center gap-2")}
+    >
+      <span className={`text-caption uppercase tracking-[0.08em] ${titleClass}`}>{title}</span>
+      <span className="min-w-0 flex-1 truncate text-caption text-hal-muted">{firstText}</span>
     </MessagePrimitive.Root>
   );
 }

@@ -224,8 +224,9 @@ added as components are built and patterns stabilize.
 
 ```css
 :root {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 }
 ```
 
@@ -233,52 +234,53 @@ added as components are built and patterns stabilize.
 
 ```css
 :root {
-  --type-title-size: 24px;
-  --type-title-line: 28px;
+  --type-title-size: 23px;
+  --type-title-line: 30px;
   --type-title-weight: 600;
 
-  --type-heading-size: 18px;
-  --type-heading-line: 24px;
+  --type-heading-size: 17px;
+  --type-heading-line: 23px;
   --type-heading-weight: 600;
 
   --type-subheading-size: 15px;
-  --type-subheading-line: 20px;
+  --type-subheading-line: 21px;
   --type-subheading-weight: 600;
 
-  --type-body-size: 14px;
-  --type-body-line: 20px;
+  --type-body-size: 15px;
+  --type-body-line: 24px;
   --type-body-weight: 400;
 
-  --type-reading-size: 15px;
-  --type-reading-line: 24px;
+  --type-reading-size: 16px;
+  --type-reading-line: 27px;
   --type-reading-weight: 400;
 
-  --type-meta-size: 12px;
-  --type-meta-line: 16px;
+  --type-meta-size: 12.5px;
+  --type-meta-line: 18px;
   --type-meta-weight: 500;
 
-  --type-caption-size: 11px;
-  --type-caption-line: 14px;
+  --type-caption-size: 11.5px;
+  --type-caption-line: 16px;
   --type-caption-weight: 500;
 }
 ```
 
 | Role | Size | Weight | Line Height | Use |
 |------|------|--------|-------------|-----|
-| **title** | 24px | 600 | 28px | Session title, primary page heading |
-| **heading** | 18px | 600 | 24px | Thread names, section headers |
-| **subheading** | 15px | 600 | 20px | Turn headers, BRIEF section headings |
-| **body** | 14px | 400 | 20px | Prose, log entries, default UI text |
-| **reading** | 15px | 400 | 24px | BRIEF prose, long-form content — optimized for reading comfort |
-| **meta** | 12px | 500 | 16px | Timestamps, state labels, thread metadata |
-| **caption** | 11px | 500 | 14px | Evidence labels, technical annotations |
+| **title** | 23px | 600 | 30px | Primary page heading, thread detail title |
+| **heading** | 17px | 600 | 23px | Session title, section headers |
+| **subheading** | 15px | 600 | 21px | Small section headers, empty-state titles |
+| **body** | 15px | 400 | 24px | Default UI text, thread descriptions |
+| **reading** | 16px | 400 | 27px | Main assistant prose, BRIEF prose, long-form reading |
+| **meta** | 12.5px | 500 | 18px | State labels, session metadata, compact annotations |
+| **caption** | 11.5px | 500 | 16px | Tool rows, evidence labels, technical chrome |
 
 ### 6.3 Type Rules
 
-- Default UI body size is 14px.
+- Default UI body size is 15px.
 - Use weight and spacing for emphasis before reaching for color.
 - Monospace is sparse and functional — code, event payloads, file paths only.
-- BRIEF prose rendering may use 15–16px for reading comfort.
+- Main reading surfaces use `reading` scale rather than `body`.
+- BRIEF prose and assistant prose share the same base reading rhythm; BRIEF may step up heading size, not body density.
 
 ---
 
@@ -300,6 +302,19 @@ Uses Tailwind's 4px base scale (`p-1` = 4px, `p-2` = 8px, etc.).
 - Default density supports long working sessions without fatigue.
 - Density tracks hierarchy: event items tighter than turn containers.
 - Working log may be one spacing step tighter than BRIEF content.
+- Bordered paper objects should feel close to their content. Horizontal padding is typically tighter than early mockups suggested.
+- For bordered message and code surfaces, left inset and top inset should feel roughly equivalent unless a dedicated seam or button needs extra room.
+- Current shared density presets are:
+  `compact` for system/tool rows,
+  `comfortable` for user bubbles and composer shell,
+  `spacious` for empty-state notes,
+  `roomy` for larger paper panels.
+
+### 7.3 Layout Width Rules
+
+- Session working log and thread detail share a narrow reading column. Current shared default is `49rem`, with smaller effective width coming from viewport padding on narrower screens.
+- The session header may span the full row so navigation and view toggles do not make the page feel under-filled.
+- Outer page padding may grow before the main reading column grows. Prefer more canvas around content over a wider text block.
 
 ---
 
@@ -445,6 +460,14 @@ BRIEF is not a generic detail drawer. It is a compiled working artifact:
 - Maintains strong typographic readability (`text-reading`) at lower
   density than the message flow.
 
+### 12.3 Working Log Message Grammar
+
+- Assistant turns are part of the page flow, not speaker bubbles.
+- Human turns may use a light bounded paper container, but the human marker should come from seam or border tint first, not a large colored fill.
+- Message-local timestamps are optional and should not be shown by default if they compete with reading flow.
+- Tool results and system notices are secondary rows. They use `caption` or `meta` scale and must not compete with the main prose layer.
+- Evidence affordances remain the one explicit bounded object attached to an assistant turn.
+
 ---
 
 ## 13. Information Architecture: Activity + Evidence
@@ -478,6 +501,13 @@ Diagnostic detail available through explicit user action:
 - Evidence is entered through explicit interaction, never auto-expanded.
 - When available, a compact indicator conveys what kind of evidence exists.
 - Evidence does not interrupt the primary reading flow.
+
+### 13.4 Session and Thread Overview Hierarchy
+
+- Thread detail and session pages should use the same core content width.
+- In thread detail, thread name is a true page title, not body-sized metadata.
+- Session lists use a primary line plus secondary metadata line. Do not place timestamp, status, and counts all at the same visual weight.
+- Empty states should read like calm paper notes, not dashed placeholders or form errors.
 
 ---
 
@@ -567,6 +597,17 @@ is a design error.
 - Make hover visually heavier than selected
 - Use identical visual treatment for hover and selected on the same element
 - Apply `--shadow-popover` to non-floating elements
+
+### 14.6 Markdown and Embedded Content
+
+Markdown is not a browser default and not a generic `prose` dump. It is a first-class reading surface.
+
+- Use a shared markdown renderer component so assistant messages, user messages, and BRIEF do not drift.
+- Clear first-child and last-child margins inside bounded containers so markdown does not silently reintroduce excess padding.
+- Inline code should read like an in-sentence annotation: subtle surface, warm text emphasis, no decorative pill styling.
+- Code blocks use a restrained inset surface, no shadow, and no persistent toolbar chrome. Copy affordance may appear on hover only.
+- Tables are reading objects, not cards: full available width, horizontal rules only, no outer box, no hover theatrics.
+- Links open in a new tab and should use understated underline treatment rather than button-like styling.
 
 ---
 

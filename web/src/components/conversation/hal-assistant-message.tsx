@@ -2,23 +2,22 @@
  * HalAssistantMessage — renders an assistant message with tool call parts.
  *
  * Uses assistant-ui primitives for context binding. Tool calls render as
- * compact rows. Text parts render as markdown with prose-mineral styling.
+ * compact rows. Text parts render through the shared HaL markdown renderer.
  * Command responses render as compact inline rows without bubble chrome.
  */
 
 import { MessagePrimitive, useMessage } from "@assistant-ui/react";
 import type { TextMessagePartProps, ToolCallMessagePartProps } from "@assistant-ui/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
+import { HalMarkdown } from "@/components/ui/hal-markdown";
+import { halPaperObjectVariants } from "@/components/ui/hal-patterns";
 import { StatusDot } from "@/components/ui/status-dot";
 import { summarizeEvidenceKinds } from "@/lib/evidence";
-import { formatRelativeTime, formatTimestamp } from "@/lib/runtime";
 import type { HalMessageMeta } from "@/lib/session-adapter";
 import { useHalStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
 export function HalAssistantMessage() {
-  const createdAt = useMessage((s) => s.createdAt);
   const isRunning = useMessage((s) => s.status?.type === "running");
   const isFailed = useMessage((s) => s.status?.type === "incomplete");
   const custom = useMessage(
@@ -29,7 +28,6 @@ export function HalAssistantMessage() {
     return part?.type === "text" ? part.text : "";
   });
   const openInspector = useHalStore((s) => s.openInspector);
-  const ts = createdAt?.toISOString() ?? "";
   const isCommand = custom?.isCommand === true;
 
   const evidenceCounts = custom?.evidenceCounts;
@@ -41,19 +39,12 @@ export function HalAssistantMessage() {
   if (isCommand) {
     const commandText = isFailed ? summarizeErrorText(firstText) : firstText;
     return (
-      <MessagePrimitive.Root className="px-1 py-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            {isRunning && <StatusDot state="live" />}
-            {commandText && (
-              <span className={isFailed ? "text-meta text-danger" : "text-meta text-hal-primary"}>
-                {commandText}
-              </span>
-            )}
-          </div>
-          {ts && (
-            <span className="shrink-0 text-caption text-hal-muted" title={formatTimestamp(ts)}>
-              {formatRelativeTime(ts)}
+      <MessagePrimitive.Root className="px-1 py-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          {isRunning && <StatusDot state="live" />}
+          {commandText && (
+            <span className={isFailed ? "text-meta text-danger" : "text-meta text-hal-primary"}>
+              {commandText}
             </span>
           )}
         </div>
@@ -65,12 +56,12 @@ export function HalAssistantMessage() {
     <MessagePrimitive.Root
       className={
         isFailed
-          ? "rounded-md border border-danger bg-hal-danger-subtle px-4 py-3"
-          : "rounded-md border border-border border-l-2 border-l-accent bg-hal-panel px-4 py-3"
+          ? "rounded-md border border-danger bg-hal-danger-subtle px-4 py-3.5"
+          : "px-1 py-2"
       }
     >
-      <div className="mb-1.5 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      {(isRunning || custom?.origin === "background_resume") && (
+        <div className="mb-2 flex items-center gap-2">
           {isRunning && <StatusDot state="live" />}
           {custom?.origin === "background_resume" && (
             <span className="text-caption font-medium uppercase tracking-[0.1em] text-hal-muted">
@@ -78,14 +69,7 @@ export function HalAssistantMessage() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {ts && (
-            <span className="text-caption text-hal-muted" title={formatTimestamp(ts)}>
-              {formatRelativeTime(ts)}
-            </span>
-          )}
-        </div>
-      </div>
+      )}
 
       <MessagePrimitive.Content components={ASSISTANT_CONTENT_COMPONENTS} />
 
@@ -96,7 +80,7 @@ export function HalAssistantMessage() {
           className="group mt-3 flex w-full items-stretch overflow-hidden rounded-md border border-subtle bg-hal-paper text-left transition-all duration-fast ease-standard hover:border-accent hover:bg-hal-hover"
         >
           <span className="w-[3px] shrink-0 bg-[color:var(--turn-seam-color)] transition-colors duration-fast ease-standard group-hover:bg-[color:var(--turn-seam-active)]" />
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2.5">
+          <span className="flex min-w-0 flex-1 items-center justify-between gap-3 px-2.5 py-2">
             <span className="min-w-0">
               <span className="hal-meta-kicker">Evidence</span>
               <span className="mt-1 block truncate text-meta text-hal-primary">
@@ -116,11 +100,7 @@ export function HalAssistantMessage() {
 function AssistantTextPart({ text }: TextMessagePartProps) {
   if (!text?.trim()) return null;
 
-  return (
-    <div className="prose prose-mineral max-w-none text-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
-    </div>
-  );
+  return <HalMarkdown>{text}</HalMarkdown>;
 }
 
 function HalToolCallPart({ toolName, result, isError }: ToolCallMessagePartProps) {
@@ -128,10 +108,10 @@ function HalToolCallPart({ toolName, result, isError }: ToolCallMessagePartProps
   const brief = typeof result === "string" ? truncate(result, 100) : "completed";
 
   return (
-    <div className="my-1.5 flex items-center gap-2 rounded-md border border-subtle bg-hal-paper px-3 py-2">
+    <div className={cn(halPaperObjectVariants(), "my-2 flex items-center gap-2")}>
       <StatusDot state={dotState} />
-      <span className="font-mono text-meta text-hal-primary">{toolName}</span>
-      <span className="min-w-0 flex-1 truncate text-meta text-hal-muted">{brief}</span>
+      <span className="font-mono text-caption text-hal-primary">{toolName}</span>
+      <span className="min-w-0 flex-1 truncate text-caption text-hal-muted">{brief}</span>
     </div>
   );
 }

@@ -8,14 +8,22 @@
 
 import { ComposerPrimitive } from "@assistant-ui/react";
 
+import { HAL_READING_COLUMN_CLASS, halPaperObjectVariants } from "@/components/ui/hal-patterns";
+import { cn } from "@/lib/utils";
+
 export function HalComposer() {
   return (
-    <ComposerPrimitive.Root className="mx-auto w-full max-w-5xl shrink-0 px-1 pb-4 pt-2 md:px-2">
-      <div className="hal-paper flex items-end gap-2 rounded-md border border-border px-4 py-3 shadow-sm">
+    <ComposerPrimitive.Root className={cn(HAL_READING_COLUMN_CLASS, "shrink-0 px-3 pb-4 pt-2 md:px-5")}>
+      <div
+        className={cn(
+          "hal-paper flex items-end gap-2 shadow-sm",
+          halPaperObjectVariants({ surface: "panel", density: "comfortable" }),
+        )}
+      >
         <ComposerPrimitive.Input
           autoFocus
           placeholder="Describe the next step, question, or direction for this session..."
-          className="min-h-[40px] max-h-[200px] flex-1 resize-none border-0 bg-transparent text-body text-hal-primary placeholder:text-hal-muted focus:outline-none"
+          className="min-h-[34px] max-h-[200px] flex-1 resize-none border-0 bg-transparent text-body text-hal-primary placeholder:text-hal-muted focus:outline-none"
           rows={1}
         />
         <ComposerPrimitive.Send className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors duration-fast ease-standard hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">

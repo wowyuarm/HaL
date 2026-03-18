@@ -14,6 +14,17 @@ Keep source and tests in matching paths.
 - Prefer explicit workspace/repository abstractions over ad hoc `Path` reads and writes inside engine logic when refactoring persistent state flows.
 - For frontend work, read `docs/specs/design-system.md` and use the `hal-design` skill.
 
+## Frontend Engineering Notes
+- Treat `docs/specs/design-system.md` as the source of truth for frontend invariants. If a new UI rule stabilizes through iteration, write it back there instead of leaving it only in component code.
+- Keep working-log and thread-detail body width aligned through shared code constants. Do not scatter raw width literals like `max-w-[49rem]` across new components.
+- Reuse shared frontend patterns before adding more one-off class strings:
+  `web/src/components/ui/hal-patterns.ts` holds layout width and bounded paper-object variants;
+  `web/src/components/ui/hal-markdown.tsx` owns markdown rendering.
+- Do not split markdown behavior across multiple styling systems. `HalMarkdown` + `web/src/styles/globals.css` is the primary path; avoid reintroducing parallel markdown rules in Tailwind typography config or per-message wrappers.
+- Preserve working-log message grammar:
+  assistant text lives in the page flow, user text may use a light bounded container, tool/system rows are secondary chrome, evidence remains the explicit bounded affordance.
+- When tightening or loosening density, change shared variants or tokens first, not scattered per-component padding values.
+
 ## Build, Test, and Development Commands
 - `pip install -e ".[dev]"`: editable install with test/lint dependencies.
 - `pytest tests/`: run the full test suite.
