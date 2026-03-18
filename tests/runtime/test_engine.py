@@ -622,6 +622,24 @@ class TestThreadTouching:
 
 
 class TestBackgroundResume:
+    async def test_emit_session_created_refreshes_snapshot_without_type_error(self, engine):
+        engine.thread_repository.write_state(
+            "auth",
+            "# Auth\nStatus: active\n\n## Purpose\nThread for auth.\n",
+        )
+        state = engine.create_session(
+            channel="web",
+            chat_id="chat-1",
+            primary_thread="auth",
+        )
+
+        await engine.emit_session_created(state.session_id)
+
+        snapshot = engine._background_resume._load_resume_snapshot(state.session_id)
+        assert snapshot is not None
+        transport = engine._background_resume._session_transports[state.session_id]
+        assert (transport.channel, transport.chat_id) == ("web", "chat-1")
+
     async def test_finalize_resumed_turn_updates_session_history_and_publishes_outbound(
         self, engine
     ):

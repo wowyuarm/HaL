@@ -755,17 +755,19 @@ class AgentEngine:
         self,
         *,
         session_id: str,
+        channel: str | None = None,
+        chat_id: str | None = None,
         messages: list[dict[str, object]],
         final_content: str | None,
     ) -> None:
         """Store full loop context snapshot for potential background continuation."""
         transport = self._transport_context_for_session(session_id)
-        channel = transport.channel if transport else "unknown"
-        chat_id = transport.chat_id if transport else "unknown"
+        resolved_channel = channel or (transport.channel if transport else "unknown")
+        resolved_chat_id = chat_id or (transport.chat_id if transport else "unknown")
         self._background_resume.store_session_snapshot(
             session_id=session_id,
-            channel=channel,
-            chat_id=chat_id,
+            channel=resolved_channel,
+            chat_id=resolved_chat_id,
             messages=messages,
             final_content=final_content,
         )
