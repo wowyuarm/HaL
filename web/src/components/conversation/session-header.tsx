@@ -67,10 +67,10 @@ export function SessionHeader({
               {threadName ?? session.primary_thread ?? "Working log"}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-hal-muted">
-              <span className={cn("font-medium", status.textClass)}>
+              <span className={cn("font-mono font-medium", status.textClass)}>
                 {status.label}
               </span>
-              {showSocketState ? <span>{socketLabel(socketState)}</span> : null}
+              {showSocketState ? <span className="font-mono">{socketLabel(socketState)}</span> : null}
             </div>
           </div>
         </div>

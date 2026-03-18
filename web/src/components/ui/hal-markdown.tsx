@@ -16,6 +16,10 @@ import { cn } from "@/lib/utils";
 
 type HalMarkdownTone = "conversation" | "brief";
 
+const PROTECTED_MARKDOWN_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
+const CJK_OPEN_PUNCTUATION = "“‘「『《〈【（〔［｛";
+const CJK_CLOSE_PUNCTUATION = "：；，。！？、…）】」』》〉”’〕］｝";
+
 interface HalMarkdownProps {
   children: string;
   tone?: HalMarkdownTone;
@@ -27,6 +31,8 @@ export function HalMarkdown({
   tone = "conversation",
   className,
 }: HalMarkdownProps) {
+  const normalizedMarkdown = normalizeMarkdownEmphasis(children);
+
   return (
     <div
       className={cn(
@@ -40,10 +46,61 @@ export function HalMarkdown({
         rehypePlugins={[rehypeHighlight]}
         components={MARKDOWN_COMPONENTS}
       >
-        {children}
+        {normalizedMarkdown}
       </ReactMarkdown>
     </div>
   );
+}
+
+function normalizeMarkdownEmphasis(source: string): string {
+  return source
+    .split(PROTECTED_MARKDOWN_SEGMENT_RE)
+    .map((segment, index) =>
+      index % 2 === 1 ? segment : normalizeEmphasisInTextSegment(segment),
+    )
+    .join("");
+}
+
+function normalizeEmphasisInTextSegment(segment: string): string {
+  let current = segment;
+
+  for (const delimiter of ["**", "__", "*", "_"]) {
+    current = normalizeDelimiterEdges(current, delimiter);
+  }
+
+  return current;
+}
+
+function normalizeDelimiterEdges(text: string, delimiter: string): string {
+  const escaped = escapeForRegExp(delimiter);
+  const leadingPunctuationRe = new RegExp(
+    `(${escaped})([${CJK_OPEN_PUNCTUATION}]+)(.+?)\\1`,
+    "g",
+  );
+  const trailingPunctuationRe = new RegExp(
+    `(${escaped})(.+?)([${CJK_CLOSE_PUNCTUATION}]+)\\1`,
+    "g",
+  );
+
+  let current = text;
+
+  for (let i = 0; i < 3; i += 1) {
+    const next = current
+      .replace(leadingPunctuationRe, "$2$1$3$1")
+      .replace(trailingPunctuationRe, "$1$2$1$3");
+
+    if (next === current) {
+      break;
+    }
+
+    current = next;
+  }
+
+  return current;
+}
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function MarkdownPre({

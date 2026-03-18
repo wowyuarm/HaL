@@ -224,11 +224,23 @@ added as components are built and patterns stabilize.
 
 ```css
 :root {
-  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
-  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  --font-sans: "IBM Plex Sans", "Noto Sans SC UI", "Segoe UI", sans-serif;
+  --font-serif: "IBM Plex Sans", "Noto Sans SC UI", "Segoe UI", sans-serif;
+  --font-mono: "Maple Mono Latin", "Noto Sans SC UI", "Maple Mono", "IBM Plex Mono",
+    "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 }
 ```
+
+Latin letters, digits, and common Western punctuation are self-hosted with
+`Maple Mono` for tool-layer text: code, timestamps, IDs, tags, buttons, and
+other compact operational labels. Body copy and headings share the same sans
+base to avoid cross-script clashes.
+Chinese text uses `Noto Sans SC` for a neutral, readable base that mixes cleanly
+with Maple Mono.
+Markdown headings inside conversation flow should read as restrained section
+markers, not page-level display titles. Keep conversation `h1/h2/h3` close
+enough in scale that long assistant answers do not fragment into oversized
+hero blocks.
 
 ### 6.2 Type Scale
 

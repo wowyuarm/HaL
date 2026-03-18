@@ -79,11 +79,11 @@ export function SessionList({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <div className="text-body font-medium text-hal-primary">
+                      <div className="font-mono text-body font-medium text-hal-primary">
                         {formatTimestamp(session.created_at)}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-hal-muted">
-                        <span className="text-hal-muted">
+                        <span className="font-mono text-hal-muted">
                           {session.turn_count} turn{session.turn_count === 1 ? "" : "s"}
                         </span>
                         {otherThreads.map((slug) => (
@@ -95,7 +95,7 @@ export function SessionList({
                     </div>
                     <span
                       className={cn(
-                        "shrink-0 pt-0.5 text-caption font-medium uppercase tracking-[0.08em]",
+                        "shrink-0 pt-0.5 font-mono text-caption font-medium uppercase tracking-[0.08em]",
                         status.textClass,
                       )}
                     >

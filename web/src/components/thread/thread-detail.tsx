@@ -49,14 +49,14 @@ export function ThreadDetailPanel({
                 <span
                   className={
                     thread.status === "active"
-                      ? "font-medium text-accent"
-                      : "font-medium text-hal-muted"
+                      ? "font-mono font-medium text-accent"
+                      : "font-mono font-medium text-hal-muted"
                   }
                 >
                   {thread.status}
                 </span>
               ) : null}
-              <span>
+              <span className="font-mono">
                 {thread.sessions.length} session{thread.sessions.length === 1 ? "" : "s"}
               </span>
             </div>

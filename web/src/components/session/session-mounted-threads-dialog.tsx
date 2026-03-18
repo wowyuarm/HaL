@@ -107,13 +107,13 @@ export function SessionMountedThreadsDialog({
                     </div>
 
                     <div className="mt-3 flex items-center justify-between gap-3 text-xs">
-                      <span className="text-hal-muted">{thread.slug}</span>
+                      <span className="font-mono text-hal-muted">{thread.slug}</span>
                       {isPrimary ? (
-                        <span className="rounded-sm bg-accent-subtle px-2 py-0.5 font-medium text-accent">
+                        <span className="rounded-sm bg-accent-subtle px-2 py-0.5 font-mono font-medium text-accent">
                           primary
                         </span>
                       ) : (
-                        <span className="text-hal-muted">{checked ? "mounted" : "not mounted"}</span>
+                        <span className="font-mono text-hal-muted">{checked ? "mounted" : "not mounted"}</span>
                       )}
                     </div>
                   </div>
@@ -135,7 +135,7 @@ export function SessionMountedThreadsDialog({
               type="button"
               onClick={() => void handleSubmit()}
               disabled={submitting}
-              className="rounded-md bg-accent px-3 py-1.5 text-body font-medium text-white transition-colors duration-fast ease-standard hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-accent px-3 py-1.5 font-mono text-body font-medium text-white transition-colors duration-fast ease-standard hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? "Applying..." : "Apply Scope"}
             </button>
