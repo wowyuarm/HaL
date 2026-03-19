@@ -24,12 +24,14 @@ interface HalMarkdownProps {
   children: string;
   tone?: HalMarkdownTone;
   className?: string;
+  onLinkClick?: (href: string) => void;
 }
 
 export function HalMarkdown({
   children,
   tone = "conversation",
   className,
+  onLinkClick,
 }: HalMarkdownProps) {
   const normalizedMarkdown = normalizeMarkdownEmphasis(children);
 
@@ -44,7 +46,7 @@ export function HalMarkdown({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
-        components={MARKDOWN_COMPONENTS}
+        components={buildMarkdownComponents(onLinkClick)}
       >
         {normalizedMarkdown}
       </ReactMarkdown>
@@ -187,15 +189,25 @@ function MarkdownLink({
   className,
   href,
   children,
+  onLinkClick,
   ...props
-}: ComponentPropsWithoutRef<"a">) {
+}: ComponentPropsWithoutRef<"a"> & { onLinkClick?: (href: string) => void }) {
   const openInNewTab = Boolean(href && !href.startsWith("#"));
+  const isEpisodeLink = Boolean(href && isEpisodeLinkHref(href));
 
   return (
     <a
       href={href}
-      target={openInNewTab ? "_blank" : undefined}
-      rel={openInNewTab ? "noreferrer noopener" : undefined}
+      target={openInNewTab && !isEpisodeLink ? "_blank" : undefined}
+      rel={openInNewTab && !isEpisodeLink ? "noreferrer noopener" : undefined}
+      onClick={
+        isEpisodeLink && href && onLinkClick
+          ? (event) => {
+              event.preventDefault();
+              onLinkClick(href);
+            }
+          : undefined
+      }
       className={cn("hal-markdown-link", className)}
       {...props}
     >
@@ -204,12 +216,21 @@ function MarkdownLink({
   );
 }
 
-const MARKDOWN_COMPONENTS = {
-  pre: MarkdownPre,
-  code: MarkdownCode,
-  table: MarkdownTable,
-  a: MarkdownLink,
-} as const;
+function buildMarkdownComponents(onLinkClick?: (href: string) => void) {
+  return {
+    pre: MarkdownPre,
+    code: MarkdownCode,
+    table: MarkdownTable,
+    a: (props: ComponentPropsWithoutRef<"a">) => (
+      <MarkdownLink {...props} onLinkClick={onLinkClick} />
+    ),
+  } as const;
+}
+
+function isEpisodeLinkHref(href: string): boolean {
+  const normalized = href.startsWith("./") ? href.slice(2) : href;
+  return normalized.startsWith("episodes/");
+}
 
 function extractTextContent(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") {

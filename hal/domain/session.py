@@ -59,6 +59,7 @@ class SessionManifest(BaseModel):
     channel: str | None = None
     chat_id: str | None = None
     primary_thread: str | None = None
+    title: str | None = None
     mounted_threads: list[str] = Field(default_factory=list)
     touched_threads: list[str] = Field(default_factory=list)
     turn_count: int = 0

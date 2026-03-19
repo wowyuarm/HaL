@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .episodes import EpisodeRepository
+from .episodes import EPISODES_DIRNAME, EpisodeRepository
 from .layout import WorkspaceLayout
 from .thread_metadata import (
     THREAD_METADATA_FILENAME,
@@ -23,6 +24,9 @@ from .thread_state import (
 THREADS_DIRNAME = "threads"
 THREAD_STATE_FILENAME = "BRIEF.md"
 _THREAD_STATUS_ACTIVE = "active"
+_EPISODE_FILE_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>.+)-(?P<session_id>s_\d{14}_[0-9a-f]{8})\.md$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +55,26 @@ class ThreadEpisodeWriteResult:
     episode_rel_path: str
     episode_title: str
     state_content: str
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadEpisodeRef:
+    """Lightweight thread episode reference keyed by session_id."""
+
+    session_id: str
+    thread_slug: str
+    episode_rel_path: str
+    episode_title: str
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadEpisodeDocument:
+    """Resolved episode markdown for one thread-relative episode file."""
+
+    thread_slug: str
+    episode_rel_path: str
+    episode_title: str
+    markdown: str
 
 
 class ThreadRepository:
@@ -151,9 +175,110 @@ class ThreadRepository:
         """Collect episode markdown paths from all thread directories."""
         return self.episodes.collect_episode_paths()
 
+    def collect_episode_refs(self, thread_slug: str) -> dict[str, ThreadEpisodeRef]:
+        """Collect episode references for one thread keyed by session id."""
+        episodes_dir = self.episodes.episodes_dir(thread_slug)
+        if not episodes_dir.is_dir():
+            return {}
+
+        refs: dict[str, ThreadEpisodeRef] = {}
+        for episode_path in sorted(episodes_dir.glob("*.md")):
+            ref = self._build_episode_ref(thread_slug, episode_path)
+            if ref is None:
+                continue
+            refs[ref.session_id] = ref
+        return refs
+
+    def collect_session_episode_refs(
+        self,
+        session_ids: set[str],
+    ) -> dict[str, list[ThreadEpisodeRef]]:
+        """Collect episode references across all threads for the given sessions."""
+        if not session_ids:
+            return {}
+
+        refs: dict[str, list[ThreadEpisodeRef]] = {}
+        for thread_dir in self._iter_thread_dirs(self.threads_dir()):
+            for episode_path in sorted((thread_dir / EPISODES_DIRNAME).glob("*.md")):
+                ref = self._build_episode_ref(thread_dir.name, episode_path)
+                if ref is None or ref.session_id not in session_ids:
+                    continue
+                refs.setdefault(ref.session_id, []).append(ref)
+        return refs
+
+    def read_episode(self, thread_slug: str, episode_rel_path: str) -> ThreadEpisodeDocument | None:
+        """Read one thread-relative episode markdown file after validating its path."""
+        episode_path = self._resolve_episode_path(thread_slug, episode_rel_path)
+        if episode_path is None or not episode_path.is_file():
+            return None
+        markdown = episode_path.read_text(encoding="utf-8")
+        return ThreadEpisodeDocument(
+            thread_slug=thread_slug,
+            episode_rel_path=self._normalize_episode_rel_path(episode_rel_path),
+            episode_title=extract_episode_title(markdown),
+            markdown=markdown,
+        )
+
     def _iter_thread_dirs(self, threads_dir: Path) -> list[Path]:
         """List candidate thread directories that may contain thread state."""
         return [thread_dir for thread_dir in sorted(threads_dir.iterdir()) if thread_dir.is_dir()]
+
+    def _build_episode_ref(
+        self,
+        thread_slug: str,
+        episode_path: Path,
+    ) -> ThreadEpisodeRef | None:
+        """Build one episode reference from an episode markdown path."""
+        session_id = self._extract_session_id(episode_path.name)
+        if session_id is None:
+            return None
+        try:
+            markdown = episode_path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+        return ThreadEpisodeRef(
+            session_id=session_id,
+            thread_slug=thread_slug,
+            episode_rel_path=f"{EPISODES_DIRNAME}/{episode_path.name}",
+            episode_title=extract_episode_title(markdown),
+        )
+
+    def _resolve_episode_path(
+        self,
+        thread_slug: str,
+        episode_rel_path: str,
+    ) -> Path | None:
+        """Resolve and validate one thread-relative episode path."""
+        relative_path = Path(episode_rel_path)
+        if not relative_path.parts or relative_path.is_absolute():
+            raise ValueError(f"Invalid episode path: {episode_rel_path}")
+        if any(part == ".." for part in relative_path.parts):
+            raise ValueError(f"Invalid episode path: {episode_rel_path}")
+        if relative_path.parts[0] != EPISODES_DIRNAME:
+            raise ValueError(
+                f"Episode path must live under {EPISODES_DIRNAME}/: {episode_rel_path}"
+            )
+        if len(relative_path.parts) < 2:
+            raise ValueError(f"Episode path must point to a markdown file: {episode_rel_path}")
+
+        episodes_dir = self.episodes.episodes_dir(thread_slug).resolve()
+        resolved = (episodes_dir / Path(*relative_path.parts[1:])).resolve()
+        if not resolved.is_relative_to(episodes_dir):
+            raise ValueError(f"Invalid episode path: {episode_rel_path}")
+        return resolved
+
+    @staticmethod
+    def _normalize_episode_rel_path(episode_rel_path: str) -> str:
+        """Normalize one thread-relative episode path to POSIX form."""
+        return Path(episode_rel_path).as_posix()
+
+    @staticmethod
+    def _extract_session_id(file_name: str) -> str | None:
+        """Extract the session id suffix from one episode filename."""
+        match = _EPISODE_FILE_RE.match(file_name)
+        if match is None:
+            return None
+        return match.group("session_id")
 
     def _load_registry_entry(self, thread_dir: Path) -> ThreadRegistryEntry | None:
         """Load one normalized registry entry from a thread directory."""

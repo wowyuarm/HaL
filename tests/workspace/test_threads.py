@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from hal.workspace.threads import (
     ThreadRepository,
     collect_thread_episode_paths,
@@ -10,6 +12,7 @@ from hal.workspace.threads import (
     episode_path_for_thread,
     thread_metadata_path,
 )
+from hal.workspace.thread_state import build_episode_file_name
 
 
 def test_collect_thread_registry_entries_reads_metadata(tmp_path: Path) -> None:
@@ -200,6 +203,65 @@ def test_collect_thread_episode_paths_wrapper_uses_repository(tmp_path: Path) ->
     (episode_dir / "2026-03-06-actions.md").write_text("# Episode\n", encoding="utf-8")
 
     assert collect_thread_episode_paths(tmp_path) == [episode_dir / "2026-03-06-actions.md"]
+
+
+def test_thread_repository_collects_episode_refs_and_reads_documents(tmp_path: Path) -> None:
+    repo = ThreadRepository(tmp_path)
+    episode_dir = tmp_path / "work" / "threads" / "github-actions" / "episodes"
+    episode_dir.mkdir(parents=True)
+    episode_path = episode_dir / build_episode_file_name(
+        now=datetime(2026, 3, 6, 9, 0, 0),
+        session_id="s_20260306090000_deadbeef",
+        thread_slug="github-actions",
+    )
+    episode_markdown = "# 2026-03-06: Workflow update\n\nBody.\n"
+    episode_path.write_text(episode_markdown, encoding="utf-8")
+
+    refs = repo.collect_episode_refs("github-actions")
+    document = repo.read_episode("github-actions", f"episodes/{episode_path.name}")
+
+    assert refs["s_20260306090000_deadbeef"].thread_slug == "github-actions"
+    assert refs["s_20260306090000_deadbeef"].episode_rel_path == f"episodes/{episode_path.name}"
+    assert refs["s_20260306090000_deadbeef"].episode_title == "2026-03-06: Workflow update"
+    assert document is not None
+    assert document.episode_rel_path == f"episodes/{episode_path.name}"
+    assert document.episode_title == "2026-03-06: Workflow update"
+    assert document.markdown == episode_markdown
+
+
+def test_thread_repository_collects_session_episode_refs_across_threads(tmp_path: Path) -> None:
+    repo = ThreadRepository(tmp_path)
+    alpha_dir = tmp_path / "work" / "threads" / "alpha" / "episodes"
+    beta_dir = tmp_path / "work" / "threads" / "beta" / "episodes"
+    alpha_dir.mkdir(parents=True)
+    beta_dir.mkdir(parents=True)
+    session_id = "s_20260306090000_deadbeef"
+    alpha_path = alpha_dir / build_episode_file_name(
+        now=datetime(2026, 3, 6, 9, 0, 0),
+        session_id=session_id,
+        thread_slug="alpha",
+    )
+    beta_path = beta_dir / build_episode_file_name(
+        now=datetime(2026, 3, 6, 9, 5, 0),
+        session_id=session_id,
+        thread_slug="beta",
+    )
+    alpha_path.write_text("# Alpha episode\n", encoding="utf-8")
+    beta_path.write_text("# Beta episode\n", encoding="utf-8")
+
+    refs = repo.collect_session_episode_refs({session_id})
+
+    assert [ref.thread_slug for ref in refs[session_id]] == ["alpha", "beta"]
+    assert refs[session_id][0].episode_rel_path == f"episodes/{alpha_path.name}"
+    assert refs[session_id][1].episode_rel_path == f"episodes/{beta_path.name}"
+
+
+def test_thread_repository_rejects_invalid_episode_paths(tmp_path: Path) -> None:
+    repo = ThreadRepository(tmp_path)
+
+    for episode_rel_path in ("../BRIEF.md", "episodes/../BRIEF.md", "BRIEF.md"):
+        with pytest.raises(ValueError):
+            repo.read_episode("github-actions", episode_rel_path)
 
 
 # ---------------------------------------------------------------------------

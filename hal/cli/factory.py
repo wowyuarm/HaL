@@ -21,6 +21,9 @@ def _resolve_provider_name(config, model_name: str):
         if p and p.api_key and any(kw in model_lower for kw in spec.keywords):
             return spec.name
 
+    if config._prefers_anyrouter_for_model(model_name) and config.providers.anyrouter.api_key:
+        return "anyrouter"
+
     for spec in PROVIDERS:
         p = getattr(config.providers, spec.name, None)
         if p and p.api_key:

@@ -242,17 +242,32 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
+    @staticmethod
+    def _prefers_anyrouter_for_model(model: str) -> bool:
+        """Return True when an Anthropic-family model should prefer AnyRouter relay."""
+        model_lower = model.lower()
+        return "claude" in model_lower or model_lower.startswith("anthropic/")
+
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
         from hal.infra.providers.registry import PROVIDERS
 
-        model_lower = (model or self.agents.defaults.model).lower()
+        selected_model = model or self.agents.defaults.model
+        model_lower = selected_model.lower()
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(kw in model_lower for kw in spec.keywords) and p.api_key:
                 return p
+
+        # AnyRouter is an Anthropic relay. When both AnyRouter and OpenRouter are
+        # configured, Claude-family models should prefer AnyRouter instead of the
+        # generic "first gateway wins" fallback.
+        if self._prefers_anyrouter_for_model(selected_model):
+            anyrouter = self.providers.anyrouter
+            if anyrouter.api_key:
+                return anyrouter
 
         # Fallback: gateways first, then others (follows registry order)
         for spec in PROVIDERS:

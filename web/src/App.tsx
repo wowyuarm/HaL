@@ -52,6 +52,8 @@ export default function App() {
   const selectSession = useHalStore((s) => s.selectSession);
   const createSessionForThread = useHalStore((s) => s.createSessionForThread);
   const updateSessionScope = useHalStore((s) => s.updateSessionScope);
+  const updateSessionTitle = useHalStore((s) => s.updateSessionTitle);
+  const openEpisode = useHalStore((s) => s.openEpisode);
   const toggleBriefPanel = useHalStore((s) => s.toggleBriefPanel);
   const setError = useHalStore((s) => s.setError);
 
@@ -133,6 +135,19 @@ export default function App() {
     setScopeEditorOpen(true);
   };
 
+  const handlePreviewEpisode = (episodeRef: {
+    threadSlug: string;
+    episodeRelPath: string;
+    episodeTitle: string;
+  }) => {
+    setError(null);
+    openEpisode({
+      threadSlug: episodeRef.threadSlug,
+      episodePath: episodeRef.episodeRelPath,
+      episodeTitle: episodeRef.episodeTitle,
+    });
+  };
+
   const handleUpdateScope = async (input: {
     addThreads: string[];
     removeThreads: string[];
@@ -156,6 +171,9 @@ export default function App() {
       if (socketState !== "live") {
         applySessionManifest(manifest);
         await loadSessionEvents(selectedSession.session_id);
+        if (activeThreadSlug) {
+          await loadThread(activeThreadSlug, { adoptSelection: false });
+        }
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to start briefing.");
@@ -170,9 +188,46 @@ export default function App() {
       if (socketState !== "live") {
         applySessionManifest(manifest);
         await loadSessionEvents(selectedSession.session_id);
+        if (activeThreadSlug) {
+          await loadThread(activeThreadSlug, { adoptSelection: false });
+        }
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to drop session.");
+    }
+  };
+
+  const handleUpdateSessionTitle = async (
+    sessionId: string,
+    input: { title: string | null },
+  ): Promise<boolean> => {
+    setError(null);
+    const manifest = await updateSessionTitle(sessionId, input);
+    return Boolean(manifest);
+  };
+
+  const handleEndSessionFromThreadDetail = async (
+    sessionId: string,
+    reason: "brief" | "drop",
+  ): Promise<boolean> => {
+    setError(null);
+    try {
+      const manifest = await endSession(sessionId, { reason });
+      applySessionManifest(manifest);
+      await loadSessionEvents(sessionId);
+      if (activeThreadSlug) {
+        await loadThread(activeThreadSlug, { adoptSelection: false });
+      }
+      return true;
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : reason === "brief"
+            ? "Failed to start briefing."
+            : "Failed to drop session.",
+      );
+      return false;
     }
   };
 
@@ -223,6 +278,9 @@ export default function App() {
                 selectedSessionId={selectedSessionId}
                 onSelectSession={handleSelectSession}
                 onCreateSession={handleCreateSession}
+                onUpdateSessionTitle={handleUpdateSessionTitle}
+                onEndSession={handleEndSessionFromThreadDetail}
+                onPreviewEpisode={handlePreviewEpisode}
                 creatingSession={creatingSession}
                 onToggleBriefPanel={toggleBriefPanel}
               />
@@ -231,7 +289,10 @@ export default function App() {
         </main>
 
         {/* External review panel */}
-        <ReviewPanel briefMarkdown={activeThread?.brief_markdown ?? null} />
+        <ReviewPanel
+          briefMarkdown={activeThread?.brief_markdown ?? null}
+          threadSlug={activeThread?.slug ?? null}
+        />
 
         {/* Dialogs */}
         <SessionMountedThreadsDialog

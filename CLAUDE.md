@@ -69,3 +69,4 @@ Native web (SessionBridge) ──────────────┘        
 - Tests use `pytest` + `pytest-asyncio` (`asyncio_mode = auto`).
 - Add module-level constants for non-trivial thresholds/limits; avoid magic numbers in flow logic.
 - Register new tools/providers through existing registries/factories (`hal/runtime/tool_factory.py`, provider registry).
+- Commit messages follow `type(scope): summary`; for frontend work, prefer `web-session`, `web-thread`, `web-ui`, `web-layout`, or `web-runtime` over plain `web` when the change is mainly in one area.

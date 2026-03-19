@@ -6,7 +6,7 @@ from typing import Any
 
 from hal.domain.events import SessionEvent
 from hal.domain.session import SessionManifest
-from hal.workspace.threads import ThreadRegistryEntry
+from hal.workspace.threads import ThreadEpisodeDocument, ThreadEpisodeRef, ThreadRegistryEntry
 
 SESSION_SNAPSHOT = "session_snapshot"
 SESSION_EVENT = "session_event"
@@ -60,6 +60,26 @@ def serialize_thread_summary(
         "description": entry.description,
         "updated_at": entry.updated_at,
         "session_counts": session_counts,
+    }
+
+
+def serialize_thread_episode_ref(ref: ThreadEpisodeRef) -> dict[str, Any]:
+    """Serialize one thread episode reference."""
+    return {
+        "session_id": ref.session_id,
+        "thread_slug": ref.thread_slug,
+        "episode_rel_path": ref.episode_rel_path,
+        "episode_title": ref.episode_title,
+    }
+
+
+def serialize_thread_episode_document(document: ThreadEpisodeDocument) -> dict[str, Any]:
+    """Serialize one thread episode markdown document."""
+    return {
+        "thread_slug": document.thread_slug,
+        "episode_rel_path": document.episode_rel_path,
+        "episode_title": document.episode_title,
+        "markdown": document.markdown,
     }
 
 

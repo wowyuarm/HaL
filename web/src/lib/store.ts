@@ -5,6 +5,7 @@ import {
   getSessionEvents,
   getThread,
   listThreads,
+  updateSessionTitle,
   updateSessionScope,
 } from "@/lib/api";
 import type {
@@ -19,6 +20,12 @@ import type {
 export type ReviewPanelState =
   | { kind: "brief" }
   | { kind: "evidence"; turnId: string }
+  | {
+      kind: "episode";
+      threadSlug: string;
+      episodePath: string;
+      episodeTitle?: string | null;
+    }
   | null;
 
 interface HalStore {
@@ -43,6 +50,11 @@ interface HalStore {
   toggleBriefPanel: () => void;
   closeReviewPanel: () => void;
   openInspector: (turnId: string) => void;
+  openEpisode: (input: {
+    threadSlug: string;
+    episodePath: string;
+    episodeTitle?: string | null;
+  }) => void;
   setSocketState: (state: SocketState) => void;
   setError: (message: string | null) => void;
 
@@ -53,6 +65,10 @@ interface HalStore {
   ) => Promise<void>;
   refreshActiveThread: () => Promise<void>;
   createSessionForThread: (slug: string) => Promise<SessionManifest | null>;
+  updateSessionTitle: (
+    sessionId: string,
+    input: { title: string | null },
+  ) => Promise<SessionManifest | null>;
   updateSessionScope: (
     sessionId: string,
     input: { addThreads?: string[]; removeThreads?: string[] },
@@ -317,6 +333,15 @@ export const useHalStore = create<HalStore>((set, get) => ({
           ? null
           : { kind: "evidence", turnId },
     })),
+  openEpisode: ({ threadSlug, episodePath, episodeTitle }) =>
+    set({
+      reviewPanel: {
+        kind: "episode",
+        threadSlug,
+        episodePath,
+        episodeTitle,
+      },
+    }),
   setSocketState: (state) => set({ socketState: state }),
   setError: (message) => set({ lastError: message }),
 
@@ -425,6 +450,22 @@ export const useHalStore = create<HalStore>((set, get) => ({
       set({
         creatingSession: false,
         lastError: error instanceof Error ? error.message : "Failed to create session.",
+      });
+      return null;
+    }
+  },
+
+  updateSessionTitle: async (sessionId, { title }) => {
+    set({ lastError: null });
+    try {
+      const manifest = await updateSessionTitle(sessionId, { title });
+      set((state) => ({
+        ...mergeManifestIntoState(state, manifest),
+      }));
+      return manifest;
+    } catch (error) {
+      set({
+        lastError: error instanceof Error ? error.message : "Failed to update session title.",
       });
       return null;
     }

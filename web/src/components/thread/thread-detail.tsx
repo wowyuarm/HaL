@@ -14,6 +14,19 @@ interface ThreadDetailProps {
   onSelectSession: (sessionId: string) => void;
   onCreateSession: () => void;
   onToggleBriefPanel: () => void;
+  onUpdateSessionTitle: (
+    sessionId: string,
+    input: { title: string | null },
+  ) => Promise<boolean> | boolean;
+  onEndSession: (
+    sessionId: string,
+    reason: "brief" | "drop",
+  ) => Promise<boolean> | boolean;
+  onPreviewEpisode: (input: {
+    threadSlug: string;
+    episodeRelPath: string;
+    episodeTitle: string;
+  }) => void;
   creatingSession?: boolean;
 }
 
@@ -23,6 +36,9 @@ export function ThreadDetailPanel({
   onSelectSession,
   onCreateSession,
   onToggleBriefPanel,
+  onUpdateSessionTitle,
+  onEndSession,
+  onPreviewEpisode,
   creatingSession = false,
 }: ThreadDetailProps) {
   if (!thread) {
@@ -80,9 +96,13 @@ export function ThreadDetailPanel({
           <SessionList
             currentThreadSlug={thread.slug}
             sessions={thread.sessions}
+            episodeRefs={thread.episode_refs}
             selectedSessionId={selectedSessionId}
             onSelect={onSelectSession}
             onCreate={onCreateSession}
+            onUpdateSessionTitle={onUpdateSessionTitle}
+            onEndSession={onEndSession}
+            onPreviewEpisode={onPreviewEpisode}
             creating={creatingSession}
           />
         </div>

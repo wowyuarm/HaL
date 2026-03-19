@@ -95,6 +95,18 @@ def test_load_config_invalid_yaml_raises(tmp_home: Path) -> None:
         load_config()
 
 
+def test_get_provider_prefers_anyrouter_over_openrouter_for_claude_models() -> None:
+    cfg = Config()
+    cfg.agents.defaults.model = "anthropic/claude-opus-4-6"
+    cfg.providers.openrouter.api_key = "sk-or-test"
+    cfg.providers.anyrouter.api_key = "sk-test"
+    cfg.providers.anyrouter.api_base = "http://127.0.0.1:3181"
+
+    provider = cfg.get_provider()
+
+    assert provider is cfg.providers.anyrouter
+
+
 def test_load_config_lifts_legacy_channels_web_block(tmp_home: Path) -> None:
     path = get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -513,15 +513,19 @@ Diagnostic detail available through explicit user action:
 - Evidence is entered through explicit interaction, never auto-expanded.
 - When available, a compact indicator conveys what kind of evidence exists.
 - Evidence does not interrupt the primary reading flow.
+- BRIEF, episode preview, and turn evidence share the same right-side review panel surface. Only one review object should be open at a time.
 
 ### 13.4 Session and Thread Overview Hierarchy
 
 - Thread detail and session pages should use the same core content width.
 - In thread detail, thread name is a true page title, not body-sized metadata.
 - Session lists use a primary line plus secondary metadata line. Do not place timestamp, status, and counts all at the same visual weight.
+- In grouped session lists, lifecycle status belongs to the group header. Do not repeat per-session status badges inside each row.
 - Thread-detail session lists may group runs by lifecycle state. These groups should read like light ledger sections, not stacked accordion cards.
 - Group toggles use compact chevron disclosure, `meta`-scale labels, and restrained count markers. Use border and spacing before fill.
 - Collapse/expand motion should stay subtle: quick opacity and height changes only, with no bounce or theatrical slide.
+- Session-row actions appear only on hover or focus and should stay at the row end as lightweight contextual controls. Prefer no more than two visible controls at once.
+- Session renaming in thread detail should happen inline within the row rather than through a separate dialog, so the list keeps its ledger rhythm.
 - Empty states should read like calm paper notes, not dashed placeholders or form errors.
 
 ---
@@ -542,6 +546,7 @@ close buttons, icon buttons.
 - Hover: text promotes to `--hal-text`, border promotes to `--border-default`.
   **No background change.**
 - These controls are furniture — present and reachable, never attention-seeking.
+- In overflow menus, semantic escalation should usually happen through text color only. For example, a supportive action may use accent text and a destructive action may use danger text, without adding filled backgrounds.
 
 #### Primary Action
 `--color-accent` fill, `--text-on-accent` text. **No shadow.** Maximum one per
@@ -622,7 +627,8 @@ Markdown is not a browser default and not a generic `prose` dump. It is a first-
 - Inline code should read like an in-sentence annotation: subtle surface, warm text emphasis, no decorative pill styling.
 - Code blocks use a restrained inset surface, no shadow, and no persistent toolbar chrome. Copy affordance may appear on hover only.
 - Tables are reading objects, not cards: full available width, horizontal rules only, no outer box, no hover theatrics.
-- Links open in a new tab and should use understated underline treatment rather than button-like styling.
+- External links open in a new tab and should use understated underline treatment rather than button-like styling.
+- Internal thread-episode links inside BRIEF or episode markdown should stay in-app and open the shared review panel rather than spawning a browser tab.
 
 ---
 

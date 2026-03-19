@@ -58,9 +58,13 @@ class WebServer:
         self._app.router.add_get("/sessions/{session_id}/events", self._get_events)
         self._app.router.add_post("/sessions/{session_id}/end", self._end_session)
         self._app.router.add_post("/sessions/{session_id}/scope", self._update_scope)
+        self._app.router.add_post("/sessions/{session_id}/title", self._update_session_title)
         self._app.router.add_get(_WS_ROUTE, self._session_ws)
         self._app.router.add_get("/threads", self._list_threads)
         self._app.router.add_get("/threads/{slug}", self._get_thread)
+        self._app.router.add_get(
+            "/threads/{slug}/episode/{episode_rel_path:.*}", self._get_thread_episode
+        )
         self._app.router.add_get(_FRONTEND_STATIC_ROUTE, self._serve_frontend_static)
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
@@ -203,6 +207,17 @@ class WebServer:
             raise web.HTTPBadRequest(text=str(exc)) from exc
         return web.json_response({"session": serialize_manifest(manifest)})
 
+    async def _update_session_title(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        self._require_manifest(session_id)
+        payload = await self._read_json(request)
+        title = self._optional_string(payload.get("title"))
+        try:
+            manifest = await self._bridge.update_session_title(session_id, title)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        return web.json_response({"session": serialize_manifest(manifest)})
+
     async def _end_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["session_id"]
         self._require_manifest(session_id)
@@ -230,6 +245,15 @@ class WebServer:
         except ValueError as exc:
             raise web.HTTPNotFound(text=str(exc)) from exc
         return web.json_response({"thread": thread})
+
+    async def _get_thread_episode(self, request: web.Request) -> web.Response:
+        slug = request.match_info["slug"]
+        episode_rel_path = request.match_info["episode_rel_path"]
+        try:
+            episode = self._bridge.get_thread_episode(slug, episode_rel_path)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        return web.json_response({"episode": episode})
 
     async def _session_ws(self, request: web.Request) -> web.StreamResponse:
         session_id = request.match_info["session_id"]

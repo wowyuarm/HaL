@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from aiohttp import web
 
 from hal.infra.config.schema import WebConfig
 from hal.web import WebServer
+from hal.workspace.thread_state import build_episode_file_name
 
 
 def _create_thread(thread_repo, slug: str, title: str) -> None:
@@ -50,6 +52,16 @@ async def test_http_handler_roundtrip_for_sessions_and_threads(bridge, thread_re
     session_payload = _decode_response(session_response)
     assert session_payload["session"]["primary_thread"] == "auth"
 
+    episode_path = thread_repo.write_episode(
+        "auth",
+        build_episode_file_name(
+            now=datetime(2026, 3, 6, 9, 0, 0),
+            session_id=session_id,
+            thread_slug="auth",
+        ),
+        "# 2026-03-06: Auth wrap-up\n\nBody.\n",
+    )
+
     threads_response = await server._list_threads(_FakeRequest())  # type: ignore[attr-defined]
     threads_payload = _decode_response(threads_response)
     assert threads_payload["threads"][0]["slug"] == "auth"
@@ -61,6 +73,10 @@ async def test_http_handler_roundtrip_for_sessions_and_threads(bridge, thread_re
     thread_payload = _decode_response(thread_response)
     assert thread_payload["thread"]["brief_markdown"].startswith("# Auth")
     assert thread_payload["thread"]["sessions"][0]["session_id"] == session_id
+    assert thread_payload["thread"]["episode_refs"][session_id]["thread_slug"] == "auth"
+    assert thread_payload["thread"]["episode_refs"][session_id]["episode_rel_path"] == (
+        f"episodes/{episode_path.name}"
+    )
 
 
 @pytest.mark.asyncio
@@ -131,6 +147,25 @@ async def test_http_scope_update_returns_updated_manifest(bridge, thread_repo) -
 
 
 @pytest.mark.asyncio
+async def test_http_session_title_update_persists_manifest(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    response = await server._update_session_title(  # type: ignore[attr-defined]
+        _FakeRequest(
+            payload={"title": "Planning run"},
+            match_info={"session_id": manifest.session_id},
+        )
+    )
+
+    assert response.status == 200
+    payload = _decode_response(response)
+    assert payload["session"]["title"] == "Planning run"
+    assert bridge.get_session(manifest.session_id).title == "Planning run"
+
+
+@pytest.mark.asyncio
 async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thread_repo) -> None:
     _create_thread(thread_repo, "auth", "Auth")
     manifest = await bridge.create_session(primary_thread="auth")
@@ -156,6 +191,44 @@ async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thr
         )
     end_payload = _decode_response(end_response)
     assert end_payload["session"]["status"] == "briefing"
+
+
+@pytest.mark.asyncio
+async def test_http_thread_episode_endpoint_roundtrips_markdown_and_rejects_traversal(
+    bridge,
+    thread_repo,
+) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    episode_path = thread_repo.write_episode(
+        "auth",
+        build_episode_file_name(
+            now=datetime(2026, 3, 6, 9, 0, 0),
+            session_id="s_20260306090000_deadbeef",
+            thread_slug="auth",
+        ),
+        "# 2026-03-06: Auth wrap-up\n\nBody.\n",
+    )
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    response = await server._get_thread_episode(  # type: ignore[attr-defined]
+        _FakeRequest(
+            match_info={
+                "slug": "auth",
+                "episode_rel_path": f"episodes/{episode_path.name}",
+            }
+        )
+    )
+    assert response.status == 200
+    payload = _decode_response(response)
+    assert payload["episode"]["episode_rel_path"] == f"episodes/{episode_path.name}"
+    assert payload["episode"]["episode_title"] == "2026-03-06: Auth wrap-up"
+    assert payload["episode"]["markdown"].startswith("# 2026-03-06: Auth wrap-up")
+
+    with pytest.raises(Exception) as exc_info:
+        await server._get_thread_episode(  # type: ignore[attr-defined]
+            _FakeRequest(match_info={"slug": "auth", "episode_rel_path": "../BRIEF.md"})
+        )
+    assert getattr(exc_info.value, "status", None) == 400
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -11,13 +12,17 @@ from hal.domain.event_sink import SessionEventSink
 from hal.domain.events import SessionEvent
 from hal.domain.session import SessionManifest
 from hal.runtime.engine.processing import build_direct_inbound_message
+from hal.web.protocol import serialize_thread_episode_document, serialize_thread_episode_ref
 from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.session_store import SessionStore
-from hal.workspace.threads import ThreadRegistryEntry, ThreadRepository
+from hal.workspace.threads import ThreadEpisodeRef, ThreadRegistryEntry, ThreadRepository
 
 _THREAD_LIST_MAX = 200
 _WEB_CHANNEL = "web"
 _WEB_SENDER_ID = "web-user"
+_CJK_TO_ASCII_RE = re.compile(r"([\u3400-\u4DBF\u4E00-\u9FFF])([A-Za-z0-9])")
+_ASCII_TO_CJK_RE = re.compile(r"([A-Za-z0-9])([\u3400-\u4DBF\u4E00-\u9FFF])")
+_TITLE_SPACE_RE = re.compile(r"\s+")
 
 
 class SessionBusyError(ValueError):
@@ -179,6 +184,17 @@ class SessionBridge:
                 remove_threads=remove or None,
             )
 
+    async def update_session_title(self, session_id: str, title: str | None) -> SessionManifest:
+        """Update one session's human-facing title."""
+        normalized = self._normalize_session_title(title)
+        async with self._session_lock(session_id):
+            manifest = self._require_session(session_id)
+            state = self._engine._sessions.get(session_id)
+            target = state.manifest if state is not None else manifest
+            target.title = normalized
+            self._session_store.write_manifest(session_id, target)
+            return target
+
     async def subscribe(self, session_id: str) -> SessionSubscription:
         """Attach a live event subscriber to an active in-memory session."""
         self._require_session(session_id)
@@ -224,6 +240,14 @@ class SessionBridge:
         brief = self._threads.read_state(slug) or ""
         sessions = self.list_sessions(thread_slug=slug)
         counts = Counter(session.status for session in sessions)
+        session_episode_refs = self._threads.collect_session_episode_refs(
+            {session.session_id for session in sessions}
+        )
+        episode_refs = {
+            session.session_id: serialize_thread_episode_ref(ref)
+            for session in sessions
+            if (ref := _select_session_episode_ref(slug, session, session_episode_refs)) is not None
+        }
         return {
             "slug": entry.slug,
             "name": entry.name,
@@ -234,7 +258,16 @@ class SessionBridge:
             "brief_markdown": brief,
             "session_counts": dict(counts),
             "sessions": [session.model_dump(mode="json") for session in sessions],
+            "episode_refs": episode_refs,
         }
+
+    def get_thread_episode(self, slug: str, episode_rel_path: str) -> dict[str, Any]:
+        """Return one thread episode markdown document."""
+        self._require_thread_entry(slug)
+        document = self._threads.read_episode(slug, episode_rel_path)
+        if document is None:
+            raise ValueError(f"Unknown episode path for thread {slug}: {episode_rel_path}")
+        return serialize_thread_episode_document(document)
 
     def _build_thread_session_counts(self) -> dict[str, Counter[str]]:
         counts: dict[str, Counter[str]] = defaultdict(Counter)
@@ -322,6 +355,14 @@ class SessionBridge:
             joined = ", ".join(missing)
             raise ValueError(f"Unknown thread slug(s): {joined}")
 
+    @staticmethod
+    def _normalize_session_title(title: str | None) -> str | None:
+        normalized = title.strip() if isinstance(title, str) else ""
+        normalized = _TITLE_SPACE_RE.sub(" ", normalized)
+        normalized = _CJK_TO_ASCII_RE.sub(r"\1 \2", normalized)
+        normalized = _ASCII_TO_CJK_RE.sub(r"\1 \2", normalized)
+        return normalized or None
+
 
 def _thread_session_total(session_counts: dict[str, int]) -> int:
     return sum(session_counts.values())
@@ -329,3 +370,31 @@ def _thread_session_total(session_counts: dict[str, int]) -> int:
 
 def _thread_live_session_total(session_counts: dict[str, int]) -> int:
     return int(session_counts.get("active", 0)) + int(session_counts.get("briefing", 0))
+
+
+def _select_session_episode_ref(
+    current_thread_slug: str,
+    session: SessionManifest,
+    refs_by_session: dict[str, list[ThreadEpisodeRef]],
+) -> ThreadEpisodeRef | None:
+    candidates = refs_by_session.get(session.session_id, [])
+    if not candidates:
+        return None
+
+    mounted_threads = set(session.mounted_threads)
+    touched_threads = set(session.touched_threads)
+
+    def sort_key(ref: ThreadEpisodeRef) -> tuple[int, str, str]:
+        if ref.thread_slug == current_thread_slug:
+            priority = 0
+        elif session.primary_thread and ref.thread_slug == session.primary_thread:
+            priority = 1
+        elif ref.thread_slug in mounted_threads:
+            priority = 2
+        elif ref.thread_slug in touched_threads:
+            priority = 3
+        else:
+            priority = 4
+        return (priority, ref.thread_slug, ref.episode_rel_path)
+
+    return min(candidates, key=sort_key)

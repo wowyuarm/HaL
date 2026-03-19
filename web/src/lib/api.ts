@@ -1,4 +1,10 @@
-import type { SessionEvent, SessionManifest, ThreadDetail, ThreadSummary } from "@/lib/types";
+import type {
+  SessionEvent,
+  SessionManifest,
+  ThreadDetail,
+  ThreadEpisode,
+  ThreadSummary,
+} from "@/lib/types";
 
 export interface SessionTurnSubmission {
   session: SessionManifest;
@@ -40,6 +46,20 @@ export async function createSession(input: {
   return payload.session;
 }
 
+export async function updateSessionTitle(
+  sessionId: string,
+  input: { title: string | null },
+): Promise<SessionManifest> {
+  const payload = await requestJson<{ session: SessionManifest }>(
+    `/sessions/${encodeURIComponent(sessionId)}/title`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+  return payload.session;
+}
+
 export async function submitSessionTurn(
   sessionId: string,
   input: { content: string },
@@ -58,6 +78,16 @@ export async function getSessionEvents(sessionId: string): Promise<SessionEvent[
     `/sessions/${encodeURIComponent(sessionId)}/events`,
   );
   return payload.events;
+}
+
+export async function getThreadEpisode(
+  threadSlug: string,
+  episodePath: string,
+): Promise<ThreadEpisode> {
+  const payload = await requestJson<{ episode: ThreadEpisode }>(
+    `/threads/${encodeURIComponent(threadSlug)}/episode/${encodeURIComponent(episodePath)}`,
+  );
+  return payload.episode;
 }
 
 export async function endSession(

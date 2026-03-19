@@ -45,6 +45,27 @@ def test_make_alternate_provider_passes_resolved_provider_name(monkeypatch) -> N
     assert captured["provider_name"] == "anyrouter"
 
 
+def test_make_provider_prefers_anyrouter_over_openrouter_for_claude_models(monkeypatch) -> None:
+    config = Config()
+    config.agents.defaults.model = "anthropic/claude-opus-4-6"
+    config.providers.openrouter.api_key = "sk-or-test"
+    config.providers.anyrouter.api_key = "sk-test"
+    config.providers.anyrouter.api_base = "http://127.0.0.1:3181"
+
+    captured = {}
+
+    class DummyProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("hal.infra.providers.litellm.LiteLLMProvider", DummyProvider)
+
+    provider = factory.make_provider(config)
+    assert isinstance(provider, DummyProvider)
+    assert captured["provider_name"] == "anyrouter"
+    assert captured["api_base"] == "http://127.0.0.1:3181"
+
+
 def test_make_provider_passes_request_params(monkeypatch) -> None:
     config = Config()
     config.agents.defaults.model = "gpt-4o"

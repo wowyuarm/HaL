@@ -61,6 +61,7 @@ No fixed coverage threshold is configured; add regression tests for bug fixes.
 
 ## Commit & Pull Request Guidelines
 Follow observed commit style: `type(scope): imperative summary` (for example `feat(memory): ...`, `fix(exec): ...`, `refactor(cli): ...`).  
+For frontend commits, prefer a slightly more specific scope than plain `web` when one area is clearly affected: use `web-session`, `web-thread`, `web-ui`, `web-layout`, or `web-runtime`; keep plain `web` only for changes that intentionally span multiple frontend areas.  
 For non-trivial changes, include a short body using `-` bullet points, each on its own real newline (never join bullets with literal `\n` strings — use a heredoc to pass multi-line messages).
 Keep commits focused and runnable. Before opening a PR, run `pytest tests/` and `ruff check hal/ && ruff format hal/`.  
 PRs should include purpose, key files changed, config/migration notes, and verification steps (commands plus short output snippets). Link related issues when applicable.

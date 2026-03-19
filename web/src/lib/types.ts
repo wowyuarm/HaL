@@ -22,6 +22,7 @@ export interface ThreadSummary {
 export interface SessionManifest {
   session_id: string;
   status: SessionStatus;
+  title?: string | null;
   created_at: string;
   ended_at: string | null;
   channel: string | null;
@@ -33,10 +34,27 @@ export interface SessionManifest {
   last_event_seq: number;
 }
 
+/** Episode reference returned in a thread view for one session. */
+export interface ThreadEpisodeRef {
+  session_id: string;
+  thread_slug: string;
+  episode_rel_path: string;
+  episode_title: string;
+}
+
 /** Full thread detail returned by `/threads/{slug}`. */
 export interface ThreadDetail extends ThreadSummary {
   brief_markdown: string;
   sessions: SessionManifest[];
+  episode_refs?: Record<string, ThreadEpisodeRef>;
+}
+
+/** Episode markdown payload returned for previewing a thread episode. */
+export interface ThreadEpisode {
+  thread_slug: string;
+  episode_rel_path: string;
+  episode_title: string;
+  markdown: string;
 }
 
 /** Durable session event entry from `working-log.jsonl`. */

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 import pytest
 
@@ -15,6 +16,7 @@ from hal.domain.events import (
     TURN_STARTED,
     USER_MESSAGE,
 )
+from hal.workspace.thread_state import build_episode_file_name
 
 
 def _create_thread(thread_repo, slug: str, title: str) -> None:
@@ -34,6 +36,19 @@ async def test_create_session_emits_session_created(bridge, engine, thread_repo)
     assert manifest.primary_thread == "auth"
     assert manifest.mounted_threads == ["auth"]
     assert [event.type for event in events] == [SESSION_CREATED, MESSAGE_INJECTED]
+
+
+@pytest.mark.asyncio
+async def test_update_session_title_persists_manifest(bridge, engine, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+
+    updated = await bridge.update_session_title(manifest.session_id, "  规划v2阶段3  ")
+    persisted = engine._session_store.read_manifest(manifest.session_id)
+
+    assert updated.title == "规划 v2 阶段 3"
+    assert persisted is not None
+    assert persisted.title == "规划 v2 阶段 3"
 
 
 @pytest.mark.asyncio
@@ -123,6 +138,91 @@ async def test_removed_scope_thread_no_longer_lists_session_even_if_touched(
     assert updated.touched_threads == ["memory"]
     assert memory_thread["sessions"] == []
     assert memory_summary["session_counts"] == {}
+
+
+@pytest.mark.asyncio
+async def test_thread_detail_exposes_episode_refs_for_briefed_sessions(
+    bridge,
+    thread_repo,
+) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    episode_markdown = "# 2026-03-06: Auth wrap-up\n\nBody.\n"
+    episode_path = thread_repo.write_episode(
+        "auth",
+        build_episode_file_name(
+            now=datetime(2026, 3, 6, 9, 0, 0),
+            session_id=manifest.session_id,
+            thread_slug="auth",
+        ),
+        episode_markdown,
+    )
+
+    thread = bridge.get_thread("auth")
+    episode_ref = thread["episode_refs"][manifest.session_id]
+
+    assert episode_ref["thread_slug"] == "auth"
+    assert episode_path.name == episode_ref["episode_rel_path"].split("/")[-1]
+    assert episode_ref["episode_title"] == "2026-03-06: Auth wrap-up"
+
+
+@pytest.mark.asyncio
+async def test_thread_detail_prefers_cross_thread_episode_for_matching_session(
+    bridge,
+    thread_repo,
+) -> None:
+    _create_thread(thread_repo, "hal-project", "HaL Project")
+    _create_thread(thread_repo, "hal-web-design", "HaL Web Design")
+    manifest = await bridge.create_session(
+        primary_thread="hal-project",
+        mounted_threads=["hal-web-design"],
+    )
+    manifest.status = "ended"
+    engine_manifest = bridge._engine._session_store.read_manifest(manifest.session_id)
+    assert engine_manifest is not None
+    engine_manifest.status = "ended"
+    bridge._engine._session_store.write_manifest(manifest.session_id, engine_manifest)
+    episode_path = thread_repo.write_episode(
+        "hal-web-design",
+        build_episode_file_name(
+            now=datetime(2026, 3, 6, 9, 0, 0),
+            session_id=manifest.session_id,
+            thread_slug="hal-web-design",
+        ),
+        "# 2026-03-06: Web design wrap-up\n\nBody.\n",
+    )
+
+    thread = bridge.get_thread("hal-project")
+    episode_ref = thread["episode_refs"][manifest.session_id]
+
+    assert episode_ref["thread_slug"] == "hal-web-design"
+    assert episode_ref["episode_rel_path"] == f"episodes/{episode_path.name}"
+    assert episode_ref["episode_title"] == "2026-03-06: Web design wrap-up"
+
+
+@pytest.mark.asyncio
+async def test_thread_episode_reader_returns_markdown_and_rejects_traversal(
+    bridge,
+    thread_repo,
+) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    episode_path = thread_repo.write_episode(
+        "auth",
+        build_episode_file_name(
+            now=datetime(2026, 3, 6, 9, 0, 0),
+            session_id="s_20260306090000_deadbeef",
+            thread_slug="auth",
+        ),
+        "# 2026-03-06: Auth wrap-up\n\nBody.\n",
+    )
+
+    episode = bridge.get_thread_episode("auth", f"episodes/{episode_path.name}")
+    assert episode["episode_rel_path"] == f"episodes/{episode_path.name}"
+    assert episode["episode_title"] == "2026-03-06: Auth wrap-up"
+    assert episode["markdown"].startswith("# 2026-03-06: Auth wrap-up")
+
+    with pytest.raises(ValueError):
+        bridge.get_thread_episode("auth", "../BRIEF.md")
 
 
 @pytest.mark.asyncio
