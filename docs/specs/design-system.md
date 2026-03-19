@@ -519,6 +519,9 @@ Diagnostic detail available through explicit user action:
 - Thread detail and session pages should use the same core content width.
 - In thread detail, thread name is a true page title, not body-sized metadata.
 - Session lists use a primary line plus secondary metadata line. Do not place timestamp, status, and counts all at the same visual weight.
+- Thread-detail session lists may group runs by lifecycle state. These groups should read like light ledger sections, not stacked accordion cards.
+- Group toggles use compact chevron disclosure, `meta`-scale labels, and restrained count markers. Use border and spacing before fill.
+- Collapse/expand motion should stay subtle: quick opacity and height changes only, with no bounce or theatrical slide.
 - Empty states should read like calm paper notes, not dashed placeholders or form errors.
 
 ---

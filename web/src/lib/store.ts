@@ -63,6 +63,36 @@ interface HalStore {
   appendSessionEvent: (event: SessionEvent) => void;
 }
 
+function sessionTotalCount(counts: ThreadSummary["session_counts"]): number {
+  return (
+    (counts.active ?? 0) +
+    (counts.briefing ?? 0) +
+    (counts.ended ?? 0) +
+    (counts.dropped ?? 0)
+  );
+}
+
+function liveSessionCount(counts: ThreadSummary["session_counts"]): number {
+  return (counts.active ?? 0) + (counts.briefing ?? 0);
+}
+
+function sortThreadSummaries(threads: ThreadSummary[]): ThreadSummary[] {
+  return [...threads].sort((a, b) => {
+    const totalDelta = sessionTotalCount(b.session_counts) - sessionTotalCount(a.session_counts);
+    if (totalDelta !== 0) return totalDelta;
+
+    const liveDelta = liveSessionCount(b.session_counts) - liveSessionCount(a.session_counts);
+    if (liveDelta !== 0) return liveDelta;
+
+    if (a.updated_at && b.updated_at && a.updated_at !== b.updated_at) {
+      return b.updated_at.localeCompare(a.updated_at);
+    }
+    if (a.updated_at && !b.updated_at) return -1;
+    if (!a.updated_at && b.updated_at) return 1;
+    return a.slug.localeCompare(b.slug);
+  });
+}
+
 function mergeSessionEvents(
   current: SessionEvent[] | undefined,
   incoming: SessionEvent[],
@@ -209,16 +239,18 @@ function syncThreadSummaries(
   threads: ThreadSummary[],
   details: Record<string, ThreadDetail>,
 ): ThreadSummary[] {
-  return threads.map((thread) => {
-    const detail = details[thread.slug];
-    return detail
-      ? {
-          ...thread,
-          session_counts: detail.session_counts,
-          updated_at: detail.updated_at,
-        }
-      : thread;
-  });
+  return sortThreadSummaries(
+    threads.map((thread) => {
+      const detail = details[thread.slug];
+      return detail
+        ? {
+            ...thread,
+            session_counts: detail.session_counts,
+            updated_at: detail.updated_at,
+          }
+        : thread;
+    }),
+  );
 }
 
 function normalizeThreadDetail(detail: ThreadDetail): ThreadDetail {
@@ -293,7 +325,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
     try {
       const threads = await listThreads();
       set((state) => ({
-        threads,
+        threads: sortThreadSummaries(threads),
         activeThreadSlug:
           state.activeThreadSlug && threads.some((thread) => thread.slug === state.activeThreadSlug)
             ? state.activeThreadSlug

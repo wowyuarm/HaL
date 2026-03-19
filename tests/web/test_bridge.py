@@ -123,3 +123,18 @@ async def test_removed_scope_thread_no_longer_lists_session_even_if_touched(
     assert updated.touched_threads == ["memory"]
     assert memory_thread["sessions"] == []
     assert memory_summary["session_counts"] == {}
+
+
+@pytest.mark.asyncio
+async def test_list_threads_orders_by_session_total_desc(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    _create_thread(thread_repo, "memory", "Memory")
+    _create_thread(thread_repo, "search", "Search")
+
+    await bridge.create_session(primary_thread="auth")
+    await bridge.create_session(primary_thread="auth")
+    await bridge.create_session(primary_thread="memory")
+
+    thread_summaries = bridge.list_threads()
+
+    assert [thread["slug"] for thread in thread_summaries] == ["auth", "memory", "search"]

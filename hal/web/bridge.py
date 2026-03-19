@@ -198,7 +198,7 @@ class SessionBridge:
         """Return thread summaries enriched with session counts."""
         entries = self._threads.collect_registry_entries(max_entries=_THREAD_LIST_MAX)
         counts = self._build_thread_session_counts()
-        return [
+        summaries = [
             {
                 "slug": entry.slug,
                 "name": entry.name,
@@ -210,6 +210,13 @@ class SessionBridge:
             }
             for entry in entries
         ]
+        summaries.sort(
+            key=lambda summary: (
+                -_thread_session_total(summary["session_counts"]),
+                -_thread_live_session_total(summary["session_counts"]),
+            )
+        )
+        return summaries
 
     def get_thread(self, slug: str) -> dict[str, Any]:
         """Return thread detail, BRIEF.md, and currently mounted sessions."""
@@ -314,3 +321,11 @@ class SessionBridge:
         if missing:
             joined = ", ".join(missing)
             raise ValueError(f"Unknown thread slug(s): {joined}")
+
+
+def _thread_session_total(session_counts: dict[str, int]) -> int:
+    return sum(session_counts.values())
+
+
+def _thread_live_session_total(session_counts: dict[str, int]) -> int:
+    return int(session_counts.get("active", 0)) + int(session_counts.get("briefing", 0))
