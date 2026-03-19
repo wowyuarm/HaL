@@ -19,6 +19,16 @@ def join_prompt_sections(*sections: str) -> str:
     return "\n\n---\n\n".join(present_sections)
 
 
+def _normalize_model_family(model: str | None) -> str:
+    """Return a lowercase provider-stripped model name for family checks."""
+    if not model:
+        return ""
+    normalized = model.lower().strip()
+    if "/" in normalized:
+        normalized = normalized.split("/", 1)[1]
+    return normalized
+
+
 def build_identity_prompt(*, workspace: Path) -> str:
     """Render the stable identity/environment prompt layer."""
     workspace_path = str(workspace.expanduser().resolve())
@@ -39,6 +49,15 @@ INSTRUCTIONS.md defines how you work (procedures, tool usage, conventions). \
 MEMORY.md stores stable long-term facts and preferences. \
 Only write to system/MEMORY.md; suggest system/INSTRUCTIONS.md changes to the user.
 
+## How HaL Acts
+- Be a collaborator, not a service persona. Work the problem with the user instead of performing politeness.
+- Start from the live point under discussion. Move it forward; do not turn every exchange into a verdict or a lecture.
+- Say what you think plainly when you have a view. Name the disagreement or tradeoff directly.
+- Keep responses tight and organized. Make each paragraph carry one step; stop when the point is clear.
+- Prefer plain language over abstract jargon. If an abstract term is useful, cash it out in concrete meaning immediately.
+- Use structure only when it genuinely clarifies the point. Do not use lists or headings as decoration.
+- Focus on judgment, clarification, and forward motion. Do not pad with restatements, performative summaries, or soft closing lines.
+
 ## Environment
 Platform: {runtime}
 Workspace: {workspace_path}
@@ -52,6 +71,27 @@ Layout:
   projects/            — project working files and artifacts
   data/media/          — received and generated media files
   tmp/                 — temporary files (safe to clean up)"""
+
+
+def build_model_adaptation_prompt(*, model: str | None) -> str:
+    """Render a model-specific output-style layer when needed."""
+    normalized_model = _normalize_model_family(model)
+    if not normalized_model.startswith("gpt-"):
+        return ""
+
+    return """## GPT Output Restraints
+
+- Do not end with generic offer lines like "if you want..." unless the user explicitly asks for options or next steps.
+- Avoid industry jargon, especially internet/product buzzwords, unless the user already uses it or the term is necessary.
+- Keep Markdown light. Avoid deep heading hierarchies or over-structuring simple replies.
+- Do not restate the same point in different words. If a point is already clear, stop.
+- If a sentence adds no new distinction, implication, or example, remove it.
+- Each paragraph must add a new distinction, step, or example. If a paragraph adds no new information, remove it.
+- In collaborative discussion, clarify the live point before concluding.
+- Avoid performative contrast frames and rhetorical setup lines unless they materially sharpen the point.
+- End on the last useful sentence. Do not add a soft landing.
+- Do not restate the user's request or obvious context just to pad the answer.
+- Expand only when the user asks for more detail or the task genuinely requires it."""
 
 
 def render_bootstrap_prompt(documents: list[WorkspaceDocument]) -> str:

@@ -28,6 +28,7 @@ from hal.context.message_building import (
 from hal.context.prompt_layers import (
     build_capabilities_prompt,
     build_identity_prompt,
+    build_model_adaptation_prompt,
     build_situation_prompt,
     join_prompt_sections,
     render_bootstrap_prompt,
@@ -89,7 +90,7 @@ class ContextBuilder:
         directive and long-term memory.
         """
         return join_prompt_sections(
-            self._build_identity(),
+            self._build_identity(token_model=token_model),
             self._load_bootstrap_files(),
             self._build_capabilities(),
             self._build_situation(
@@ -215,12 +216,15 @@ class ContextBuilder:
     # Layer builders
     # ------------------------------------------------------------------
 
-    def _build_identity(self) -> str:
+    def _build_identity(self, *, token_model: str | None = None) -> str:
         """Layer 0 — Core identity. Truly stable across requests.
 
         No time, no per-request state. Only who I am, how I think, how I act.
         """
-        return build_identity_prompt(workspace=self.workspace)
+        return join_prompt_sections(
+            build_identity_prompt(workspace=self.workspace),
+            build_model_adaptation_prompt(model=token_model),
+        )
 
     def _load_bootstrap_files(self) -> str:
         """Layer 1 — Personality and user profile from workspace markdown files."""

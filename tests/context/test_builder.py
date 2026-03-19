@@ -132,6 +132,14 @@ class TestBuildSystemPrompt:
         prompt = builder.build_system_prompt()
         assert "HaL" in prompt
 
+    def test_includes_identity_behavior_guidance(self, builder: ContextBuilder) -> None:
+        prompt = builder.build_system_prompt()
+
+        assert "## How HaL Acts" in prompt
+        assert "Be a collaborator, not a service persona." in prompt
+        assert "Keep responses tight and organized." in prompt
+        assert "Use structure only when it genuinely clarifies the point." in prompt
+
     def test_contains_workspace_path(self, builder: ContextBuilder, workspace: Path) -> None:
         prompt = builder.build_system_prompt()
         resolved = str(workspace.expanduser().resolve())
@@ -213,6 +221,21 @@ class TestBuildSystemPrompt:
         assert "# Threads" in prompt
         assert "- github-actions" in prompt
         assert "threads/github-actions/BRIEF.md" in prompt
+
+    def test_includes_gpt_output_style_adaptation(self, builder: ContextBuilder) -> None:
+        prompt = builder.build_system_prompt(token_model="openai/gpt-5.4")
+
+        assert "## GPT Output Restraints" in prompt
+        assert 'Do not end with generic offer lines like "if you want..."' in prompt
+        assert "Do not restate the same point in different words." in prompt
+        assert "If a sentence adds no new distinction, implication, or example, remove it." in prompt
+        assert "Avoid performative contrast frames and rhetorical setup lines" in prompt
+        assert "Avoid industry jargon, especially internet/product buzzwords" in prompt
+
+    def test_omits_model_adaptation_for_non_gpt_models(self, builder: ContextBuilder) -> None:
+        prompt = builder.build_system_prompt(token_model="anthropic/claude-opus-4-6")
+
+        assert "## GPT Output Restraints" not in prompt
 
 
 # ---------------------------------------------------------------------------
