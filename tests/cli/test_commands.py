@@ -141,6 +141,54 @@ def test_try_open_browser_uses_system_browser(monkeypatch: pytest.MonkeyPatch) -
     assert opened == ["http://localhost:8765/"]
 
 
+def test_backend_origin_maps_wildcard_bind_host_to_loopback() -> None:
+    assert web_command._backend_origin("0.0.0.0", 8765) == "http://127.0.0.1:8765"
+    assert web_command._backend_origin("::", 8765) == "http://127.0.0.1:8765"
+    assert web_command._backend_origin("localhost", 8765) == "http://localhost:8765"
+
+
+def test_start_frontend_dev_server_passes_backend_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    def fake_popen(cmd, cwd=None, env=None):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        captured["env"] = env
+        return FakeProcess()
+
+    monkeypatch.setattr(web_command.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(web_command.subprocess, "Popen", fake_popen)
+
+    process = web_command._start_frontend_dev_server(
+        web_dir=Path("/tmp/web"),
+        dev_host="0.0.0.0",
+        dev_port=3000,
+        backend_host="0.0.0.0",
+        backend_port=8765,
+    )
+
+    assert process is not None
+    assert captured["cmd"] == [
+        "/usr/bin/npm",
+        "run",
+        "dev",
+        "--",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "3000",
+        "--strictPort",
+    ]
+    assert captured["cwd"] == Path("/tmp/web")
+    assert captured["env"]["HAL_WEB_BACKEND_ORIGIN"] == "http://127.0.0.1:8765"
+
+
 def test_web_command_opens_browser_after_server_start(
     tmp_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,6 +244,88 @@ def test_web_command_opens_browser_after_server_start(
     assert result.exit_code == 0
     assert server_state == {"started": True, "stopped": True}
     assert opened == [("0.0.0.0", 4173)]
+
+
+def test_web_command_dev_mode_starts_vite_and_opens_dev_port(
+    tmp_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = Config()
+    config.web.host = "0.0.0.0"
+    config.web.port = 4173
+
+    server_state: dict[str, bool] = {"started": False, "stopped": False}
+    opened: list[tuple[str, int]] = []
+    dev_state: dict[str, object] = {"started": False, "stopped": False}
+
+    class FakeAgent:
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def disable_memory_search(self) -> None:
+            return None
+
+    class FakeServer:
+        def __init__(self, config_arg, bridge_arg) -> None:
+            assert config_arg is config.web
+            self.bridge = bridge_arg
+
+        async def start(self) -> None:
+            server_state["started"] = True
+
+        async def stop(self) -> None:
+            server_state["stopped"] = True
+
+    async def fake_to_thread(func, *args):
+        func(*args)
+
+    monkeypatch.setattr(web_command, "_configure_logging", lambda *, verbose: None)
+    monkeypatch.setattr("hal.infra.config.loader.load_config", lambda: config)
+    monkeypatch.setattr(
+        "hal.runtime.bootstrap.gateway.build_gateway_runtime",
+        lambda cfg: SimpleNamespace(agent=FakeAgent(), memory_search=None),
+    )
+    monkeypatch.setattr(
+        web_command,
+        "_ensure_frontend_bundle_current",
+        lambda: pytest.fail("static frontend rebuild should not run in --dev mode"),
+    )
+    monkeypatch.setattr("hal.web.SessionBridge", lambda agent: ("bridge", agent))
+    monkeypatch.setattr("hal.web.WebServer", FakeServer)
+    monkeypatch.setattr(web_command.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(
+        web_command,
+        "_try_open_browser",
+        lambda host, port: opened.append((host, port)),
+    )
+
+    fake_process = object()
+    monkeypatch.setattr(
+        web_command,
+        "_start_frontend_dev_server",
+        lambda **kwargs: dev_state.update({"started": kwargs}) or fake_process,
+    )
+    monkeypatch.setattr(
+        web_command,
+        "_stop_frontend_dev_server",
+        lambda process: dev_state.update({"stopped": process is fake_process}),
+    )
+
+    result = runner.invoke(commands.app, ["web", "--dev", "--dev-port", "3001"])
+
+    assert result.exit_code == 0
+    assert server_state == {"started": True, "stopped": True}
+    assert opened == [("0.0.0.0", 3001)]
+    assert dev_state["started"] == {
+        "web_dir": web_command._FRONTEND_WORKSPACE_DIR,
+        "dev_host": "0.0.0.0",
+        "dev_port": 3001,
+        "backend_host": "0.0.0.0",
+        "backend_port": 4173,
+    }
+    assert dev_state["stopped"] is True
 
 
 def test_web_command_respects_no_open_flag(tmp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,6 +390,47 @@ def test_frontend_bundle_needs_build_when_sources_are_newer(tmp_path: Path) -> N
     os.utime(source_path, ns=(2_000_000_000, 2_000_000_000))
 
     assert web_command._frontend_bundle_needs_build(web_dir) is True
+
+
+def test_frontend_bundle_needs_build_when_public_assets_are_newer(tmp_path: Path) -> None:
+    web_dir = tmp_path / "web"
+    public_dir = web_dir / "public"
+    dist_dir = web_dir / "dist"
+    public_dir.mkdir(parents=True)
+    dist_dir.mkdir(parents=True)
+
+    public_path = public_dir / "logo.svg"
+    dist_path = dist_dir / "index.html"
+    public_path.write_text("<svg />\n", encoding="utf-8")
+    dist_path.write_text("<!doctype html>\n", encoding="utf-8")
+
+    os.utime(dist_path, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(public_path, ns=(2_000_000_000, 2_000_000_000))
+
+    assert web_command._frontend_bundle_needs_build(web_dir) is True
+
+
+def test_frontend_bundle_ignores_newer_node_modules_files(tmp_path: Path) -> None:
+    web_dir = tmp_path / "web"
+    src_dir = web_dir / "src"
+    dist_dir = web_dir / "dist"
+    node_modules_dir = web_dir / "node_modules" / "vite"
+    src_dir.mkdir(parents=True)
+    dist_dir.mkdir(parents=True)
+    node_modules_dir.mkdir(parents=True)
+
+    source_path = src_dir / "App.tsx"
+    dist_path = dist_dir / "index.html"
+    dependency_path = node_modules_dir / "index.js"
+    source_path.write_text("export default function App() { return null; }\n", encoding="utf-8")
+    dist_path.write_text("<!doctype html>\n", encoding="utf-8")
+    dependency_path.write_text("export {};\n", encoding="utf-8")
+
+    os.utime(source_path, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(dist_path, ns=(2_000_000_000, 2_000_000_000))
+    os.utime(dependency_path, ns=(3_000_000_000, 3_000_000_000))
+
+    assert web_command._frontend_bundle_needs_build(web_dir) is False
 
 
 def test_ensure_frontend_bundle_current_runs_npm_build_for_stale_bundle(

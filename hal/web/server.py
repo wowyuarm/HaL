@@ -29,11 +29,13 @@ _WS_ROUTE = "/sessions/{session_id}/ws"
 _FRONTEND_INDEX = "index.html"
 _FRONTEND_ASSETS_DIR = "assets"
 _FRONTEND_ASSETS_ROUTE = f"/{_FRONTEND_ASSETS_DIR}/{{asset_path:.*}}"
+_FRONTEND_STATIC_ROUTE = r"/{resource_path:.*\..*}"
 _FRONTEND_MISSING_MESSAGE = (
     "HaL web frontend bundle not found. Run `npm run build` in ./web before starting `hal web`."
 )
 _FRONTEND_INDEX_CACHE_CONTROL = "no-store, max-age=0"
 _FRONTEND_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_FRONTEND_STATIC_CACHE_CONTROL = "public, max-age=3600"
 
 
 class WebServer:
@@ -59,6 +61,7 @@ class WebServer:
         self._app.router.add_get(_WS_ROUTE, self._session_ws)
         self._app.router.add_get("/threads", self._list_threads)
         self._app.router.add_get("/threads/{slug}", self._get_thread)
+        self._app.router.add_get(_FRONTEND_STATIC_ROUTE, self._serve_frontend_static)
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
 
@@ -112,6 +115,19 @@ class WebServer:
         return self._frontend_file_response(
             asset_path,
             cache_control=_FRONTEND_ASSET_CACHE_CONTROL,
+        )
+
+    async def _serve_frontend_static(self, request: web.Request) -> web.FileResponse:
+        frontend_dist = self._require_frontend_dist()
+        resource_path = self._safe_frontend_path(
+            frontend_dist,
+            request.match_info.get("resource_path", ""),
+        )
+        if not resource_path.is_file():
+            raise web.HTTPNotFound(text=f"Unknown frontend file: {request.path}")
+        return self._frontend_file_response(
+            resource_path,
+            cache_control=_FRONTEND_STATIC_CACHE_CONTROL,
         )
 
     async def _serve_favicon(self, request: web.Request) -> web.StreamResponse:
