@@ -53,6 +53,7 @@ class ProviderSpec:
 
     # capability flags
     supports_prompt_caching: bool = False
+    default_compat_mode: str = ""  # protocol hint for compatible upstreams, e.g. "anthropic"
 
     @property
     def label(self) -> str:
@@ -122,6 +123,25 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=False,
         model_overrides=(),
         supports_prompt_caching=True,
+    ),
+    # MiniMax: official international endpoint is Anthropic-compatible.
+    ProviderSpec(
+        name="minimax",
+        keywords=("minimax",),
+        env_key="ANTHROPIC_API_KEY",
+        display_name="MiniMax",
+        litellm_prefix="",
+        skip_prefixes=(),
+        env_extras=(),
+        is_gateway=False,
+        is_local=False,
+        detect_by_key_prefix="",
+        detect_by_base_keyword="minimax",
+        default_api_base="https://api.minimax.io/anthropic",
+        strip_model_prefix=False,
+        model_overrides=(),
+        supports_prompt_caching=False,
+        default_compat_mode="anthropic",
     ),
     # OpenAI: LiteLLM recognizes "gpt-*" natively, no prefix needed.
     ProviderSpec(

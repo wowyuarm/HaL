@@ -32,6 +32,36 @@ def _resolve_provider_name(config, model_name: str):
     return ""
 
 
+def _resolve_api_base(provider_name: str, provider_cfg) -> str | None:
+    if provider_cfg and provider_cfg.api_base:
+        return provider_cfg.api_base
+
+    if not provider_name:
+        return None
+
+    from hal.infra.providers.registry import find_by_name
+
+    spec = find_by_name(provider_name)
+    if spec and spec.default_api_base:
+        return spec.default_api_base
+    return None
+
+
+def _resolve_compat_mode(provider_name: str, provider_cfg) -> str:
+    if provider_cfg and provider_cfg.compat_mode:
+        return provider_cfg.compat_mode
+
+    if not provider_name:
+        return ""
+
+    from hal.infra.providers.registry import find_by_name
+
+    spec = find_by_name(provider_name)
+    if spec:
+        return spec.default_compat_mode
+    return ""
+
+
 def make_provider(config):
     """Create LiteLLMProvider from config. Exits if no API key found."""
     from hal.infra.providers.litellm import LiteLLMProvider
@@ -39,16 +69,18 @@ def make_provider(config):
     p = config.get_provider()
     model = config.agents.defaults.model
     provider_name = _resolve_provider_name(config, model)
+    api_base = _resolve_api_base(provider_name, p)
+    compat_mode = _resolve_compat_mode(provider_name, p)
     if not (p and p.api_key) and not model.startswith("bedrock/"):
         console.print("[red]Error: No API key configured.[/red]")
         console.print("Set one in ~/.hal/auth.yaml under providers section")
         raise typer.Exit(1)
     return LiteLLMProvider(
         api_key=p.api_key if p else None,
-        api_base=config.get_api_base(),
+        api_base=api_base,
         default_model=model,
         extra_headers=p.extra_headers if p else None,
-        compat_mode=p.compat_mode if p else "",
+        compat_mode=compat_mode,
         request_params=p.request_params if p else None,
         max_request_body_bytes=p.max_request_body_bytes if p else 950_000,
         provider_name=provider_name,
@@ -76,21 +108,15 @@ def _make_alternate_provider(config, model_name: str):
         return None
 
     provider_name = _resolve_provider_name(config, model_name)
-
-    api_base = sp.api_base
-    if not api_base:
-        from hal.infra.providers.registry import find_by_model
-
-        spec = find_by_model(model_name)
-        if spec and spec.default_api_base:
-            api_base = spec.default_api_base
+    api_base = _resolve_api_base(provider_name, sp)
+    compat_mode = _resolve_compat_mode(provider_name, sp)
 
     return LiteLLMProvider(
         api_key=sp.api_key,
         api_base=api_base,
         default_model=model_name,
         extra_headers=sp.extra_headers if sp else None,
-        compat_mode=sp.compat_mode if sp else "",
+        compat_mode=compat_mode,
         request_params=sp.request_params if sp else None,
         max_request_body_bytes=sp.max_request_body_bytes if sp else 950_000,
         provider_name=provider_name,

@@ -179,6 +179,23 @@ def test_provider_name_forces_gateway_on_local_anyrouter_base() -> None:
     assert p._resolve_model("anthropic/claude-opus-4-5") == "anthropic/claude-opus-4-5"
 
 
+def test_provider_name_sets_anthropic_env_for_minimax_compat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    p = LiteLLMProvider(
+        api_key="minimax-key",
+        api_base="https://api.minimax.io/anthropic",
+        default_model="MiniMax-M2.7",
+        provider_name="minimax",
+        compat_mode="anthropic",
+    )
+
+    assert p._gateway is None
+    assert os.environ.get("ANTHROPIC_API_KEY") == "minimax-key"
+    assert p.extra_headers["Authorization"] == "Bearer minimax-key"
+    assert p._resolve_model("MiniMax-M2.7") == "MiniMax-M2.7"
+
+
 def test_parse_response_tool_calls_and_usage() -> None:
     p = LiteLLMProvider(api_key=None, api_base=None, default_model="anthropic/claude")
 

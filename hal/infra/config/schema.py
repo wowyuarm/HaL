@@ -83,11 +83,18 @@ class ProviderConfig(_StrictModel):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom request headers for provider endpoints
-    compat_mode: str = ""  # Protocol hint for proxies: "openai" = OpenAI-compatible endpoint
+    compat_mode: str = ""  # Protocol hint for compatible endpoints, e.g. "openai" or "anthropic"
     request_params: dict[str, Any] | None = None  # Optional per-request LiteLLM params
     max_request_body_bytes: int = Field(
         default=950_000, ge=65_536
     )  # Last-resort ceiling for serialized chat request bodies before provider dispatch trimming
+
+
+def _default_minimax_provider_config() -> ProviderConfig:
+    return ProviderConfig(
+        api_base="https://api.minimax.io/anthropic",
+        compat_mode="anthropic",
+    )
 
 
 class ProvidersConfig(_StrictModel):
@@ -95,6 +102,9 @@ class ProvidersConfig(_StrictModel):
 
     anyrouter: ProviderConfig = Field(default_factory=ProviderConfig)  # AnyRouter (Anthropic relay)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
+    minimax: ProviderConfig = Field(
+        default_factory=_default_minimax_provider_config
+    )  # MiniMax (official intl Anthropic-compatible endpoint)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)

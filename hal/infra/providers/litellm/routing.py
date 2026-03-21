@@ -13,6 +13,7 @@ def setup_env(
     api_base: str | None,
     model: str,
     gateway: ProviderSpec | None,
+    provider_name: str = "",
 ) -> None:
     """Set provider environment variables for LiteLLM dispatch."""
     if gateway:
@@ -20,8 +21,10 @@ def setup_env(
         os.environ[gateway.env_key] = api_key
         return
 
-    # Standard provider: match by model name
-    spec = find_by_model(model)
+    spec = find_by_name(provider_name) if provider_name else None
+    if spec is None:
+        # Standard provider: match by model name
+        spec = find_by_model(model)
     if spec is None:
         return
 

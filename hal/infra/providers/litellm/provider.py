@@ -17,6 +17,10 @@ from hal.infra.providers.registry import find_by_name, find_gateway
 
 logger = logging.getLogger(__name__)
 
+MINIMAX_PROVIDER_NAME = "minimax"
+AUTHORIZATION_HEADER = "Authorization"
+BEARER_PREFIX = "Bearer "
+
 
 class LiteLLMProvider(LLMProvider):
     """LLM provider using LiteLLM for multi-provider support."""
@@ -36,11 +40,11 @@ class LiteLLMProvider(LLMProvider):
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        self.extra_headers = extra_headers or {}
+        self.provider_name = provider_name
+        self.extra_headers = self._build_extra_headers(extra_headers, api_key)
         self._compat_mode = compat_mode
         self.request_params = request_params or {}
         self.max_request_body_bytes = max(1, int(max_request_body_bytes))
-        self.provider_name = provider_name
 
         # In compat_mode, skip gateway detection — the user explicitly declared
         # the protocol, so auto-detection (vLLM fallback etc.) is unnecessary.
@@ -73,9 +77,29 @@ class LiteLLMProvider(LLMProvider):
         # Drop unsupported params for unknown models (e.g. tool_choice for proxied models)
         litellm.drop_params = True
 
+    def _build_extra_headers(
+        self,
+        extra_headers: dict[str, str] | None,
+        api_key: str | None,
+    ) -> dict[str, str]:
+        headers = dict(extra_headers or {})
+        if self.provider_name != MINIMAX_PROVIDER_NAME or not api_key:
+            return headers
+
+        header_names = {name.lower() for name in headers}
+        if AUTHORIZATION_HEADER.lower() not in header_names:
+            headers[AUTHORIZATION_HEADER] = f"{BEARER_PREFIX}{api_key}"
+        return headers
+
     def _setup_env(self, api_key: str, api_base: str | None, model: str) -> None:
         """Set environment variables based on detected provider."""
-        routing.setup_env(api_key=api_key, api_base=api_base, model=model, gateway=self._gateway)
+        routing.setup_env(
+            api_key=api_key,
+            api_base=api_base,
+            model=model,
+            gateway=self._gateway,
+            provider_name=self.provider_name,
+        )
 
     def _resolve_model(self, model: str) -> str:
         """Resolve model name by applying provider/gateway prefixes."""

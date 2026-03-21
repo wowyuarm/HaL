@@ -110,6 +110,27 @@ def test_make_provider_passes_max_request_body_bytes(monkeypatch) -> None:
     assert captured["max_request_body_bytes"] == 777_000
 
 
+def test_make_provider_uses_minimax_official_defaults(monkeypatch) -> None:
+    config = Config()
+    config.agents.defaults.model = "MiniMax-M2.7"
+    config.providers.minimax.api_key = "minimax-key"
+    config.providers.openrouter.api_key = "sk-or-test"
+
+    captured = {}
+
+    class DummyProvider:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("hal.infra.providers.litellm.LiteLLMProvider", DummyProvider)
+
+    provider = factory.make_provider(config)
+    assert isinstance(provider, DummyProvider)
+    assert captured["provider_name"] == "minimax"
+    assert captured["api_base"] == "https://api.minimax.io/anthropic"
+    assert captured["compat_mode"] == "anthropic"
+
+
 def test_make_memory_search_returns_none_when_pymilvus_missing(monkeypatch) -> None:
     config = Config()
     calls: list[str] = []

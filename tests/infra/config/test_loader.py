@@ -107,6 +107,29 @@ def test_get_provider_prefers_anyrouter_over_openrouter_for_claude_models() -> N
     assert provider is cfg.providers.anyrouter
 
 
+def test_get_provider_prefers_minimax_over_openrouter_for_minimax_models() -> None:
+    cfg = Config()
+    cfg.agents.defaults.model = "MiniMax-M2.7"
+    cfg.providers.openrouter.api_key = "sk-or-test"
+    cfg.providers.minimax.api_key = "minimax-key"
+
+    provider = cfg.get_provider()
+
+    assert provider is cfg.providers.minimax
+
+
+def test_minimax_defaults_are_present_in_saved_config(tmp_home: Path) -> None:
+    cfg = Config()
+
+    save_config(cfg)
+
+    config_data = yaml.safe_load(get_config_path().read_text())
+    minimax = config_data["providers"]["minimax"]
+
+    assert minimax["api_base"] == "https://api.minimax.io/anthropic"
+    assert minimax["compat_mode"] == "anthropic"
+
+
 def test_load_config_lifts_legacy_channels_web_block(tmp_home: Path) -> None:
     path = get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
