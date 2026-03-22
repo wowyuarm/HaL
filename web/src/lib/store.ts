@@ -147,6 +147,22 @@ function patchManifestFromEvent(
     return { ...nextManifest, status: "briefing" };
   }
 
+  if (event.type === "status.changed") {
+    const status = event.payload.status;
+    if (
+      status === "active" ||
+      status === "briefing" ||
+      status === "ended" ||
+      status === "dropped"
+    ) {
+      return {
+        ...nextManifest,
+        status,
+        ended_at: status === "ended" || status === "dropped" ? event.ts : nextManifest.ended_at,
+      };
+    }
+  }
+
   if (event.type === "session.scope_updated") {
     const mountedThreads = Array.isArray(event.refs.mounted_threads)
       ? event.refs.mounted_threads.filter((item): item is string => typeof item === "string")

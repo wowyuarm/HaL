@@ -16,12 +16,13 @@ from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.context.message_building import add_assistant_message, add_tool_result
 from hal.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
-from hal.domain.events import BRIEF_COMPLETED, SessionEvent
+from hal.domain.events import BRIEF_COMPLETED, STATUS_CHANGED, SessionEvent
 from hal.runtime.loop import LoopMetadata, run_tool_loop
 from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
 
 _BRIEF_MAX_ITERATIONS = 30
+_ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
 
 # ---------------------------------------------------------------------------
 # Thread slug extraction
@@ -256,6 +257,7 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
     max_iterations = brief_cfg.max_iterations
     hooks = _BriefLoopHooks()
     worker_failed = False
+    failure_reason: str | None = None
     try:
         final_content, meta = await run_tool_loop(
             provider=worker_provider,
@@ -272,16 +274,64 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
         final_content = None
         meta = LoopMetadata()
         worker_failed = True
+        failure_reason = str(e)
+    else:
+        if _brief_result_failed(final_content, meta):
+            worker_failed = True
+            failure_reason = _brief_failure_reason(final_content)
+            logger.error(f"Brief worker failed: {failure_reason}")
+
+    if worker_failed:
+        state.manifest.status = "active"
+        state.manifest.ended_at = None
+        state.manifest.brief_prompt = None
+        state.brief_task = None
+        engine._session_store.write_manifest(session_id, state.manifest)
+        engine._refresh_session_snapshot(session_id)
+        await state.event_publisher.emit(
+            STATUS_CHANGED,
+            actor="worker",
+            payload={
+                "status": "active",
+                "kind": "session_brief_failed",
+                "message": _format_failure_summary(failure_reason),
+            },
+        )
+
+        if channel and chat_id:
+            from hal.bus.events import OutboundMessage
+
+            await engine.bus.publish_outbound(
+                OutboundMessage(
+                    channel=channel,
+                    chat_id=chat_id,
+                    content=_format_failure_summary(failure_reason),
+                    metadata={"system_meta": True, "kind": "session_brief_failed"},
+                )
+            )
+        logger.warning(
+            f"Brief worker failed: {meta.iterations} iterations, "
+            f"{len(meta.files_modified)} files modified"
+        )
+        return
 
     # 5. Index any written episode files
     indexed_chunks = await _index_written_episodes(engine, meta)
 
-    # 6. Write thread-to-session references (only on successful completion)
-    if not worker_failed:
-        _write_thread_session_refs(engine, state)
+    # 6. Write thread-to-session references
+    _write_thread_session_refs(engine, state)
 
     # 7. Send completion summary
     summary = _format_completion_summary(final_content, meta)
+    await state.event_publisher.emit(
+        STATUS_CHANGED,
+        actor="worker",
+        payload={
+            "status": "ended",
+            "kind": "session_brief_complete",
+            "message": summary,
+        },
+    )
     if channel and chat_id:
         from hal.bus.events import OutboundMessage
 
@@ -294,30 +344,29 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
             )
         )
 
-    # 8. Record event (only on successful completion)
-    if not worker_failed:
-        await state.event_publisher.emit(
-            BRIEF_COMPLETED,
-            actor="worker",
-            refs={
-                key: value
-                for key, value in {
-                    "channel": channel,
-                    "chat_id": chat_id,
-                }.items()
-                if value
-            },
-            payload={
-                "iterations": meta.iterations,
-                "files_modified": meta.files_modified,
-                "indexed_chunks": indexed_chunks,
-                "threads_linked": sorted(_brief_target_threads(state)),
-            },
-        )
+    # 8. Record event and end the session only on successful completion.
+    await state.event_publisher.emit(
+        BRIEF_COMPLETED,
+        actor="worker",
+        refs={
+            key: value
+            for key, value in {
+                "channel": channel,
+                "chat_id": chat_id,
+            }.items()
+            if value
+        },
+        payload={
+            "iterations": meta.iterations,
+            "files_modified": meta.files_modified,
+            "indexed_chunks": indexed_chunks,
+            "threads_linked": sorted(_brief_target_threads(state)),
+        },
+    )
     await engine.end_session(
         session_id,
         status="ended",
-        reason="brief_failed" if worker_failed else "brief_completed",
+        reason="brief_completed",
     )
     logger.info(
         f"Brief worker complete: {meta.iterations} iterations, "
@@ -651,6 +700,29 @@ def _format_completion_summary(final_content: str | None, meta: LoopMetadata) ->
         suffix = f" (+{len(meta.files_modified) - 5} more)" if len(meta.files_modified) > 5 else ""
         return f"Session brief complete. Updated: {files}{suffix}"
     return "Session brief complete (no changes needed)."
+
+
+def _brief_result_failed(final_content: str | None, meta: LoopMetadata) -> bool:
+    """Return True when the brief worker did not produce a usable result."""
+    if isinstance(final_content, str) and final_content.strip().startswith(_ERROR_CALLING_LLM_PREFIX):
+        return True
+    if meta.files_modified:
+        return False
+    return not bool(final_content and final_content.strip())
+
+
+def _brief_failure_reason(final_content: str | None) -> str:
+    """Normalize brief worker failures into one readable line."""
+    if isinstance(final_content, str) and final_content.strip():
+        return final_content.strip()
+    return "Brief worker produced no usable result."
+
+
+def _format_failure_summary(reason: str | None) -> str:
+    """Format a user-facing failure message without implying completion."""
+    if reason and reason.strip():
+        return f"Session brief failed. {reason.strip()}"
+    return "Session brief failed. The session is still active."
 
 
 # ---------------------------------------------------------------------------

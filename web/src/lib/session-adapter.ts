@@ -69,6 +69,8 @@ export interface HalMessageMeta {
   turnState?: "running" | "completed" | "failed";
   origin?: "interactive" | "background_resume";
   isCommand?: boolean;
+  lifecycleKind?: "brief";
+  lifecycleState?: "start" | "complete" | "failed";
   evidenceCounts?: EvidenceCounts;
   toolSummaries?: Array<{ name: string; status: string }>;
 }
@@ -114,6 +116,7 @@ const SESSION_ACTIVITY_EVENTS = new Set([
   "session.scope_updated",
   "brief.completed",
   "message.injected",
+  "status.changed",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -426,6 +429,52 @@ function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
         turnId: null,
         createdAt: new Date(event.ts),
         content: [{ type: "text", text: parts.join(" \u00b7 ") }],
+        halMeta: {},
+      };
+    }
+
+    case "status.changed": {
+      const kind = getString(event.payload, "kind");
+      const text =
+        getString(event.payload, "message") ??
+        (() => {
+          const status = getString(event.payload, "status") ?? "updated";
+          return `Session status changed: ${status}`;
+        })();
+
+      if (
+        kind === "session_brief_start" ||
+        kind === "session_brief_complete" ||
+        kind === "session_brief_failed"
+      ) {
+        const status: SessionMessageStatus =
+          kind === "session_brief_failed"
+              ? { type: "incomplete", reason: "error", error: text }
+              : { type: "complete", reason: "stop" };
+        const lifecycleState =
+          kind === "session_brief_start"
+            ? "start"
+            : kind === "session_brief_failed"
+              ? "failed"
+              : "complete";
+
+        return {
+          id: `evt_${event.seq}`,
+          role: "assistant",
+          turnId: null,
+          createdAt: new Date(event.ts),
+          content: [{ type: "text", text }],
+          status,
+          halMeta: { isCommand: true, lifecycleKind: "brief", lifecycleState },
+        };
+      }
+
+      return {
+        id: `evt_${event.seq}`,
+        role: "system",
+        turnId: null,
+        createdAt: new Date(event.ts),
+        content: [{ type: "text", text }],
         halMeta: {},
       };
     }

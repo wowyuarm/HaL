@@ -168,8 +168,8 @@ export default function App() {
     setError(null);
     try {
       const manifest = await endSession(selectedSession.session_id, { reason: "brief" });
+      applySessionManifest(manifest);
       if (socketState !== "live") {
-        applySessionManifest(manifest);
         await loadSessionEvents(selectedSession.session_id);
         if (activeThreadSlug) {
           await loadThread(activeThreadSlug, { adoptSelection: false });
@@ -185,8 +185,8 @@ export default function App() {
     setError(null);
     try {
       const manifest = await endSession(selectedSession.session_id, { reason: "drop" });
+      applySessionManifest(manifest);
       if (socketState !== "live") {
-        applySessionManifest(manifest);
         await loadSessionEvents(selectedSession.session_id);
         if (activeThreadSlug) {
           await loadThread(activeThreadSlug, { adoptSelection: false });

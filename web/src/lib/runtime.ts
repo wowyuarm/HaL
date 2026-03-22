@@ -163,6 +163,11 @@ export function eventSummary(event: SessionEvent): string {
       return "Brief worker started";
     case "brief.completed":
       return "Brief worker completed";
+    case "status.changed": {
+      const status = stringValue(event.payload.status) ?? "updated";
+      const message = stringValue(event.payload.message);
+      return message ?? `Status changed: ${status}`;
+    }
     case "subagent.completed":
       return `Subagent completed: ${stringValue(event.payload.label) ?? "worker"}`;
     case "turn.completed":

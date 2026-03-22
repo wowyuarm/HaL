@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,6 +13,7 @@ from hal.domain.events import (
     MESSAGE_INJECTED,
     SESSION_CREATED,
     SESSION_SCOPE_UPDATED,
+    STATUS_CHANGED,
     TURN_COMPLETED,
     TURN_STARTED,
     USER_MESSAGE,
@@ -115,6 +117,25 @@ async def test_update_scope_mutates_manifest_and_streams_event(bridge, thread_re
     assert updated.mounted_threads == ["auth", "memory"]
     assert live_event.type == SESSION_SCOPE_UPDATED
     assert live_event.payload["added_threads"] == ["memory"]
+
+
+@pytest.mark.asyncio
+async def test_brief_start_streams_transient_status_change(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+
+    subscription = await bridge.subscribe(manifest.session_id)
+    with patch.object(bridge._engine, "_run_session_brief", new_callable=AsyncMock):
+        try:
+            updated = await bridge.end_session(manifest.session_id, reason="brief")
+            live_event = await asyncio.wait_for(subscription.next_event(), timeout=1)
+        finally:
+            await subscription.close()
+
+    assert updated == "/brief"
+    assert live_event.type == STATUS_CHANGED
+    assert live_event.payload["status"] == "briefing"
+    assert live_event.payload["kind"] == "session_brief_start"
 
 
 @pytest.mark.asyncio

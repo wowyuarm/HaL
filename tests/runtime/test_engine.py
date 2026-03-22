@@ -10,7 +10,7 @@ import pytest
 from hal.bus.events import InboundMessage, OutboundMessage, SubagentCompleteEvent
 from hal.bus.queue import MessageBus
 from hal.context.message_building import add_assistant_message, add_tool_result
-from hal.domain.events import BRIEF_STARTED
+from hal.domain.events import BRIEF_COMPLETED, BRIEF_STARTED, SESSION_ENDED
 from hal.infra.config.schema import ChannelsConfig, TelegramConfig
 from hal.infra.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from hal.runtime.engine import (
@@ -377,7 +377,7 @@ class TestDispatch:
         assert len(inject_messages) == 2
 
     async def test_brief_command_starts_background_worker(self, engine):
-        """Sending /brief records events, creates a brief_task, and returns ack."""
+        """Sending /brief starts briefing without writing a command turn."""
         state = engine.create_session(channel="telegram", chat_id="c1")
         engine._run_session_brief = AsyncMock()  # type: ignore[method-assign]
 
@@ -388,6 +388,14 @@ class TestDispatch:
         assert out.metadata.get("kind") == "session_brief_start"
         assert "Starting session brief" in out.content
         assert state.brief_task is not None
+        manifest = engine._session_store.read_manifest(state.session_id)
+        assert manifest is not None
+        assert manifest.status == "briefing"
+        assert manifest.turn_count == 0
+        event_types = [event.type for event in engine._session_store.read_events(state.session_id)]
+        assert "turn.started" not in event_types
+        assert "user.message" not in event_types
+        assert "brief.started" not in event_types
 
     async def test_brief_command_with_prompt(self, engine):
         """Sending /brief with extra text passes the prompt to the worker."""
@@ -754,6 +762,29 @@ class TestBriefWorker:
         assert manifest is not None
         assert manifest.status == "ended"
         engine.bus.publish_outbound.assert_not_awaited()
+
+    async def test_brief_failure_keeps_session_active_and_skips_durable_records(self, engine):
+        from hal.runtime.brief import run_session_brief
+
+        state = engine.create_session(channel="telegram", chat_id="brief-chat")
+        engine.bus.publish_outbound = AsyncMock()  # type: ignore[method-assign]
+
+        with patch("hal.runtime.brief.run_tool_loop", new_callable=AsyncMock) as mock_loop:
+            mock_loop.return_value = ("Error calling LLM: APIConnectionError: timeout", LoopMetadata())
+            await run_session_brief(engine, state.session_id)
+
+        manifest = engine._session_store.read_manifest(state.session_id)
+        assert manifest is not None
+        assert manifest.status == "active"
+        assert manifest.ended_at is None
+        assert manifest.brief_prompt is None
+        event_types = [event.type for event in engine._session_store.read_events(state.session_id)]
+        assert BRIEF_COMPLETED not in event_types
+        assert SESSION_ENDED not in event_types
+        engine.bus.publish_outbound.assert_awaited_once()
+        outbound = engine.bus.publish_outbound.await_args.args[0]
+        assert outbound.metadata["kind"] == "session_brief_failed"
+        assert "Session brief failed." in outbound.content
 
     async def test_restart_briefing_sessions_replays_saved_prompt(self, engine):
         state = engine.create_session(channel="telegram", chat_id="brief-chat")

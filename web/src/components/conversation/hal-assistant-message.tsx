@@ -29,6 +29,14 @@ export function HalAssistantMessage() {
   });
   const openInspector = useHalStore((s) => s.openInspector);
   const isCommand = custom?.isCommand === true;
+  const isBriefLifecycle = custom?.lifecycleKind === "brief";
+  const currentSessionStatus = useHalStore((s) =>
+    s.selectedSessionId ? s.sessionManifests[s.selectedSessionId]?.status ?? null : null,
+  );
+  const showBriefLiveDot =
+    isBriefLifecycle &&
+    custom?.lifecycleState === "start" &&
+    currentSessionStatus === "briefing";
 
   const evidenceCounts = custom?.evidenceCounts;
   const totalEvidence = evidenceCounts
@@ -42,6 +50,12 @@ export function HalAssistantMessage() {
       <MessagePrimitive.Root className="px-1 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           {isRunning && <StatusDot state="live" />}
+          {!isRunning && showBriefLiveDot && <StatusDot state="live" />}
+          {isBriefLifecycle && (
+            <span className="shrink-0 text-caption font-medium uppercase tracking-[0.08em] text-hal-muted">
+              Brief
+            </span>
+          )}
           {commandText && (
             <span className={isFailed ? "text-meta text-danger" : "text-meta text-hal-primary"}>
               {commandText}
