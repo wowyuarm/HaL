@@ -58,9 +58,7 @@ def _backend_origin(host: str, port: int) -> str:
 def _iter_frontend_source_files(web_dir: Path) -> list[Path]:
     source_files: list[Path] = []
     for root, dirnames, filenames in os.walk(web_dir, topdown=True):
-        dirnames[:] = [
-            dirname for dirname in dirnames if dirname not in _FRONTEND_IGNORED_DIRNAMES
-        ]
+        dirnames[:] = [dirname for dirname in dirnames if dirname not in _FRONTEND_IGNORED_DIRNAMES]
         root_path = Path(root)
         source_files.extend(root_path / filename for filename in filenames)
     return source_files

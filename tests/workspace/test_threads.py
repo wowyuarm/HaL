@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from hal.workspace.thread_state import build_episode_file_name
 from hal.workspace.threads import (
     ThreadRepository,
     collect_thread_episode_paths,
@@ -12,7 +13,6 @@ from hal.workspace.threads import (
     episode_path_for_thread,
     thread_metadata_path,
 )
-from hal.workspace.thread_state import build_episode_file_name
 
 
 def test_collect_thread_registry_entries_reads_metadata(tmp_path: Path) -> None:
@@ -92,6 +92,32 @@ def test_thread_yaml_overrides_machine_metadata(tmp_path: Path) -> None:
     assert entries[0].related_threads == ("github-actions",)
     assert entries[0].updated_at == "2026-03-06T16:00:00+08:00"
     assert entries[0].metadata_path == "threads/hal-architecture/THREAD.yaml"
+    assert entries[0].core_question == ""
+    assert entries[0].brief_hints == ""
+
+
+def test_thread_yaml_core_question_and_brief_hints(tmp_path: Path) -> None:
+    """core_question and brief_hints from THREAD.yaml propagate to registry entries."""
+    thread_dir = tmp_path / "work" / "threads" / "learning"
+    thread_dir.mkdir(parents=True)
+    (thread_dir / "BRIEF.md").write_text(
+        "# Learning\nStatus: active\n",
+        encoding="utf-8",
+    )
+    (thread_dir / "THREAD.yaml").write_text(
+        "name: Learning Path\n"
+        "status: active\n"
+        "goal: Build foundational knowledge.\n"
+        "core_question: How to balance build-first with depth?\n"
+        "brief_hints: Preserve stable judgments, avoid chronological recap.\n",
+        encoding="utf-8",
+    )
+
+    entries = collect_thread_registry_entries(tmp_path, max_entries=20)
+
+    assert len(entries) == 1
+    assert entries[0].core_question == "How to balance build-first with depth?"
+    assert entries[0].brief_hints == "Preserve stable judgments, avoid chronological recap."
 
 
 def test_episode_path_for_thread(tmp_path: Path) -> None:

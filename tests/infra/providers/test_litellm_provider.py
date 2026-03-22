@@ -179,7 +179,9 @@ def test_provider_name_forces_gateway_on_local_anyrouter_base() -> None:
     assert p._resolve_model("anthropic/claude-opus-4-5") == "anthropic/claude-opus-4-5"
 
 
-def test_provider_name_sets_anthropic_env_for_minimax_compat(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_provider_name_sets_anthropic_env_for_minimax_compat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     p = LiteLLMProvider(

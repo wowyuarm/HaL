@@ -164,5 +164,5 @@ def test_render_thread_unit_registry_markdown_includes_status(tmp_path: Path) ->
     )
 
     assert "# Threads" in text
-    assert "- github-actions" in text
-    assert "threads/github-actions/BRIEF.md" in text
+    assert "**github-actions**" in text
+    assert "GitHub Actions" in text

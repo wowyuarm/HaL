@@ -45,6 +45,8 @@ class ThreadRegistryEntry:
     related_threads: tuple[str, ...] = ()
     updated_at: str | None = None
     scope: str = ""
+    core_question: str = ""
+    brief_hints: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,6 +348,8 @@ class ThreadRepository:
             related_threads=resolved.related_threads,
             updated_at=resolved.updated_at,
             scope=resolved.scope,
+            core_question=resolved.core_question,
+            brief_hints=resolved.brief_hints,
         )
 
     @staticmethod

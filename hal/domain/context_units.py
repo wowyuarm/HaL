@@ -112,6 +112,8 @@ class ThreadContextUnit:
     related_threads: tuple[str, ...] = ()
     updated_at: str | None = None
     scope: str = ""
+    core_question: str = ""
+    brief_hints: str = ""
 
     kind: ContextUnitKind = "thread"
 
@@ -160,6 +162,8 @@ class ThreadContextUnit:
             "priority": self.priority(),
             "pinned": self.pinned,
             "related_threads": self.related_threads,
+            "core_question": self.core_question,
+            "brief_hints": self.brief_hints,
         }
 
     def to_thread_entry_snapshot(self) -> dict[str, object]:

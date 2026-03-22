@@ -214,19 +214,37 @@ def test_build_brief_user_prompt() -> None:
         touched_threads={"github-actions"},
         thread_order=["github-actions", "hal-arch"],
         thread_meta={
-            "github-actions": {"name": "GitHub Actions", "scope": "dev"},
-            "hal-arch": {"name": "HaL Architecture", "scope": ""},
+            "github-actions": {
+                "name": "GitHub Actions",
+                "description": "Ship automation",
+                "scope": "dev",
+                "core_question": "How to keep CI fast?",
+                "brief_hints": "Focus on decisions",
+            },
+            "hal-arch": {
+                "name": "HaL Architecture",
+                "description": "",
+                "scope": "",
+                "core_question": "",
+                "brief_hints": "",
+            },
         },
         user_prompt="focus on CI",
         session_id="s_test",
+        primary_thread="github-actions",
+        mounted_threads={"github-actions"},
     )
     assert '<session id="s_test">' in prompt
     assert "<events>" in prompt
     assert "hello" in prompt
-    assert '<thread slug="github-actions"' in prompt
-    assert 'touched="true"' in prompt
-    assert '<thread slug="hal-arch"' in prompt
-    assert 'touched="false"' in prompt
+    # Role-based thread attributes
+    assert '<thread slug="github-actions" role="primary">' in prompt
+    assert "<name>GitHub Actions</name>" in prompt
+    assert "<goal>Ship automation</goal>" in prompt
+    assert "<scope>dev</scope>" in prompt
+    assert "<core_question>How to keep CI fast?</core_question>" in prompt
+    assert "<brief_hints>Focus on decisions</brief_hints>" in prompt
+    assert '<thread slug="hal-arch" role="related">' in prompt
     assert "<guidance>focus on CI</guidance>" in prompt
 
 

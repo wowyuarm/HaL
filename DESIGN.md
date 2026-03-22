@@ -125,3 +125,8 @@ tokens, layout modes, component guidance, and the design checklist.
 See `docs/specs/message-injects.md` for the durable prompt-input contract used
 for thread snapshots, per-turn context, and runtime injections that must remain
 replayable across turns.
+
+### Thread system
+
+See `docs/specs/thread-system.md` for thread semantics, session-thread
+relationships, brief worker contract, and BRIEF authoring principles.

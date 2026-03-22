@@ -31,6 +31,8 @@ class ResolvedThreadMetadata:
     related_threads: tuple[str, ...]
     updated_at: str | None
     has_machine_metadata: bool
+    core_question: str
+    brief_hints: str
 
 
 def load_thread_metadata(path: Path) -> dict:
@@ -64,6 +66,8 @@ def resolve_thread_metadata(
         related_threads=_normalize_related_threads(metadata.get("related_threads")),
         updated_at=_normalize_optional_text(metadata.get("updated_at")),
         has_machine_metadata=bool(metadata),
+        core_question=_normalize_text(metadata.get("core_question"), fallback=""),
+        brief_hints=_normalize_text(metadata.get("brief_hints"), fallback=""),
     )
 
 

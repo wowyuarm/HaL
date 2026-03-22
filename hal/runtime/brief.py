@@ -244,6 +244,8 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
         thread_meta=thread_meta,
         user_prompt=user_prompt,
         session_id=session_id,
+        primary_thread=state.primary_thread,
+        mounted_threads=state.mounted_threads,
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -341,52 +343,100 @@ def _build_brief_tools(workspace: Path) -> ToolRegistry:
 # ---------------------------------------------------------------------------
 
 _BRIEF_SYSTEM_PROMPT = """\
-You are a brief maintainer for HaL's collaboration workspace.
+You are the brief maintainer for HaL's thread workspace.
 
-After each session between HaL and the user, you decide what's worth preserving \
-for future collaboration. Not every session needs recording — many are trivial and \
-warrant no file changes at all. Producing no files is a normal, expected outcome.
+Your job is not to summarize a session.
+Your job is to preserve the minimum state needed for a future session \
+to re-enter the work without re-heating old context.
 
-## What are threads?
+Not every session deserves an update. \
+If nothing materially changed for future collaboration, output a \
+one-line summary and do not modify any files.
 
-Threads are long-term collaborative objects — not just projects. They may track:
-- An implementation effort or technical project
-- A learning path or area of study
-- A recurring interest or exploration
-- An ongoing design question
+## What a thread is
 
-Threads track the evolution of shared understanding across sessions.
+A thread is a long-lived collaboration track. \
+It may be a project, a study topic, a recurring coordination concern, \
+or an ongoing design question.
 
-## Your judgment
+Each thread has:
+- BRIEF.md: the current working state for re-entry
+- episodes/: immutable session records
+- THREAD.yaml: thread identity and guidance (read-only reference)
 
-The core question is: **did something emerge that a future session should know about?**
+## Session structure
 
-Worth preserving:
-- Decisions made — including decisions NOT to do something, and why
-- New understanding, insights, or perspective shifts
-- Questions raised that remain open
-- Progress toward a goal
-- Connections discovered between ideas
+Each thread in the candidate list has a `role` indicating its relationship \
+to the session:
+- `primary`: the session's main focus, chosen by the user at start
+- `mounted`: additional threads the user explicitly scoped in
+- `touched`: threads whose files were accessed during the session
+- `related`: threads connected via `related_threads` metadata
 
-Not worth preserving:
-- Trivial exchanges, small talk, quick tests
-- Work fully captured elsewhere (e.g. a git commit speaks for itself)
-- Back-and-forth that didn't produce insight
+Primary and mounted threads reflect explicit user intent — they deserve \
+careful consideration. Touched threads may be incidental (a tool happened \
+to read a file) — use event content to judge whether the thread's state \
+actually changed. Related threads are context only; update them only when \
+the session clearly moved their state.
+
+## How to judge relevance
+
+Use thread metadata as a lens:
+- `goal`: the endpoint or purpose of the thread
+- `core_question`: the persistent tension the thread keeps working through
+- `brief_hints`: soft guidance about what this thread's BRIEF should \
+preserve or avoid
+
+Treat `brief_hints` as guidance, not a rule. \
+If it conflicts with the actual session signal, trust the session signal.
+
+## What is worth preserving
+
+Preserve only what will help the next session do better work:
+- Stable decisions, including decisions not to do something
+- Changed judgments or perspective shifts
+- Unresolved tensions
+- Important open questions
+- The current focus
+- The next useful re-entry point
+- Meaningful links to other threads
+
+Do not preserve:
+- Chronological recap
+- Tool-by-tool replay
+- Generic status wording
+- Trivial chat, tests, or motion without consequence
+- Details already captured elsewhere unless the brief needs the conclusion
 
 If nothing is worth preserving: output a one-line summary and stop. \
 Do NOT create or modify any files.
 
-## Thread matching
+## How to update a BRIEF
 
-Threads marked `touched="true"` are primary candidates — they were directly \
-referenced during the session. But consider the full thread list: if the session's \
-substance clearly relates to an untouched thread, you may write to it (higher bar).
+A BRIEF is a living state document, not a log. \
+Write it so a future session can quickly answer:
+- What matters now?
+- What seems true now?
+- What is still unresolved?
+- Where should we pick up?
+
+Do not default to a fixed template. \
+Use whatever structure fits the thread naturally.
+
+Good BRIEFs often include, when relevant:
+- Current focus
+- Stable judgments
+- Unresolved tensions
+- Re-entry point
+
+Remove stale or superseded content. \
+Preserve useful structure when it still serves the thread. \
+Do not churn headings just to make the file look newly rewritten.
 
 ## Inbox
 
-If something worth preserving doesn't belong to any existing thread, write a note \
-to `inbox/<YYYY-MM-DD>-<brief-title>.md` with a `# <title>` heading. The inbox \
-collects unanchored insights that may later become threads or feed into long-term memory.
+If something worth preserving doesn't belong to any existing thread, \
+write a note to `inbox/<YYYY-MM-DD>-<title>.md` with a `# <title>` heading.
 
 ## Available tool
 
@@ -395,38 +445,27 @@ All paths are relative to the `work/` directory (e.g. `threads/<slug>/BRIEF.md`)
 
 ## Workflow (only when writing is warranted)
 
-1. Read the current BRIEF.md for each relevant thread.
-2. Analyze the session events to understand what happened.
+1. Read the current BRIEF.md for each candidate thread.
+2. Use the session events plus thread metadata to decide whether the \
+thread's state changed.
 3. For each thread worth updating:
-   a. Write an episode file to `threads/<slug>/episodes/<filename>.md`
-      - Episode filename format: `YYYY-MM-DD-<slug>-<session_id>.md`
+   a. Write an episode to `threads/<slug>/episodes/<filename>.md`
+      - Filename: `YYYY-MM-DD-<slug>-<session_id>.md`
       - Start with `# YYYY-MM-DD: <title>` heading
-      - Content: what emerged, decisions made, open questions. Concise and factual.
+      - Content: what emerged, decisions made, open questions. Concise.
    b. Update `threads/<slug>/BRIEF.md`:
-      - Evolve the brief to reflect current state (not a log — a living document).
-      - Maintain a `## Recent Episodes` section at the end with links:
+      - Evolve to reflect current state.
+      - Keep a `## Recent Episodes` section at the end with links:
         `- [Episode title](episodes/<filename>.md)`
-
-## BRIEF.md guidelines
-
-The brief answers: Where do things stand? What's been decided? What needs attention?
-Different threads warrant different structures. Remove outdated information.
-Update status. The brief is what a collaborator reads at the start of the next session.
-
-## Workspace structure
-
-```
-threads/<slug>/BRIEF.md          # Living thread state
-threads/<slug>/THREAD.yaml       # Thread metadata (read-only reference)
-threads/<slug>/episodes/          # Immutable episode records
-inbox/                           # Unanchored insights, no thread match
-```
 
 ## Output
 
-Output a concise summary: which threads you updated (if any), episodes written (if any), \
-inbox notes (if any), and any notable observations. \
-A one-line "no updates needed" summary is perfectly fine.
+End with a concise summary:
+- Which threads you updated, and why
+- Which touched threads you did not update, and why
+- Any inbox notes you wrote
+
+If no updates were needed, say so in one line.
 """
 
 
@@ -448,25 +487,40 @@ def _build_brief_user_prompt(
     thread_meta: dict[str, dict[str, str]],
     user_prompt: str,
     session_id: str,
+    primary_thread: str | None = None,
+    mounted_threads: set[str] | None = None,
 ) -> str:
     """Build XML-structured user prompt for the brief worker."""
     parts: list[str] = []
+    _mounted = mounted_threads or set()
 
     # Session events
     parts.append(f'<session id="{session_id}">')
     parts.append(f"<events>\n{rendered_events}\n</events>")
     parts.append("</session>")
 
-    # Thread metadata
+    # Thread metadata — use sub-elements instead of attributes to handle
+    # multi-line content (scope, core_question) without escaping issues.
     parts.append("<threads>")
     for slug in thread_order:
         meta = thread_meta.get(slug, {})
-        name = meta.get("name", slug)
+        role = _thread_role(slug, primary_thread, _mounted, touched_threads)
+        thread_lines = [f'  <thread slug="{slug}" role="{role}">']
+        thread_lines.append(f"    <name>{meta.get('name', slug)}</name>")
+        description = meta.get("description", "")
+        if description:
+            thread_lines.append(f"    <goal>{description}</goal>")
         scope = meta.get("scope", "")
-        touched = "true" if slug in touched_threads else "false"
-        parts.append(
-            f'  <thread slug="{slug}" name="{name}" scope="{scope}" touched="{touched}" />'
-        )
+        if scope:
+            thread_lines.append(f"    <scope>{scope}</scope>")
+        core_question = meta.get("core_question", "")
+        if core_question:
+            thread_lines.append(f"    <core_question>{core_question}</core_question>")
+        brief_hints = meta.get("brief_hints", "")
+        if brief_hints:
+            thread_lines.append(f"    <brief_hints>{brief_hints}</brief_hints>")
+        thread_lines.append("  </thread>")
+        parts.append("\n".join(thread_lines))
     parts.append("</threads>")
 
     # Optional user guidance
@@ -537,17 +591,40 @@ class _BriefLoopHooks:
 # ---------------------------------------------------------------------------
 
 
+def _thread_role(
+    slug: str,
+    primary_thread: str | None,
+    mounted_threads: set[str],
+    touched_threads: set[str],
+) -> str:
+    """Return the most specific role for a thread in the brief worker prompt."""
+    if slug == primary_thread:
+        return "primary"
+    if slug in mounted_threads:
+        return "mounted"
+    if slug in touched_threads:
+        return "touched"
+    return "related"
+
+
 def _collect_thread_meta(engine: Any) -> dict[str, dict[str, str]]:
-    """Build thread metadata lookup from context registry."""
+    """Build thread metadata lookup from thread repository.
+
+    Reads directly from the repository instead of the registry snapshot to
+    avoid ``max_thread_registry_size`` truncation — the brief worker must
+    see metadata for every thread in the candidate list.
+    """
     meta: dict[str, dict[str, str]] = {}
     try:
-        for item in engine.context_registry.thread_snapshot():
-            slug = str(item.get("slug", ""))
-            if slug:
-                meta[slug] = {
-                    "name": str(item.get("name", slug)),
-                    "scope": str(item.get("scope", "")),
-                }
+        entries = engine.thread_repository.collect_registry_entries(max_entries=100)
+        for entry in entries:
+            meta[entry.slug] = {
+                "name": entry.name,
+                "description": entry.description,
+                "scope": entry.scope,
+                "core_question": entry.core_question,
+                "brief_hints": entry.brief_hints,
+            }
     except Exception:
         pass
     return meta

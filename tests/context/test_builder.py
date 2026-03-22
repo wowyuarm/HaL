@@ -219,8 +219,8 @@ class TestBuildSystemPrompt:
 
         prompt = cc.build_system_prompt()
         assert "# Threads" in prompt
-        assert "- github-actions" in prompt
-        assert "threads/github-actions/BRIEF.md" in prompt
+        assert "**github-actions**" in prompt
+        assert "GitHub Actions" in prompt
 
     def test_includes_gpt_output_style_adaptation(self, builder: ContextBuilder) -> None:
         prompt = builder.build_system_prompt(token_model="openai/gpt-5.4")
@@ -228,7 +228,9 @@ class TestBuildSystemPrompt:
         assert "## GPT Output Restraints" in prompt
         assert 'Do not end with generic offer lines like "if you want..."' in prompt
         assert "Do not restate the same point in different words." in prompt
-        assert "If a sentence adds no new distinction, implication, or example, remove it." in prompt
+        assert (
+            "If a sentence adds no new distinction, implication, or example, remove it." in prompt
+        )
         assert "Avoid performative contrast frames and rhetorical setup lines" in prompt
         assert "Avoid industry jargon, especially internet/product buzzwords" in prompt
 
@@ -521,5 +523,5 @@ class TestDynamicContext:
             cc = ContextBuilder(workspace, max_thread_registry_size=1)
 
         prompt = cc.build_system_prompt()
-        assert "- active-thread" in prompt
-        assert "- inactive-thread" not in prompt
+        assert "**active-thread**" in prompt
+        assert "inactive-thread" not in prompt

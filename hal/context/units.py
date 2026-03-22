@@ -56,6 +56,8 @@ def build_thread_context_unit(entry: ThreadRegistryEntry) -> ThreadContextUnit:
         related_threads=entry.related_threads,
         updated_at=entry.updated_at,
         scope=entry.scope,
+        core_question=entry.core_question,
+        brief_hints=entry.brief_hints,
     )
 
 
@@ -118,7 +120,7 @@ def render_thread_unit_registry_markdown(manifests: list[ContextUnitManifest]) -
         "",
     ]
     for manifest in manifests:
-        lines.append(f"- {manifest.key} (state: {manifest.location})")
+        lines.append(f"- **{manifest.key}** — {manifest.name}: {manifest.description}")
     return "\n".join(lines)
 
 
