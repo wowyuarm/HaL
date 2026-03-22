@@ -32,7 +32,6 @@ from hal.domain.events import (
 )
 from hal.domain.ports import LLMProviderPort
 from hal.domain.session import SessionManifest, SessionRuntimeState, build_session_id
-from hal.memory.manager import MemoryManager
 from hal.runtime.brief import run_session_brief
 from hal.runtime.session import (
     build_session_snapshot_messages,
@@ -72,7 +71,7 @@ if TYPE_CHECKING:
         WebFetchConfig,
         WebSearchConfig,
     )
-    from hal.memory.search import MemorySearch
+    from hal.memory.search import EpisodeRecallIndex
 
 
 PROCESSING_MODE = "default"
@@ -115,10 +114,9 @@ class AgentEngine:
         web_search_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
-        memory_manager: MemoryManager | None = None,
         worker_model: str = "default",
         worker_provider: LLMProviderPort | None = None,
-        memory_search: "MemorySearch | None" = None,
+        recall_index: "EpisodeRecallIndex | None" = None,
         auto_inject_top_k: int = 3,
         recall_min_score: float = 0.0,
         history_config: "HistoryConfig | None" = None,
@@ -138,7 +136,7 @@ class AgentEngine:
         self.web_search_api_key = web_search_api_key
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
-        self._memory_search = memory_search
+        self._recall_index = recall_index
         self._auto_inject_top_k = auto_inject_top_k
         self._recall_min_score = recall_min_score
         self._history_config = history_config or HistoryConfig()
@@ -156,10 +154,8 @@ class AgentEngine:
         # Adapter-facing index: transport session key -> active session id.
         self._transport_registry = SessionTransportRegistry()
 
-        self.memory = memory_manager or MemoryManager(workspace)
         self.context = ContextBuilder(
             workspace,
-            memory_manager=self.memory,
             max_thread_registry_size=self._history_config.max_thread_registry_size,
             related_thread_hops=self._history_config.related_thread_hops,
         )
@@ -167,7 +163,7 @@ class AgentEngine:
         self.context_compiler = ContextCompiler(
             context_builder=self.context,
             context_registry=self.context_registry,
-            memory_search=self._memory_search,
+            recall_index=self._recall_index,
             auto_inject_top_k=self._auto_inject_top_k,
             recall_min_score=self._recall_min_score,
         )
@@ -205,13 +201,13 @@ class AgentEngine:
             web_fetch_config=self._web_fetch_config,
             bus=self.bus,
             subagent_manager=self.subagents,
-            memory_search=self._memory_search,
+            recall_index=self._recall_index,
         )
 
-    def disable_memory_search(self) -> None:
-        """Disable memory search integration and unregister recall tool."""
-        self._memory_search = None
-        self.context_compiler.set_memory_search(None)
+    def disable_recall_index(self) -> None:
+        """Disable recall-index integration and unregister the recall tool."""
+        self._recall_index = None
+        self.context_compiler.set_recall_index(None)
         self.tools.unregister("recall")
 
     async def run(self) -> None:
@@ -856,7 +852,7 @@ class AgentEngine:
             context_builder=self.context,
             context_registry=self.context_registry,
             tools_registry=self.tools,
-            memory_search=self._memory_search,
+            recall_index=self._recall_index,
             auto_inject_top_k=self._auto_inject_top_k,
             recall_min_score=self._recall_min_score,
             history_config=self._history_config,

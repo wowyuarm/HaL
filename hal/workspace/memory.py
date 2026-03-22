@@ -1,4 +1,4 @@
-"""Workspace-facing repository for stable MEMORY.md content."""
+"""Workspace-facing repository for stable system MEMORY.md content."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 from .layout import WorkspaceLayout
 
 
-class MemoryRepository:
-    """Human-editable repository for stable long-term knowledge."""
+class SystemMemoryRepository:
+    """Human-editable repository for stable system-level long-term knowledge."""
 
     def __init__(self, workspace_or_file: Path):
         candidate = Path(workspace_or_file)

@@ -14,6 +14,7 @@ from hal.context.message_building import (
     add_assistant_message,
     add_tool_result,
 )
+from hal.workspace.memory import SystemMemoryRepository
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -58,14 +59,14 @@ class TestInit:
             cc = ContextBuilder(workspace)
         assert cc.workspace == workspace
 
-    def test_memory_manager_defaults_to_none(self, builder: ContextBuilder) -> None:
-        assert builder._memory_manager is None
+    def test_system_memory_repository_created_by_default(self, builder: ContextBuilder) -> None:
+        assert isinstance(builder._system_memory_repository, SystemMemoryRepository)
 
-    def test_memory_manager_stored_when_provided(self, workspace: Path) -> None:
-        mm = MagicMock()
+    def test_system_memory_repository_stored_when_provided(self, workspace: Path) -> None:
+        repository = MagicMock()
         with patch("hal.context.builder.SkillsLoader"):
-            cc = ContextBuilder(workspace, memory_manager=mm)
-        assert cc._memory_manager is mm
+            cc = ContextBuilder(workspace, system_memory_repository=repository)
+        assert cc._system_memory_repository is repository
 
 
 # ---------------------------------------------------------------------------
@@ -150,35 +151,35 @@ class TestBuildSystemPrompt:
         assert "artifacts/" in prompt
         assert "artifacts/subagent/" in prompt
 
-    def test_includes_memory_from_manager(self, workspace: Path) -> None:
-        mm = MagicMock()
-        mm.get_context.return_value = "Remember: user likes tea."
+    def test_includes_memory_from_repository(self, workspace: Path) -> None:
+        repository = MagicMock()
+        repository.read.return_value = "Remember: user likes tea."
 
         with patch("hal.context.builder.SkillsLoader") as cls:
             cls.return_value = MagicMock(
                 get_always_skills=MagicMock(return_value=[]),
                 build_skills_summary=MagicMock(return_value=""),
             )
-            cc = ContextBuilder(workspace, memory_manager=mm)
+            cc = ContextBuilder(workspace, system_memory_repository=repository)
 
         prompt = cc.build_system_prompt()
         assert "Remember: user likes tea." in prompt
         assert "# Memory" in prompt
-        mm.get_context.assert_called_with(budget_tokens=None, token_model=None)
+        repository.read.assert_called_once_with()
 
-    def test_memory_budget_is_passed_to_manager(self, workspace: Path) -> None:
-        mm = MagicMock()
-        mm.get_context.return_value = "short memory"
+    def test_memory_budget_is_applied_to_repository_content(self, workspace: Path) -> None:
+        repository = MagicMock()
+        repository.read.return_value = "A" * 1000
 
         with patch("hal.context.builder.SkillsLoader") as cls:
             cls.return_value = MagicMock(
                 get_always_skills=MagicMock(return_value=[]),
                 build_skills_summary=MagicMock(return_value=""),
             )
-            cc = ContextBuilder(workspace, memory_manager=mm)
+            cc = ContextBuilder(workspace, system_memory_repository=repository)
 
-        cc.build_system_prompt(memory_budget_tokens=123)
-        mm.get_context.assert_called_with(budget_tokens=123, token_model=None)
+        prompt = cc.build_system_prompt(memory_budget_tokens=20)
+        assert "[...truncated]" in prompt
 
     def test_no_memory_section_when_empty(self, builder: ContextBuilder) -> None:
         prompt = builder.build_system_prompt()
@@ -188,15 +189,15 @@ class TestBuildSystemPrompt:
         system_dir = workspace / "system"
         system_dir.mkdir(parents=True, exist_ok=True)
         (system_dir / "SOUL.md").write_text("soul content", encoding="utf-8")
-        mm = MagicMock()
-        mm.get_context.return_value = "some memory"
+        repository = MagicMock()
+        repository.read.return_value = "some memory"
 
         with patch("hal.context.builder.SkillsLoader") as cls:
             cls.return_value = MagicMock(
                 get_always_skills=MagicMock(return_value=[]),
                 build_skills_summary=MagicMock(return_value=""),
             )
-            cc = ContextBuilder(workspace, memory_manager=mm)
+            cc = ContextBuilder(workspace, system_memory_repository=repository)
 
         prompt = cc.build_system_prompt()
         # Identity, bootstrap, and memory layers should be separated by ---
@@ -394,7 +395,7 @@ class TestDynamicContext:
         prompt2 = builder.build_system_prompt()
         assert prompt1 == prompt2
 
-    def test_memory_search_results_in_user_message(self, builder: ContextBuilder) -> None:
+    def test_recall_results_in_user_message(self, builder: ContextBuilder) -> None:
         result = MagicMock()
         result.source = "daily_log"
         result.heading = "cooking"
@@ -402,7 +403,7 @@ class TestDynamicContext:
         result.content = "User likes Italian food"
         result.source_type = "raw"
 
-        msgs = builder.build_messages([], "What food?", memory_search_results=[result])
+        msgs = builder.build_messages([], "What food?", recall_results=[result])
         user_content = msgs[-1]["content"]
         assert "<relevant_memories>" in user_content
         assert "daily_log" in user_content
@@ -414,7 +415,7 @@ class TestDynamicContext:
         system_content = msgs[0]["content"]
         assert "Relevant Past Memories" not in system_content
 
-    def test_memory_search_total_tokens_limit(self, builder: ContextBuilder) -> None:
+    def test_recall_total_tokens_limit(self, builder: ContextBuilder) -> None:
         r1 = MagicMock()
         r1.source = "d1"
         r1.heading = ""
@@ -432,7 +433,7 @@ class TestDynamicContext:
         msgs = builder.build_messages(
             [],
             "msg",
-            memory_search_results=[r1, r2],
+            recall_results=[r1, r2],
             recall_max_total_tokens=120,
             recall_max_per_item_tokens=100,
         )

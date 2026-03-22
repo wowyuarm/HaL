@@ -123,17 +123,17 @@ def build_turn_context_inject(
     channel: str | None,
     chat_id: str | None,
     mounted_threads: Iterable[str],
-    memory_search_results: list[Any] | None,
+    recall_results: list[Any] | None,
     recall_max_total_tokens: int,
     recall_max_per_item_tokens: int,
     token_model: str | None,
     now: datetime | None = None,
 ) -> MessageInject:
-    """Render one per-turn context inject for time, scope, and recalled memories."""
+    """Render one per-turn context inject for time, scope, and recalled fragments."""
     ts = now or datetime.now()
     mounted = [slug for slug in mounted_threads if slug]
     recall_block = build_dynamic_recall_block(
-        memory_search_results=memory_search_results,
+        recall_results=recall_results,
         recall_max_total_tokens=recall_max_total_tokens,
         recall_max_per_item_tokens=recall_max_per_item_tokens,
         token_model=token_model,

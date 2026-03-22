@@ -11,7 +11,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 anyrouter_app = typer.Typer(help="Manage AnyRouter bridge")
+workspace_app = typer.Typer(help="Inspect and migrate workspace layout")
 app.add_typer(anyrouter_app, name="anyrouter")
+app.add_typer(workspace_app, name="workspace")
 
 console = Console()
 

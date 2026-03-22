@@ -1,4 +1,4 @@
-"""Factory functions for constructing providers and memory search."""
+"""Factory functions for constructing providers and recall indexing."""
 
 from __future__ import annotations
 
@@ -157,8 +157,8 @@ def _module_available(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
 
 
-def _missing_memory_deps(milvus_uri: str) -> list[str]:
-    """Detect missing optional dependencies required by memory search."""
+def _missing_recall_deps(milvus_uri: str) -> list[str]:
+    """Detect missing optional dependencies required by recall indexing."""
     missing: list[str] = []
 
     if not _module_available("pymilvus"):
@@ -172,15 +172,15 @@ def _missing_memory_deps(milvus_uri: str) -> list[str]:
     return missing
 
 
-def make_memory_search(config):
-    """Create MemorySearch instance from config. Returns None if deps missing."""
+def make_recall_index(config):
+    """Create an EpisodeRecallIndex instance from config. Returns None if deps missing."""
     from hal.workspace import ThreadRepository
 
-    missing = _missing_memory_deps(config.memory_search.milvus_uri)
+    missing = _missing_recall_deps(config.recall.milvus_uri)
     if missing:
         deps = ", ".join(missing)
         console.print(
-            "[yellow]Memory search unavailable "
+            "[yellow]Recall index unavailable "
             f'(missing dependency: {deps}). Install with `pip install -e ".[memory]"`.[/yellow]'
         )
         return None
@@ -188,36 +188,36 @@ def make_memory_search(config):
     try:
         from hal.memory.chunker import MarkdownChunker
         from hal.memory.contracts import MemorySearchDeps
-        from hal.memory.search import MemorySearch
+        from hal.memory.search import EpisodeRecallIndex
         from hal.memory.store import VectorStore
     except ImportError as e:
-        console.print(f"[yellow]Memory search unavailable (missing dependency: {e})[/yellow]")
+        console.print(f"[yellow]Recall index unavailable (missing dependency: {e})[/yellow]")
         return None
 
-    ms_cfg = config.memory_search
+    recall_cfg = config.recall
 
     workspace = config.workspace_path
     thread_repo = ThreadRepository(workspace)
     chunker = MarkdownChunker(
-        max_size=ms_cfg.max_chunk_size,
-        overlap_lines=ms_cfg.chunk_overlap_lines,
-        max_heading_level=ms_cfg.chunk_heading_max_level,
+        max_size=recall_cfg.max_chunk_size,
+        overlap_lines=recall_cfg.chunk_overlap_lines,
+        max_heading_level=recall_cfg.chunk_heading_max_level,
     )
     store = VectorStore(
-        uri=ms_cfg.milvus_uri,
-        collection_name=ms_cfg.collection_name,
-        embedding_dim=ms_cfg.embedding_dim,
+        uri=recall_cfg.milvus_uri,
+        collection_name=recall_cfg.collection_name,
+        embedding_dim=recall_cfg.embedding_dim,
     )
 
-    return MemorySearch(
+    return EpisodeRecallIndex(
         deps=MemorySearchDeps(chunker=chunker, store=store),
-        embedding_model=ms_cfg.embedding_model,
+        embedding_model=recall_cfg.embedding_model,
         source_root=workspace,
         episodes_root=thread_repo.threads_dir(),
-        exclude_channels=ms_cfg.exclude_channels,
-        embedding_dim=ms_cfg.embedding_dim,
-        embed_retry_attempts=ms_cfg.embed_retry_attempts,
-        embed_retry_base_delay_s=ms_cfg.embed_retry_base_delay_s,
-        embed_timeout_s=ms_cfg.embed_timeout_s,
-        **_resolve_embedding_provider(config, ms_cfg),
+        exclude_channels=recall_cfg.exclude_channels,
+        embedding_dim=recall_cfg.embedding_dim,
+        embed_retry_attempts=recall_cfg.embed_retry_attempts,
+        embed_retry_base_delay_s=recall_cfg.embed_retry_base_delay_s,
+        embed_timeout_s=recall_cfg.embed_timeout_s,
+        **_resolve_embedding_provider(config, recall_cfg),
     )

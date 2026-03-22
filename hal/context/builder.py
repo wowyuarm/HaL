@@ -8,7 +8,7 @@ Implements a 5-layer context system optimized for prompt cache hits:
     Layer 3 — Situation (stable directive + long-term memory)
     Layer 4 — Conversation (current session + message with dynamic context prefix)
 
-Dynamic per-request content (time, channel, chat_id, memory search results) is
+Dynamic per-request content (time, channel, chat_id, recall results) is
 injected as an XML-tagged prefix on the last user message rather than in the
 system prompt, so the system prompt stays stable and maximizes prefix cache hits.
 """
@@ -16,7 +16,7 @@ system prompt, so the system prompt stays stable and maximizes prefix cache hits
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hal.capabilities.skills.loader import SkillsLoader
 from hal.context.dynamic_context import build_dynamic_context_block
@@ -34,10 +34,8 @@ from hal.context.prompt_layers import (
     render_bootstrap_prompt,
 )
 from hal.context.registry import ContextRegistry
-from hal.workspace import SystemRepository
-
-if TYPE_CHECKING:
-    from hal.memory.manager import MemoryManager
+from hal.context.system_memory import build_system_memory_context
+from hal.workspace import SystemMemoryRepository, SystemRepository
 
 
 class ContextBuilder:
@@ -57,12 +55,12 @@ class ContextBuilder:
     def __init__(
         self,
         workspace: Path,
-        memory_manager: "MemoryManager | None" = None,
+        system_memory_repository: SystemMemoryRepository | None = None,
         max_thread_registry_size: int = 20,
         related_thread_hops: int = 1,
     ):
         self.workspace = workspace
-        self._memory_manager = memory_manager
+        self._system_memory_repository = system_memory_repository or SystemMemoryRepository(workspace)
         self.skills = SkillsLoader(workspace)
         self.system = SystemRepository(workspace)
         self._max_thread_registry_size = max(1, max_thread_registry_size)
@@ -106,7 +104,7 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
-        memory_search_results: list[Any] | None = None,
+        recall_results: list[Any] | None = None,
         active_threads: list[dict[str, object]] | None = None,
         memory_budget_tokens: int | None = None,
         recall_max_total_tokens: int = 500,
@@ -120,7 +118,7 @@ class ContextBuilder:
             System message = Layer 0 + 1 + 2 + 3 (stable)
             Conversation   = Layer 4 (history + current message)
 
-        Dynamic per-request context (time, channel, chat_id, memory search
+        Dynamic per-request context (time, channel, chat_id, recall
         results) is prepended to the last user message as an XML block, keeping
         the system prompt stable for prompt cache hits.
         """
@@ -135,7 +133,7 @@ class ContextBuilder:
                 media=media,
                 channel=channel,
                 chat_id=chat_id,
-                memory_search_results=memory_search_results,
+                recall_results=recall_results,
                 active_threads=active_threads,
                 recall_max_total_tokens=recall_max_total_tokens,
                 recall_max_per_item_tokens=recall_max_per_item_tokens,
@@ -148,7 +146,7 @@ class ContextBuilder:
         self,
         channel: str | None = None,
         chat_id: str | None = None,
-        memory_search_results: list[Any] | None = None,
+        recall_results: list[Any] | None = None,
         active_threads: list[dict[str, object]] | None = None,
         recall_max_total_tokens: int = 500,
         recall_max_per_item_tokens: int = 125,
@@ -158,7 +156,7 @@ class ContextBuilder:
         return self._build_dynamic_context(
             channel=channel,
             chat_id=chat_id,
-            memory_search_results=memory_search_results,
+            recall_results=recall_results,
             active_threads=active_threads,
             recall_max_total_tokens=recall_max_total_tokens,
             recall_max_per_item_tokens=recall_max_per_item_tokens,
@@ -186,7 +184,7 @@ class ContextBuilder:
         media: list[str] | None,
         channel: str | None,
         chat_id: str | None,
-        memory_search_results: list[Any] | None,
+        recall_results: list[Any] | None,
         active_threads: list[dict[str, object]] | None,
         recall_max_total_tokens: int,
         recall_max_per_item_tokens: int,
@@ -198,7 +196,7 @@ class ContextBuilder:
             self.build_dynamic_context_block(
                 channel=channel,
                 chat_id=chat_id,
-                memory_search_results=memory_search_results,
+                recall_results=recall_results,
                 active_threads=active_threads,
                 recall_max_total_tokens=recall_max_total_tokens,
                 recall_max_per_item_tokens=recall_max_per_item_tokens,
@@ -263,13 +261,12 @@ class ContextBuilder:
         budget_tokens: int | None = None,
         token_model: str | None = None,
     ) -> str:
-        """Assemble memory context from MemoryManager."""
-        if self._memory_manager:
-            return self._memory_manager.get_context(
-                budget_tokens=budget_tokens,
-                token_model=token_model,
-            )
-        return ""
+        """Assemble prompt-ready context from system memory."""
+        return build_system_memory_context(
+            self._system_memory_repository,
+            budget_tokens=budget_tokens,
+            token_model=token_model,
+        )
 
     # ------------------------------------------------------------------
     # Dynamic context (injected into user message, not system prompt)
@@ -279,7 +276,7 @@ class ContextBuilder:
         self,
         channel: str | None = None,
         chat_id: str | None = None,
-        memory_search_results: list[Any] | None = None,
+        recall_results: list[Any] | None = None,
         active_threads: list[dict[str, object]] | None = None,
         recall_max_total_tokens: int = 500,
         recall_max_per_item_tokens: int = 125,
@@ -296,7 +293,7 @@ class ContextBuilder:
             active_threads=active_threads or self.registry.active_thread_entry_snapshot(),
             active_threads_max_total_tokens=self._ACTIVE_THREADS_MAX_TOTAL_TOKENS,
             active_thread_max_tokens=self._ACTIVE_THREAD_MAX_TOKENS,
-            memory_search_results=memory_search_results,
+            recall_results=recall_results,
             recall_max_total_tokens=recall_max_total_tokens,
             recall_max_per_item_tokens=recall_max_per_item_tokens,
             token_model=token_model,

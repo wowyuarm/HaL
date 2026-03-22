@@ -1,27 +1,25 @@
-"""Memory subsystem."""
+"""System memory and recall-index helpers."""
 
-from hal.memory.manager import MemoryManager
-from hal.workspace.memory import MemoryRepository
+from hal.workspace.memory import SystemMemoryRepository
 
 __all__ = [
-    "MemoryManager",
-    "MemoryRepository",
+    "SystemMemoryRepository",
 ]
 
-# Optional: available when memory search deps are installed
+# Optional: available when recall deps are installed
 try:
     from hal.memory.chunker import Chunk, MarkdownChunker, compute_chunk_id
-    from hal.memory.search import MemorySearch
+    from hal.memory.search import EpisodeRecallIndex
     from hal.memory.store import SearchResult, VectorStore
 
     __all__ += [
         "Chunk",
         "compute_chunk_id",
+        "EpisodeRecallIndex",
         "MarkdownChunker",
-        "MemorySearch",
         "SearchResult",
         "VectorStore",
     ]
 except Exception:
-    # Optional memory-search stack should not break base memory imports.
+    # Optional recall stack should not break base memory imports.
     pass

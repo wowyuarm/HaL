@@ -55,7 +55,6 @@ def engine(bus, mock_provider, workspace):
     """Build an AgentEngine with all heavy dependencies mocked."""
     with (
         patch("hal.runtime.engine.ContextBuilder") as mock_ctx,
-        patch("hal.runtime.engine.MemoryManager") as mock_mem,
         patch("hal.runtime.engine.SubagentManager"),
     ):
         # ContextBuilder.build_messages returns minimal message list
@@ -69,14 +68,10 @@ def engine(bus, mock_provider, workspace):
         builder_instance.registry.thread_snapshot.return_value = []
         builder_instance.registry.skill_snapshot.return_value = []
 
-        # MemoryManager stub
-        mem_instance = mock_mem.return_value
-
         eng = AgentEngine(
             bus=bus,
             provider=mock_provider,
             workspace=workspace,
-            memory_manager=mem_instance,
         )
         # Ensure subagents.await_pending() is awaitable and returns no results
         eng.subagents.await_pending = AsyncMock(return_value=[])
@@ -306,7 +301,6 @@ class TestDispatch:
 
         with (
             patch("hal.runtime.engine.ContextBuilder") as mock_ctx,
-            patch("hal.runtime.engine.MemoryManager") as mock_mem,
             patch("hal.runtime.engine.SubagentManager"),
         ):
             builder_instance = mock_ctx.return_value
@@ -323,7 +317,6 @@ class TestDispatch:
                 bus=bus,
                 provider=mock_provider,
                 workspace=workspace,
-                memory_manager=mock_mem.return_value,
             )
 
         # Session should be eagerly restored by __init__ (via _restore_active_sessions)
@@ -358,8 +351,6 @@ class TestDispatch:
             m.get("role") == "assistant" and m.get("content") == "reply-1"
             for m in second_turn_messages
         )
-        engine.memory.get_conversation_history.assert_not_called()
-
     async def test_turn_context_injects_are_replayed_each_turn(self, engine):
         engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
             lambda *, history, current_message, **kwargs: [

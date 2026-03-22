@@ -55,6 +55,34 @@ def test_version_flag_exits_0() -> None:
     assert "hal v" in result.output
 
 
+def test_workspace_doctor_command_reports_legacy_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "skills" / "demo").mkdir(parents=True)
+
+    result = runner.invoke(commands.app, ["workspace", "doctor", "--workspace", str(workspace)])
+
+    assert result.exit_code == 0
+    assert "Legacy path can move to canonical location" in result.output
+    assert "skills -> capabilities/skills" in result.output
+
+
+def test_workspace_migrate_apply_moves_legacy_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "skills" / "demo").mkdir(parents=True)
+    (workspace / "skills" / "demo" / "SKILL.md").write_text("demo", encoding="utf-8")
+
+    result = runner.invoke(
+        commands.app,
+        ["workspace", "migrate", "--workspace", str(workspace), "--apply"],
+    )
+
+    assert result.exit_code == 0
+    assert "APPLIED: skills -> capabilities/skills" in result.output
+    assert (workspace / "capabilities" / "skills" / "demo" / "SKILL.md").read_text(
+        encoding="utf-8"
+    ) == "demo"
+
+
 def test_resolve_worker_model_uses_primary_when_default() -> None:
     assert commands._resolve_worker_model("claude-opus", "default") == "claude-opus"
 
@@ -206,7 +234,7 @@ def test_web_command_opens_browser_after_server_start(
         def stop(self) -> None:
             return None
 
-        def disable_memory_search(self) -> None:
+        def disable_recall_index(self) -> None:
             return None
 
     class FakeServer:
@@ -227,7 +255,7 @@ def test_web_command_opens_browser_after_server_start(
     monkeypatch.setattr("hal.infra.config.loader.load_config", lambda: config)
     monkeypatch.setattr(
         "hal.runtime.bootstrap.gateway.build_gateway_runtime",
-        lambda cfg: SimpleNamespace(agent=FakeAgent(), memory_search=None),
+        lambda cfg: SimpleNamespace(agent=FakeAgent(), recall_index=None),
     )
     monkeypatch.setattr(web_command, "_ensure_frontend_bundle_current", lambda: False)
     monkeypatch.setattr("hal.web.SessionBridge", lambda agent: ("bridge", agent))
@@ -264,7 +292,7 @@ def test_web_command_dev_mode_starts_vite_and_opens_dev_port(
         def stop(self) -> None:
             return None
 
-        def disable_memory_search(self) -> None:
+        def disable_recall_index(self) -> None:
             return None
 
     class FakeServer:
@@ -285,7 +313,7 @@ def test_web_command_dev_mode_starts_vite_and_opens_dev_port(
     monkeypatch.setattr("hal.infra.config.loader.load_config", lambda: config)
     monkeypatch.setattr(
         "hal.runtime.bootstrap.gateway.build_gateway_runtime",
-        lambda cfg: SimpleNamespace(agent=FakeAgent(), memory_search=None),
+        lambda cfg: SimpleNamespace(agent=FakeAgent(), recall_index=None),
     )
     monkeypatch.setattr(
         web_command,
@@ -339,7 +367,7 @@ def test_web_command_respects_no_open_flag(tmp_home: Path, monkeypatch: pytest.M
         def stop(self) -> None:
             return None
 
-        def disable_memory_search(self) -> None:
+        def disable_recall_index(self) -> None:
             return None
 
     class FakeServer:
@@ -361,7 +389,7 @@ def test_web_command_respects_no_open_flag(tmp_home: Path, monkeypatch: pytest.M
     monkeypatch.setattr("hal.infra.config.loader.load_config", lambda: config)
     monkeypatch.setattr(
         "hal.runtime.bootstrap.gateway.build_gateway_runtime",
-        lambda cfg: SimpleNamespace(agent=FakeAgent(), memory_search=None),
+        lambda cfg: SimpleNamespace(agent=FakeAgent(), recall_index=None),
     )
     monkeypatch.setattr(web_command, "_ensure_frontend_bundle_current", lambda: False)
     monkeypatch.setattr("hal.web.SessionBridge", lambda agent: ("bridge", agent))

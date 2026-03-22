@@ -115,6 +115,10 @@ Sessions live under `work/` — they are persistent work units, not
 ephemeral runtime artifacts. Threads and sessions are linked via
 `refs/sessions.jsonl`, not physical nesting.
 
+See `docs/specs/workspace-layout.md` for the canonical workspace contract,
+legacy-path cleanup policy, and the boundary between durable state and runtime
+derived data.
+
 ### Frontend design
 
 See `docs/specs/design-system.md` for the interface design system:

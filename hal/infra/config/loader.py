@@ -7,16 +7,17 @@ import yaml
 from loguru import logger
 
 from hal.infra.config.schema import Config
+from hal.workspace import WorkspaceLayout
 
 
 def get_config_path() -> Path:
     """Get the default configuration file path."""
-    return Path.home() / ".hal" / "system" / "config.yaml"
+    return WorkspaceLayout(Path.home() / ".hal").config_file_path()
 
 
 def get_auth_path() -> Path:
     """Get the auth credentials file path."""
-    return Path.home() / ".hal" / "system" / "auth.yaml"
+    return WorkspaceLayout(Path.home() / ".hal").auth_file_path()
 
 
 def load_config(config_path: Path | None = None) -> Config:

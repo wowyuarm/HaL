@@ -23,7 +23,7 @@ def test_build_dynamic_context_block_renders_meta_threads_and_recall() -> None:
         ],
         active_threads_max_total_tokens=1000,
         active_thread_max_tokens=500,
-        memory_search_results=[
+        recall_results=[
             SimpleNamespace(
                 source="episodes/workflow.md",
                 heading="Decisions",
@@ -63,7 +63,7 @@ def test_build_dynamic_context_block_limits_active_thread_states_by_budget() -> 
         ],
         active_threads_max_total_tokens=80,
         active_thread_max_tokens=40,
-        memory_search_results=None,
+        recall_results=None,
         recall_max_total_tokens=500,
         recall_max_per_item_tokens=125,
         token_model="test-model",
@@ -94,7 +94,7 @@ def test_collect_recall_lines_respects_total_budget() -> None:
     budget = estimate_text_tokens(first_entry, model="test-model")
 
     lines = collect_recall_lines(
-        memory_search_results=results,
+        recall_results=results,
         recall_max_total_tokens=budget,
         recall_max_per_item_tokens=10,
         token_model="test-model",

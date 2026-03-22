@@ -8,7 +8,7 @@ from loguru import logger
 
 
 def collect_recalled_thread_slugs(search_results: list[object]) -> set[str]:
-    """Collect recalled thread slugs from memory-search results."""
+    """Collect recalled thread slugs from recall results."""
     return {
         str(getattr(result, "thread", "")).strip()
         for result in search_results
@@ -25,22 +25,22 @@ def collect_active_thread_slugs(thread_snapshot: list[dict[str, object]]) -> set
     }
 
 
-async def prefetch_memory_results(
+async def prefetch_recall_results(
     *,
-    memory_search: Any,
+    recall_index: Any,
     current_message: str,
     top_k: int,
     min_score: float,
 ) -> list[object]:
-    """Best-effort memory-search prefetch for turn-context injects."""
-    if not memory_search:
+    """Best-effort recall prefetch for turn-context injects."""
+    if not recall_index:
         return []
     try:
-        return await memory_search.search(
+        return await recall_index.search(
             current_message,
             top_k=top_k,
             min_score=min_score,
         )
     except Exception as e:
-        logger.warning(f"Memory search prefetch failed: {e}")
+        logger.warning(f"Recall prefetch failed: {e}")
         return []

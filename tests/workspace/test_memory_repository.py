@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hal.workspace.memory import MemoryRepository
+from hal.workspace.memory import SystemMemoryRepository
 
 
-def test_memory_repository_reads_writes_and_updates_sections(tmp_path: Path) -> None:
-    repo = MemoryRepository(tmp_path)
+def test_system_memory_repository_reads_writes_and_updates_sections(tmp_path: Path) -> None:
+    repo = SystemMemoryRepository(tmp_path)
 
     repo.update("# Memory\n\n## Preferences\nLikes concise replies.\n")
 

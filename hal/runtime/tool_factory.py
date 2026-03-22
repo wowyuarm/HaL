@@ -14,7 +14,7 @@ from hal.domain.ports import SubagentPort
 if TYPE_CHECKING:
     from hal.bus.queue import MessageBus
     from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
-    from hal.memory.search import MemorySearch
+    from hal.memory.search import EpisodeRecallIndex
 
 
 def create_tools(
@@ -27,7 +27,7 @@ def create_tools(
     web_fetch_config: "WebFetchConfig | None" = None,
     bus: "MessageBus | None" = None,
     subagent_manager: SubagentPort | None = None,
-    memory_search: "MemorySearch | None" = None,
+    recall_index: "EpisodeRecallIndex | None" = None,
 ) -> ToolRegistry:
     """Build a ToolRegistry with the requested capabilities.
 
@@ -44,7 +44,7 @@ def create_tools(
         web_fetch_config: Web fetch tool settings (max_chars, timeout, redirects).
         bus: Message bus (enables message tool).
         subagent_manager: Subagent manager (enables spawn tool).
-        memory_search: Memory search (enables recall tool).
+        recall_index: Episode recall index (enables recall tool).
     """
     from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
@@ -92,9 +92,9 @@ def create_tools(
         send_cb = bus.publish_outbound if bus else None
         tools.register(SpawnTool(manager=subagent_manager, send_callback=send_cb))
 
-    if memory_search:
+    if recall_index:
         from hal.capabilities.tools.recall import RecallTool
 
-        tools.register(RecallTool(memory_search))
+        tools.register(RecallTool(recall_index))
 
     return tools

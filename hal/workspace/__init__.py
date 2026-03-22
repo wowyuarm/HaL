@@ -1,6 +1,13 @@
 """Workspace-facing repositories and filesystem helpers."""
 
 from .artifacts import ArtifactRepository, SubagentExecutionRecord
+from .doctor import (
+    WorkspaceDoctor,
+    WorkspaceDoctorReport,
+    WorkspaceIssue,
+    WorkspaceMigrationOperation,
+    WorkspaceMigrationResult,
+)
 from .episodes import (
     EPISODES_DIRNAME,
     EpisodeRepository,
@@ -14,6 +21,7 @@ from .layout import (
     SkillRepository,
     WorkspaceLayout,
 )
+from .memory import SystemMemoryRepository
 from .session_store import SessionStore
 from .sessions import SessionRepository, SessionSnapshot
 from .system_files import SystemRepository, WorkspaceDocument
@@ -61,6 +69,12 @@ __all__ = [
     "ThreadSessionRef",
     "WorkspaceLayout",
     "WorkspaceDocument",
+    "WorkspaceDoctor",
+    "WorkspaceDoctorReport",
+    "WorkspaceIssue",
+    "WorkspaceMigrationOperation",
+    "WorkspaceMigrationResult",
+    "SystemMemoryRepository",
     "collect_thread_episode_paths",
     "build_episode_file_name",
     "collect_thread_registry_entries",

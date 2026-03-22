@@ -279,11 +279,11 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.tools.exec.timeout == 60
     assert cfg.tools.exec.kill_wait_s == 5
 
-    # Memory search
-    assert cfg.memory_search.embed_retry_attempts == 3
-    assert cfg.memory_search.embed_retry_base_delay_s == 0.5
-    assert cfg.memory_search.embed_timeout_s == 60.0
-    assert cfg.memory_search.exclude_channels == []
+    # Recall
+    assert cfg.recall.embed_retry_attempts == 3
+    assert cfg.recall.embed_retry_base_delay_s == 0.5
+    assert cfg.recall.embed_timeout_s == 60.0
+    assert cfg.recall.exclude_channels == []
 
     # Provider safeguards
     assert cfg.providers.openai.max_request_body_bytes == 950_000

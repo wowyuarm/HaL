@@ -34,8 +34,8 @@ async def test_compile_session_turn_appends_turn_context_inject(
     builder: MagicMock,
     context_registry: MagicMock,
 ) -> None:
-    memory_search = AsyncMock()
-    memory_search.search.return_value = [
+    recall_index = AsyncMock()
+    recall_index.search.return_value = [
         SimpleNamespace(
             thread="github-actions",
             source="episodes/auth/e1.md",
@@ -48,7 +48,7 @@ async def test_compile_session_turn_appends_turn_context_inject(
     compiler = ContextCompiler(
         context_builder=builder,
         context_registry=context_registry,
-        memory_search=memory_search,
+        recall_index=recall_index,
         auto_inject_top_k=3,
         recall_min_score=0.0,
     )
@@ -74,7 +74,7 @@ async def test_compile_session_turn_appends_turn_context_inject(
     assert compiled.injected_messages[0].kind == KIND_TURN_CONTEXT
     assert "[HaL Turn Context]" in compiled.injected_messages[0].content
     assert "<relevant_memories>" in compiled.injected_messages[0].content
-    memory_search.search.assert_awaited_once_with("continue", top_k=3, min_score=0.0)
+    recall_index.search.assert_awaited_once_with("continue", top_k=3, min_score=0.0)
     builder.build_messages.assert_called_once()
     assert (
         builder.build_messages.call_args.kwargs["history"][-1]["content"]
@@ -86,12 +86,12 @@ async def test_compile_session_turn_preserves_existing_history_and_scope_threads
     builder: MagicMock,
     context_registry: MagicMock,
 ) -> None:
-    memory_search = AsyncMock()
-    memory_search.search.return_value = []
+    recall_index = AsyncMock()
+    recall_index.search.return_value = []
     compiler = ContextCompiler(
         context_builder=builder,
         context_registry=context_registry,
-        memory_search=memory_search,
+        recall_index=recall_index,
         auto_inject_top_k=3,
         recall_min_score=0.0,
     )

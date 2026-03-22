@@ -53,7 +53,7 @@ def gateway(
     runtime = build_gateway_runtime(config)
     agent = runtime.agent
     channels = runtime.channels
-    memory_search = runtime.memory_search
+    recall_index = runtime.recall_index
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
@@ -61,23 +61,23 @@ def gateway(
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
     async def run() -> None:
-        nonlocal memory_search
+        nonlocal recall_index
         try:
-            # Initialize memory search if enabled
-            if memory_search:
+            # Initialize recall index if enabled
+            if recall_index:
                 try:
-                    await memory_search.initialize()
-                    backfill_count = await memory_search.backfill()
+                    await recall_index.initialize()
+                    backfill_count = await recall_index.backfill()
                     status = (
                         f"initialized ({backfill_count} chunks backfilled)"
                         if backfill_count
                         else "initialized"
                     )
-                    console.print(f"[green]✓[/green] Memory search {status}")
+                    console.print(f"[green]✓[/green] Recall index {status}")
                 except Exception as e:
-                    console.print(f"[yellow]Memory search init failed: {e}[/yellow]")
-                    agent.disable_memory_search()
-                    memory_search = None
+                    console.print(f"[yellow]Recall index init failed: {e}[/yellow]")
+                    agent.disable_recall_index()
+                    recall_index = None
 
             await asyncio.gather(agent.run(), channels.start_all())
         except KeyboardInterrupt:

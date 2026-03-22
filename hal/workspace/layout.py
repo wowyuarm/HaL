@@ -1,11 +1,14 @@
 """Workspace layout helpers and thin repository wrappers.
 
 All paths follow the canonical workspace contract:
-  system/       — identity, instructions, memory, config
+  system/       — identity, instructions, long-term memory, config, auth
   work/         — threads, sessions, inbox
-  runtime/      — logs, resume snapshots, metrics, cache
-  capabilities/ — skills
-  data/         — vectors, artifacts, media
+  runtime/      — operational logs, detached resume snapshots, metrics, indexes
+  capabilities/ — skills and other capability packages
+  data/         — user-facing artifacts and media
+  projects/     — optional project working files
+  scripts/      — reusable scripts created inside the workspace
+  tmp/          — disposable scratch space
 
 Thin repository classes (MetricsRepository, LogRepository, SkillRepository) live
 here alongside WorkspaceLayout to keep per-concern wrappers co-located with the
@@ -27,20 +30,38 @@ class WorkspaceLayout:
 
     root: Path
 
+    def system_dir(self) -> Path:
+        return self.root / "system"
+
     def system_document_path(self, name: str) -> Path:
-        return self.root / "system" / name
+        return self.system_dir() / name
+
+    def config_file_path(self) -> Path:
+        return self.system_dir() / "config.yaml"
+
+    def auth_file_path(self) -> Path:
+        return self.system_dir() / "auth.yaml"
+
+    def secrets_file_path(self) -> Path:
+        return self.system_dir() / "secrets.yaml"
 
     def memory_dir(self) -> Path:
         return self.root / "memory"
 
     def memory_file_path(self) -> Path:
-        return self.root / "system" / "MEMORY.md"
+        return self.system_dir() / "MEMORY.md"
+
+    def work_dir(self) -> Path:
+        return self.root / "work"
 
     def threads_dir(self) -> Path:
-        return self.root / "work" / "threads"
+        return self.work_dir() / "threads"
+
+    def inbox_dir(self) -> Path:
+        return self.work_dir() / "inbox"
 
     def work_sessions_dir(self) -> Path:
-        return self.root / "work" / "sessions"
+        return self.work_dir() / "sessions"
 
     def session_dir(self, session_id: str) -> Path:
         return self.work_sessions_dir() / session_id
@@ -54,11 +75,17 @@ class WorkspaceLayout:
     def thread_refs_dir(self, slug: str) -> Path:
         return self.threads_dir() / slug / "refs"
 
+    def capabilities_dir(self) -> Path:
+        return self.root / "capabilities"
+
     def skills_dir(self) -> Path:
-        return self.root / "capabilities" / "skills"
+        return self.capabilities_dir() / "skills"
+
+    def runtime_dir(self) -> Path:
+        return self.root / "runtime"
 
     def logs_dir(self) -> Path:
-        return self.root / "runtime" / "logs"
+        return self.runtime_dir() / "logs"
 
     def sessions_dir(self) -> Path:
         """Legacy alias kept for background-resume snapshots.
@@ -71,13 +98,16 @@ class WorkspaceLayout:
         return self.resume_dir()
 
     def resume_dir(self) -> Path:
-        return self.root / "runtime" / "resume"
+        return self.runtime_dir() / "resume"
 
     def session_resume_path(self, session_id: str) -> Path:
         return self.resume_dir() / f"{session_id}.json"
 
     def metrics_dir(self) -> Path:
-        return self.root / "runtime" / "metrics"
+        return self.runtime_dir() / "metrics"
+
+    def indexes_dir(self) -> Path:
+        return self.runtime_dir() / "indexes"
 
     def daily_log_path(self, log_date: date) -> Path:
         return self.logs_dir() / f"{log_date.isoformat()}.jsonl"
@@ -88,22 +118,51 @@ class WorkspaceLayout:
     def context_metrics_path(self) -> Path:
         return self.metrics_dir() / "context_metrics.jsonl"
 
+    def data_dir(self) -> Path:
+        return self.root / "data"
+
     def artifacts_dir(self) -> Path:
-        return self.root / "data" / "artifacts"
+        return self.data_dir() / "artifacts"
 
     def subagent_artifacts_dir(self) -> Path:
         return self.artifacts_dir() / "subagent"
 
+    def media_dir(self) -> Path:
+        return self.data_dir() / "media"
+
+    def received_media_dir(self) -> Path:
+        return self.media_dir() / "received"
+
+    def projects_dir(self) -> Path:
+        return self.root / "projects"
+
+    def scripts_dir(self) -> Path:
+        return self.root / "scripts"
+
+    def tmp_dir(self) -> Path:
+        return self.root / "tmp"
+
     def ensure_base_dirs(self) -> None:
         """Create the canonical top-level directories used by the runtime."""
         for path in (
-            self.root / "system",
+            self.system_dir(),
+            self.work_dir(),
             self.threads_dir(),
+            self.inbox_dir(),
             self.work_sessions_dir(),
+            self.capabilities_dir(),
             self.skills_dir(),
+            self.runtime_dir(),
             self.logs_dir(),
             self.resume_dir(),
             self.metrics_dir(),
+            self.indexes_dir(),
+            self.data_dir(),
+            self.media_dir(),
+            self.received_media_dir(),
+            self.projects_dir(),
+            self.scripts_dir(),
+            self.tmp_dir(),
             self.subagent_artifacts_dir(),
         ):
             path.mkdir(parents=True, exist_ok=True)

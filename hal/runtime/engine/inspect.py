@@ -50,7 +50,7 @@ async def build_context_inspection(
     context_builder: Any,
     context_registry: Any,
     tools_registry: Any,
-    memory_search: Any,
+    recall_index: Any,
     auto_inject_top_k: int,
     recall_min_score: float,
     history_config: Any,
@@ -70,7 +70,7 @@ async def build_context_inspection(
     compiler = ContextCompiler(
         context_builder=context_builder,
         context_registry=context_registry,
-        memory_search=memory_search,
+        recall_index=recall_index,
         auto_inject_top_k=auto_inject_top_k,
         recall_min_score=recall_min_score,
     )

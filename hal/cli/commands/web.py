@@ -221,27 +221,27 @@ def web(
 
     runtime = build_gateway_runtime(config)
     agent = runtime.agent
-    memory_search = runtime.memory_search
+    recall_index = runtime.recall_index
     server = WebServer(config.web, SessionBridge(agent))
     frontend_dev_process: subprocess.Popen[bytes] | None = None
 
     async def run() -> None:
-        nonlocal frontend_dev_process, memory_search
+        nonlocal frontend_dev_process, recall_index
         try:
-            if memory_search:
+            if recall_index:
                 try:
-                    await memory_search.initialize()
-                    backfill_count = await memory_search.backfill()
+                    await recall_index.initialize()
+                    backfill_count = await recall_index.backfill()
                     status = (
                         f"initialized ({backfill_count} chunks backfilled)"
                         if backfill_count
                         else "initialized"
                     )
-                    console.print(f"[green]\u2713[/green] Memory search {status}")
+                    console.print(f"[green]\u2713[/green] Recall index {status}")
                 except Exception as exc:
-                    console.print(f"[yellow]Memory search init failed: {exc}[/yellow]")
-                    agent.disable_memory_search()
-                    memory_search = None
+                    console.print(f"[yellow]Recall index init failed: {exc}[/yellow]")
+                    agent.disable_recall_index()
+                    recall_index = None
 
             await server.start()
             if dev:

@@ -131,7 +131,7 @@ def test_make_provider_uses_minimax_official_defaults(monkeypatch) -> None:
     assert captured["compat_mode"] == "anthropic"
 
 
-def test_make_memory_search_returns_none_when_pymilvus_missing(monkeypatch) -> None:
+def test_make_recall_index_returns_none_when_pymilvus_missing(monkeypatch) -> None:
     config = Config()
     calls: list[str] = []
 
@@ -141,13 +141,13 @@ def test_make_memory_search_returns_none_when_pymilvus_missing(monkeypatch) -> N
 
     monkeypatch.setattr(factory, "_module_available", fake_module_available)
 
-    result = factory.make_memory_search(config)
+    result = factory.make_recall_index(config)
 
     assert result is None
     assert "pymilvus" in calls
 
 
-def test_make_memory_search_returns_none_when_milvus_lite_missing_on_local_uri(monkeypatch) -> None:
+def test_make_recall_index_returns_none_when_milvus_lite_missing_on_local_uri(monkeypatch) -> None:
     config = Config()
     calls: list[str] = []
 
@@ -157,33 +157,33 @@ def test_make_memory_search_returns_none_when_milvus_lite_missing_on_local_uri(m
 
     monkeypatch.setattr(factory, "_module_available", fake_module_available)
 
-    result = factory.make_memory_search(config)
+    result = factory.make_recall_index(config)
 
     assert result is None
     assert "milvus_lite" in calls
 
 
-def test_make_memory_search_uses_episode_indexing_defaults(monkeypatch, tmp_path: Path) -> None:
+def test_make_recall_index_uses_episode_indexing_defaults(monkeypatch, tmp_path: Path) -> None:
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
 
     captured: dict[str, object] = {}
 
-    class DummyMemorySearch:
+    class DummyEpisodeRecallIndex:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
     monkeypatch.setattr(factory, "_module_available", lambda _name: True)
-    monkeypatch.setattr("hal.memory.search.MemorySearch", DummyMemorySearch)
+    monkeypatch.setattr("hal.memory.search.EpisodeRecallIndex", DummyEpisodeRecallIndex)
 
-    result = factory.make_memory_search(config)
+    result = factory.make_recall_index(config)
 
-    assert isinstance(result, DummyMemorySearch)
+    assert isinstance(result, DummyEpisodeRecallIndex)
     assert captured["source_root"] == config.workspace_path
     assert captured["episodes_root"] == config.workspace_path / "work" / "threads"
 
 
-def test_make_memory_search_prefers_workspace_roots(monkeypatch, tmp_path: Path) -> None:
+def test_make_recall_index_prefers_workspace_roots(monkeypatch, tmp_path: Path) -> None:
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     workspace = config.workspace_path
@@ -192,14 +192,14 @@ def test_make_memory_search_prefers_workspace_roots(monkeypatch, tmp_path: Path)
 
     captured: dict[str, object] = {}
 
-    class DummyMemorySearch:
+    class DummyEpisodeRecallIndex:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
     monkeypatch.setattr(factory, "_module_available", lambda _name: True)
-    monkeypatch.setattr("hal.memory.search.MemorySearch", DummyMemorySearch)
+    monkeypatch.setattr("hal.memory.search.EpisodeRecallIndex", DummyEpisodeRecallIndex)
 
-    result = factory.make_memory_search(config)
+    result = factory.make_recall_index(config)
 
-    assert isinstance(result, DummyMemorySearch)
+    assert isinstance(result, DummyEpisodeRecallIndex)
     assert captured["episodes_root"] == workspace / "work" / "threads"

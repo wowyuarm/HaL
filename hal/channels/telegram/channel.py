@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from telegram.ext import Application
 
@@ -15,9 +15,6 @@ from .commands import TelegramCommandsMixin
 from .context import TelegramContextMixin
 from .lifecycle import TelegramLifecycleMixin
 from .messaging import TelegramMessagingMixin
-
-if TYPE_CHECKING:
-    from hal.memory.manager import MemoryManager
 
 
 class TelegramChannel(
@@ -36,13 +33,11 @@ class TelegramChannel(
         config: TelegramConfig,
         bus: MessageBus,
         groq_api_key: str = "",
-        memory_manager: MemoryManager | None = None,
         context_inspector: Callable[[str, str, str], Awaitable[dict[str, Any]]] | None = None,
     ):
         super().__init__(config, bus)
         self.config: TelegramConfig = config
         self.groq_api_key = groq_api_key
-        self.memory_manager = memory_manager
         self._context_inspector = context_inspector
         self._app: Application | None = None
         self._chat_ids: dict[str, int] = {}

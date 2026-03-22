@@ -119,33 +119,13 @@ class TestSourceType:
         assert len(chunks) == 1
         assert chunks[0].source_type == "raw"
 
-    def test_summary_tagged(self, chunker):
-        text = "# Title\n\n**[10:30] User**: [System Summary]\nAgent did something."
-        chunks = chunker.chunk_text(text, "test.md")
-        assert len(chunks) == 1
-        assert chunks[0].source_type == "summary"
-
-    def test_subagent_tagged(self, chunker):
+    def test_marker_like_text_stays_raw(self, chunker):
         text = (
             "# Title\n\n"
-            "**[10:30] User**: [Subagent Result: repo-audit]\n"
-            "Found 2 issues.\n"
-            "[Subagent Artifact] /tmp/artifacts/subagent/abc.md"
+            "[System Summary]\n"
+            "[Subagent Result: repo-audit]\n"
+            "[Subagent Artifact] /tmp/report.md"
         )
         chunks = chunker.chunk_text(text, "test.md")
         assert len(chunks) == 1
-        assert chunks[0].source_type == "subagent"
-
-    def test_mixed_raw_and_summary(self, chunker):
-        text = (
-            "# Title\n\n"
-            "**[10:30] User**: Hello\n\n"
-            "# Summary Section\n\n"
-            "**[10:35] User**: [System Summary]\nAgent fixed a bug."
-        )
-        chunks = chunker.chunk_text(text, "test.md")
-        assert len(chunks) == 2
-        raw_chunks = [c for c in chunks if c.source_type == "raw"]
-        summary_chunks = [c for c in chunks if c.source_type == "summary"]
-        assert len(raw_chunks) == 1
-        assert len(summary_chunks) == 1
+        assert chunks[0].source_type == "raw"

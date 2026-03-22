@@ -62,14 +62,18 @@ Only write to system/MEMORY.md; suggest system/INSTRUCTIONS.md changes to the us
 Platform: {runtime}
 Workspace: {workspace_path}
 Layout:
-  system/              — SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml
-  work/threads/        — long-running workstreams (BRIEF.md + episodes/)
+  system/              — SOUL.md, INSTRUCTIONS.md, MEMORY.md, config.yaml, auth.yaml, secrets.yaml
+  work/threads/        — long-running workstreams (THREAD.yaml, BRIEF.md, episodes/)
+  work/sessions/       — durable session manifests and working logs
+  work/inbox/          — notes that do not belong to an existing thread yet
   capabilities/skills/ — skill packages (each has SKILL.md)
-  runtime/logs/        — session event logs (JSONL)
+  runtime/logs/        — operational logs
+  runtime/resume/      — detached session snapshots for background continuation
+  runtime/metrics/     — context and runtime metrics
   data/artifacts/      — generated artifacts (subagent reports under data/artifacts/subagent/)
+  data/media/          — received and generated media files (received files under data/media/received/)
   scripts/             — reusable scripts you can create and execute
   projects/            — project working files and artifacts
-  data/media/          — received and generated media files
   tmp/                 — temporary files (safe to clean up)"""
 
 

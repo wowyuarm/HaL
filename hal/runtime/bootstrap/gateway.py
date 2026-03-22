@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 from hal.bus.queue import MessageBus
 from hal.channels.manager import ChannelManager
 from hal.cli.factory import (
-    make_memory_search,
     make_provider,
+    make_recall_index,
     make_worker_provider,
 )
 from hal.runtime.engine import AgentEngine
@@ -24,14 +24,14 @@ class GatewayRuntime:
 
     agent: AgentEngine
     channels: ChannelManager
-    memory_search: Any | None
+    recall_index: Any | None
 
 
 def build_gateway_runtime(config: "Config") -> GatewayRuntime:
-    """Build agent, channels, and optional memory search for gateway execution."""
+    """Build agent, channels, and optional episode recall index for gateway execution."""
     bus = MessageBus()
     provider = make_provider(config)
-    memory_search = make_memory_search(config) if config.memory_search.enabled else None
+    recall_index = make_recall_index(config) if config.recall.enabled else None
     worker_provider = make_worker_provider(config) or provider
 
     agent = AgentEngine(
@@ -45,9 +45,9 @@ def build_gateway_runtime(config: "Config") -> GatewayRuntime:
         restrict_to_workspace=config.tools.restrict_to_workspace,
         worker_model=config.agents.defaults.worker_model,
         worker_provider=worker_provider,
-        memory_search=memory_search,
-        auto_inject_top_k=config.memory_search.auto_inject_top_k,
-        recall_min_score=config.memory_search.recall_min_score,
+        recall_index=recall_index,
+        auto_inject_top_k=config.recall.auto_inject_top_k,
+        recall_min_score=config.recall.recall_min_score,
         history_config=config.agents.defaults.history,
         engine_config=config.engine,
         web_search_config=config.tools.web.search,
@@ -58,9 +58,8 @@ def build_gateway_runtime(config: "Config") -> GatewayRuntime:
     channels = ChannelManager(
         config,
         bus,
-        memory_manager=agent.memory,
         context_inspector=agent.inspect_context,
         outbound_poll_timeout_s=config.channels.outbound_poll_timeout_s,
     )
 
-    return GatewayRuntime(agent=agent, channels=channels, memory_search=memory_search)
+    return GatewayRuntime(agent=agent, channels=channels, recall_index=recall_index)

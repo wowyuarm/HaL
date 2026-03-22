@@ -161,8 +161,8 @@ class ToolsConfig(_StrictModel):
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
 
 
-class MemorySearchConfig(_StrictModel):
-    """Semantic memory search configuration."""
+class RecallConfig(_StrictModel):
+    """Episode recall configuration."""
 
     enabled: bool = False
     embedding_model: str = "openai/text-embedding-3-small"
@@ -244,7 +244,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    memory_search: MemorySearchConfig = Field(default_factory=MemorySearchConfig)
+    recall: RecallConfig = Field(default_factory=RecallConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
 
     @property

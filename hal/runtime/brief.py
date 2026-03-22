@@ -633,10 +633,10 @@ def _collect_thread_meta(engine: Any) -> dict[str, dict[str, str]]:
 async def _index_written_episodes(engine: Any, meta: LoopMetadata) -> int:
     """Index any episode files written by the brief worker."""
     episode_paths = [Path(p) for p in meta.files_modified if "episodes/" in p and p.endswith(".md")]
-    if not episode_paths or engine._memory_search is None:
+    if not episode_paths or engine._recall_index is None:
         return 0
     try:
-        return await engine._memory_search.index_paths(episode_paths)
+        return await engine._recall_index.index_paths(episode_paths)
     except Exception as e:
         logger.warning(f"Episode indexing after brief failed: {e}")
         return 0

@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from hal.bus.queue import MessageBus
 from hal.channels.base import BaseChannel
 from hal.infra.config.schema import Config
-
-if TYPE_CHECKING:
-    from hal.memory.manager import MemoryManager
 
 
 class ChannelManager:
@@ -30,13 +26,11 @@ class ChannelManager:
         self,
         config: Config,
         bus: MessageBus,
-        memory_manager: "MemoryManager | None" = None,
         context_inspector: Callable[[str, str, str], Awaitable[dict[str, object]]] | None = None,
         outbound_poll_timeout_s: float = 1.0,
     ):
         self.config = config
         self.bus = bus
-        self.memory_manager = memory_manager
         self.context_inspector = context_inspector
         self._outbound_poll_timeout_s = outbound_poll_timeout_s
         self.channels: dict[str, BaseChannel] = {}
@@ -54,7 +48,6 @@ class ChannelManager:
 
                 kwargs: dict[str, object] = {
                     "groq_api_key": self.config.providers.groq.api_key,
-                    "memory_manager": self.memory_manager,
                 }
                 if self.context_inspector is not None:
                     kwargs["context_inspector"] = self.context_inspector

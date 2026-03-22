@@ -1,4 +1,4 @@
-"""Memory search orchestrator — coordinates indexing, embedding, and retrieval.
+"""Episode recall index orchestrator — coordinates indexing, embedding, and retrieval.
 
 Primary pipeline:
 episodes/*.md -> chunks -> embeddings -> Milvus -> semantic search
@@ -18,22 +18,16 @@ from hal.memory.contracts import MemorySearchDeps
 from hal.memory.store import SearchResult
 from hal.workspace import EpisodeRepository
 
-# Score multiplier applied to summary chunks during retrieval.
-# Demotes summaries so raw conversation chunks are preferred (raw-first strategy).
-_SUMMARY_PENALTY = 0.75
-# Score multiplier for subagent injection chunks (derived data, not raw dialog).
-_SUBAGENT_PENALTY = 0.70
 _EMBED_RETRY_ATTEMPTS = 3
 _EMBED_RETRY_BASE_DELAY_S = 0.5
 _ASCII_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,}")
 _FETCH_K_MULTIPLIER = 5
 _FETCH_K_BUFFER = 12
 _FETCH_K_CAP = 40
-_SUBAGENT_LITERAL_HIT_THRESHOLD = 2
 
 
-class MemorySearch:
-    """Orchestrates the full memory search pipeline."""
+class EpisodeRecallIndex:
+    """Indexes thread episodes and serves recall queries over past session outputs."""
 
     def __init__(
         self,
@@ -68,16 +62,12 @@ class MemorySearch:
     async def initialize(self) -> None:
         """Initialize the vector store."""
         await self._store.initialize()
-        logger.info("MemorySearch initialized")
+        logger.info("EpisodeRecallIndex initialized")
 
     async def search(
         self, query: str, top_k: int = 5, min_score: float = 0.0
     ) -> list[SearchResult]:
-        """Hybrid search (semantic + keyword) across indexed memories.
-
-        Applies source-type penalties so raw conversation chunks are preferred
-        when scores are close (raw-first strategy).
-        """
+        """Hybrid search (semantic + keyword) across indexed episode chunks."""
         query_embedding = await self._embed_texts([query])
         if not query_embedding:
             return []
@@ -88,7 +78,6 @@ class MemorySearch:
             query_embedding=query_embedding[0], keyword_query=keyword_query, top_k=top_k
         )
         results = self._filter_excluded_channels(results)
-        results = self._rank_with_source_penalties(results, query_terms=query_terms)
         return self._slice_results(results, top_k=top_k, min_score=min_score)
 
     async def index_episode(self, episode_path: Path) -> int:
@@ -121,7 +110,7 @@ class MemorySearch:
             total += await self._index_file(md_path)
 
         if total:
-            logger.info(f"Episode backfill completed: indexed {total} chunks")
+            logger.info(f"Episode recall backfill completed: indexed {total} chunks")
         return total
 
     # ------------------------------------------------------------------
@@ -155,17 +144,6 @@ class MemorySearch:
             for result in results
             if _extract_channel_from_heading(result.heading) not in self._exclude_channels
         ]
-
-    def _rank_with_source_penalties(
-        self, results: list[SearchResult], *, query_terms: list[str]
-    ) -> list[SearchResult]:
-        for result in results:
-            hit_count = _count_literal_hits(f"{result.heading}\n{result.content}", query_terms)
-            if result.source_type == "summary":
-                result.score *= _SUMMARY_PENALTY
-            elif result.source_type == "subagent" and hit_count < _SUBAGENT_LITERAL_HIT_THRESHOLD:
-                result.score *= _SUBAGENT_PENALTY
-        return sorted(results, key=lambda result: result.score, reverse=True)
 
     @staticmethod
     def _slice_results(
@@ -409,20 +387,6 @@ def _build_keyword_query(query: str, terms: list[str]) -> str:
     parts.extend(terms)
     combined = " ".join(p for p in parts if p)
     return combined[:512]
-
-
-def _count_literal_hits(text: str, terms: list[str]) -> int:
-    """Count literal term hits with separator-normalized matching."""
-    if not terms:
-        return 0
-    raw = text.lower()
-    normalized = re.sub(r"[_-]+", " ", raw)
-    normalized = re.sub(r"\s+", " ", normalized)
-    hits = 0
-    for t in terms:
-        if t in raw or t in normalized:
-            hits += 1
-    return hits
 
 
 def _extract_thread_from_source(source: str) -> str:

@@ -75,11 +75,10 @@ def _extract_sent_text(send_message_mock: AsyncMock) -> str:
 
 def _build_startup_notification_channel() -> tuple[TelegramChannel, MagicMock, AsyncMock]:
     cfg = TelegramConfig(enabled=True, token="t", allow_from=["42"])
-    memory_manager = MagicMock()
-    channel = TelegramChannel(cfg, MessageBus(), memory_manager=memory_manager)
+    channel = TelegramChannel(cfg, MessageBus())
     mock_bot = AsyncMock()
     _attach_bot(channel, mock_bot)
-    return channel, memory_manager, mock_bot
+    return channel, MagicMock(), mock_bot
 
 
 def _mock_git_log(monkeypatch: pytest.MonkeyPatch) -> None:

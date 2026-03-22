@@ -1,4 +1,4 @@
-"""Recall tool — semantic search over past conversations and memories."""
+"""Recall tool — semantic search over past episode notes."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from loguru import logger
 from hal.capabilities.tools.base import Tool
 
 if TYPE_CHECKING:
-    from hal.memory.search import MemorySearch
+    from hal.memory.search import EpisodeRecallIndex
 
 
 class RecallTool(Tool):
-    """Search past conversations and memories semantically."""
+    """Search past episode notes semantically."""
 
-    def __init__(self, memory_search: MemorySearch):
-        self._search = memory_search
+    def __init__(self, recall_index: EpisodeRecallIndex):
+        self._search = recall_index
 
     @property
     def name(self) -> str:
@@ -25,8 +25,8 @@ class RecallTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Search past conversations and memories semantically. "
-            "Use this to find relevant information from previous interactions."
+            "Search past episode notes semantically. "
+            "Use this to find relevant information from earlier work."
         )
 
     @property
@@ -56,12 +56,12 @@ class RecallTool(Tool):
             results = await self._search.search(query, top_k=top_k)
         except Exception as e:
             logger.warning(f"Recall search failed: {e}")
-            return "Memory search is temporarily unavailable."
+            return "Recall is temporarily unavailable."
 
         if not results:
-            return "No relevant memories found."
+            return "No relevant past notes found."
 
-        parts: list[str] = [f"Found {len(results)} relevant memories:\n"]
+        parts: list[str] = [f"Found {len(results)} relevant past notes:\n"]
         for i, r in enumerate(results, 1):
             header = f"**[{i}] {r.source}"
             if r.heading:

@@ -33,7 +33,6 @@ def mock_provider() -> MagicMock:
 def engine(workspace: Path, mock_provider: MagicMock) -> AgentEngine:
     with (
         patch("hal.runtime.engine.ContextBuilder") as mock_ctx,
-        patch("hal.runtime.engine.MemoryManager") as mock_mem,
         patch("hal.runtime.engine.SubagentManager"),
     ):
         builder_instance = mock_ctx.return_value
@@ -45,14 +44,13 @@ def engine(workspace: Path, mock_provider: MagicMock) -> AgentEngine:
             bus=MessageBus(),
             provider=mock_provider,
             workspace=workspace,
-            memory_manager=mock_mem.return_value,
         )
         engine.subagents.await_pending = AsyncMock(return_value=[])
         turn_context = build_turn_context_inject(
             channel="web",
             chat_id="session",
             mounted_threads=["auth"],
-            memory_search_results=None,
+            recall_results=None,
             recall_max_total_tokens=500,
             recall_max_per_item_tokens=125,
             token_model="test-model",

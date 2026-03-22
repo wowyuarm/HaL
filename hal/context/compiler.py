@@ -6,12 +6,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from hal.context.message_injects import MessageInject, build_turn_context_inject
-from hal.context.recall import collect_recalled_thread_slugs, prefetch_memory_results
+from hal.context.recall import collect_recalled_thread_slugs, prefetch_recall_results
 
 if TYPE_CHECKING:
     from hal.context.builder import ContextBuilder
     from hal.context.registry import ContextRegistry
-    from hal.memory.search import MemorySearch
+    from hal.memory.search import EpisodeRecallIndex
 
 
 @dataclass(slots=True)
@@ -49,27 +49,27 @@ class ContextCompiler:
         *,
         context_builder: "ContextBuilder",
         context_registry: "ContextRegistry",
-        memory_search: "MemorySearch | None" = None,
+        recall_index: "EpisodeRecallIndex | None" = None,
         auto_inject_top_k: int = 3,
         recall_min_score: float = 0.0,
     ) -> None:
         self._context_builder = context_builder
         self._context_registry = context_registry
-        self._memory_search = memory_search
+        self._recall_index = recall_index
         self._auto_inject_top_k = auto_inject_top_k
         self._recall_min_score = recall_min_score
 
-    def set_memory_search(self, memory_search: "MemorySearch | None") -> None:
-        """Update the memory search dependency after engine construction changes."""
-        self._memory_search = memory_search
+    def set_recall_index(self, recall_index: "EpisodeRecallIndex | None") -> None:
+        """Update the recall index dependency after engine construction changes."""
+        self._recall_index = recall_index
 
     async def compile_session_turn(
         self,
         request: SessionTurnRequest,
     ) -> CompiledSessionContext:
         """Compile one session turn into prompt messages and replayable injects."""
-        search_results = await prefetch_memory_results(
-            memory_search=self._memory_search,
+        search_results = await prefetch_recall_results(
+            recall_index=self._recall_index,
             current_message=request.current_message,
             top_k=self._auto_inject_top_k,
             min_score=self._recall_min_score,
@@ -80,7 +80,7 @@ class ContextCompiler:
             channel=request.channel,
             chat_id=request.chat_id,
             mounted_threads=sorted(scope_thread_slugs),
-            memory_search_results=search_results or None,
+            recall_results=search_results or None,
             recall_max_total_tokens=request.recall_max_total_tokens,
             recall_max_per_item_tokens=request.recall_max_per_item_tokens,
             token_model=request.token_model,
@@ -93,6 +93,7 @@ class ContextCompiler:
             media=request.media,
             channel=request.channel,
             chat_id=request.chat_id,
+            recall_results=search_results or None,
             memory_budget_tokens=request.memory_budget_tokens,
             recall_max_total_tokens=request.recall_max_total_tokens,
             recall_max_per_item_tokens=request.recall_max_per_item_tokens,

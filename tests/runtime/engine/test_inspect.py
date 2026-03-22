@@ -37,7 +37,7 @@ async def test_build_context_inspection_uses_mounted_threads() -> None:
             context_builder=MagicMock(),
             context_registry=MagicMock(),
             tools_registry=tools_registry,
-            memory_search=None,
+            recall_index=None,
             auto_inject_top_k=3,
             recall_min_score=0.0,
             history_config=history_config,

@@ -24,7 +24,7 @@ class Chunk:
     heading_level: int  # 0 = preamble (before first heading), 1-6 for h1-h6
     start_line: int
     end_line: int
-    source_type: str = "raw"  # "raw" | "summary" | "subagent"
+    source_type: str = "raw"
     content_hash: str = field(default="", repr=False)
 
     def __post_init__(self):
@@ -107,43 +107,11 @@ class MarkdownChunker:
                     )
                 )
 
-        return self._tag_source_types(chunks)
+        return chunks
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _tag_source_types(chunks: list[Chunk]) -> list[Chunk]:
-        """Tag synthetic entries so retrieval can apply source-type-aware ranking."""
-        result: list[Chunk] = []
-        for c in chunks:
-            source_type = "raw"
-            if "[System Summary]" in c.content:
-                source_type = "summary"
-            elif (
-                "[Subagent Result:" in c.content
-                or "[Background subagent '" in c.content
-                or "[Subagent Artifact]" in c.content
-            ):
-                source_type = "subagent"
-
-            if source_type != "raw":
-                result.append(
-                    Chunk(
-                        content=c.content,
-                        source=c.source,
-                        heading=c.heading,
-                        heading_level=c.heading_level,
-                        start_line=c.start_line,
-                        end_line=c.end_line,
-                        source_type=source_type,
-                        content_hash=c.content_hash,
-                    )
-                )
-            else:
-                result.append(c)
-        return result
 
     @staticmethod
     def _split_into_sections(

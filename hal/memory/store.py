@@ -1,4 +1,4 @@
-"""Milvus Lite vector store for memory search.
+"""Milvus Lite vector store for episode recall.
 
 Wraps pymilvus MilvusClient (synchronous) with async wrappers via
 asyncio.to_thread() to avoid blocking the event loop.
