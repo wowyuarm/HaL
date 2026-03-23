@@ -22,3 +22,5 @@ BOT_COMMANDS = [
     BotCommand("context", "Show current LLM context"),
     BotCommand("help", "Show available commands"),
 ]
+
+BOT_BOOTSTRAP_RETRIES = -1

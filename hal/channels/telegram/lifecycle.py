@@ -8,9 +8,15 @@ import subprocess
 from pathlib import Path
 
 from loguru import logger
+from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from .constants import BOT_COMMANDS, BOT_KEEPALIVE_SLEEP_S, GIT_LOG_TIMEOUT_S
+from .constants import (
+    BOT_BOOTSTRAP_RETRIES,
+    BOT_COMMANDS,
+    BOT_KEEPALIVE_SLEEP_S,
+    GIT_LOG_TIMEOUT_S,
+)
 
 
 class TelegramLifecycleMixin:
@@ -68,6 +74,8 @@ class TelegramLifecycleMixin:
         await self._app.updater.start_polling(
             allowed_updates=["message"],
             drop_pending_updates=True,
+            bootstrap_retries=BOT_BOOTSTRAP_RETRIES,
+            error_callback=self._on_polling_error,
         )
 
         await self._send_startup_notification()
@@ -201,3 +209,8 @@ class TelegramLifecycleMixin:
         except Exception as e:
             logger.warning(f"Failed to read update marker: {e}")
             return None
+
+    @staticmethod
+    def _on_polling_error(error: TelegramError) -> None:
+        """Log polling errors without aborting the retry loop."""
+        logger.warning(f"Telegram polling error: {error}")

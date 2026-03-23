@@ -9,6 +9,7 @@ import pytest
 from hal.bus.events import OutboundMessage
 from hal.bus.queue import MessageBus
 from hal.channels.telegram import TelegramChannel, _markdown_to_telegram_html
+from hal.channels.telegram.constants import BOT_BOOTSTRAP_RETRIES
 from hal.infra.config.schema import TelegramConfig
 
 
@@ -736,6 +737,65 @@ async def test_stop_cancels_typing_tasks_and_shuts_down_app() -> None:
 
     assert ch._app is None
     assert ch._typing_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_start_polling_uses_bootstrap_retries_and_error_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    polling_kwargs: dict[str, object] = {}
+
+    class DummyBot:
+        async def get_me(self):
+            return type("BotInfo", (), {"username": "tester"})()
+
+        async def set_my_commands(self, commands):
+            return None
+
+    class DummyUpdater:
+        async def start_polling(self, **kwargs):
+            polling_kwargs.update(kwargs)
+            ch._running = False
+
+    class DummyApp:
+        def __init__(self):
+            self.bot = DummyBot()
+            self.updater = DummyUpdater()
+            self.initialize = AsyncMock()
+            self.start = AsyncMock()
+            self.stop = AsyncMock()
+            self.shutdown = AsyncMock()
+            self.add_handler = MagicMock()
+
+    class DummyBuilder:
+        def __init__(self, app):
+            self._app = app
+
+        def token(self, _token):
+            return self
+
+        def proxy(self, _proxy):
+            return self
+
+        def get_updates_proxy(self, _proxy):
+            return self
+
+        def build(self):
+            return self._app
+
+    dummy_app = DummyApp()
+    monkeypatch.setattr(
+        "hal.channels.telegram.lifecycle.Application.builder",
+        lambda: DummyBuilder(dummy_app),
+    )
+
+    ch = TelegramChannel(TelegramConfig(enabled=True, token="t"), MessageBus())
+    ch._send_startup_notification = AsyncMock()  # type: ignore[method-assign]
+
+    await ch.start()
+
+    assert polling_kwargs["bootstrap_retries"] == BOT_BOOTSTRAP_RETRIES
+    assert callable(polling_kwargs["error_callback"])
 
 
 @pytest.mark.asyncio
