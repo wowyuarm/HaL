@@ -11,30 +11,30 @@
   color-scheme: light;
 
   /* ── Surfaces ── */
-  --surface-base: #F7F4EF;
-  --surface-raised: #EFECE6;
-  --surface-elevated: #FFFFFF;
-  --surface-inset: #E8E4DD;
+  --surface-base: #f7f4ef;
+  --surface-raised: #efece6;
+  --surface-elevated: #ffffff;
+  --surface-inset: #e8e4dd;
   --surface-paper: rgba(255, 255, 255, 0.72);
   --surface-veil: rgba(255, 252, 247, 0.58);
   --surface-hover: rgba(36, 33, 29, 0.06);
 
   /* ── Text ── */
-  --text-primary: #24211D;
-  --text-secondary: #7A756D;
-  --text-on-accent: #FFFFFF;
+  --text-primary: #24211d;
+  --text-secondary: #7a756d;
+  --text-on-accent: #ffffff;
 
   /* ── Accent & semantic hues ── */
-  --color-accent: #4A7A74;
-  --color-accent-subtle: #E8F0EF;
-  --color-human: #9A7840;
-  --color-human-subtle: #F5EDE0;
-  --color-danger: #A25248;
-  --color-danger-subtle: #FAEAE8;
-  --color-success: #5A8A6A;
-  --color-success-subtle: #ECF3ED;
-  --color-warning: #B8863B;
-  --color-warning-subtle: #F7EFE1;
+  --color-accent: #4a7a74;
+  --color-accent-subtle: #e8f0ef;
+  --color-human: #9a7840;
+  --color-human-subtle: #f5ede0;
+  --color-danger: #a25248;
+  --color-danger-subtle: #faeae8;
+  --color-success: #5a8a6a;
+  --color-success-subtle: #ecf3ed;
+  --color-warning: #b8863b;
+  --color-warning-subtle: #f7efe1;
 
   /* ── Borders (rgba for natural surface blending) ── */
   --border-strong: rgba(36, 33, 29, 0.18);
@@ -44,7 +44,7 @@
   --border-human: rgba(154, 120, 64, 0.28);
   --border-danger: rgba(162, 82, 72, 0.28);
   --border-success: rgba(90, 138, 106, 0.28);
-  --border-warning: rgba(184, 134, 59, 0.30);
+  --border-warning: rgba(184, 134, 59, 0.3);
 
   /* ── Semantic aliases (--hal-* namespace) ── */
   --hal-canvas: var(--surface-base);
@@ -106,7 +106,7 @@
 
   /* ── Elevation (shadow) ── */
   --shadow-sm: 0 1px 2px rgba(36, 33, 29, 0.06);
-  --shadow-popover: 0 6px 18px rgba(36, 33, 29, 0.10);
+  --shadow-popover: 0 6px 18px rgba(36, 33, 29, 0.1);
 
   /* ── Radius ── */
   --radius-sm: 4px;
@@ -205,7 +205,7 @@
   }
 
   .hal-sheet::before {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
     pointer-events: none;
@@ -232,7 +232,7 @@
   }
 
   .hal-rule-label::before {
-    content: "";
+    content: '';
     width: 1.75rem;
     height: 1px;
     background: var(--border-accent);
@@ -285,12 +285,13 @@
     color: var(--hal-text);
     font-size: var(--type-reading-size);
     line-height: var(--type-reading-line);
-    --hal-markdown-surface:
-      color-mix(in srgb, rgba(255, 255, 255, 0.64) 72%, var(--hal-inset));
-    --hal-markdown-surface-strong:
-      color-mix(in srgb, var(--hal-inset) 74%, rgba(255, 255, 255, 0.56));
-    --hal-markdown-surface-hover:
-      color-mix(in srgb, var(--hal-paper) 76%, var(--hal-inset));
+    --hal-markdown-surface: color-mix(in srgb, rgba(255, 255, 255, 0.64) 72%, var(--hal-inset));
+    --hal-markdown-surface-strong: color-mix(
+      in srgb,
+      var(--hal-inset) 74%,
+      rgba(255, 255, 255, 0.56)
+    );
+    --hal-markdown-surface-hover: color-mix(in srgb, var(--hal-paper) 76%, var(--hal-inset));
   }
 
   .hal-markdown > :first-child {
@@ -452,7 +453,7 @@
     color: var(--hal-text);
   }
 
-  .hal-markdown-copy-button[aria-label="Copied code"] {
+  .hal-markdown-copy-button[aria-label='Copied code'] {
     color: color-mix(in srgb, var(--hal-live) 68%, var(--hal-text));
   }
 

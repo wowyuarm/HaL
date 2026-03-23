@@ -19,6 +19,13 @@ pytest tests/runtime/test_engine.py
 # Lint & Format
 ruff check hal/
 ruff format hal/
+
+# Frontend (web/)
+cd web && npm install              # Install frontend deps
+cd web && npm run dev              # Vite dev server (port 3000, proxies to backend :8765)
+cd web && npm run build            # TypeScript check + Vite production build
+cd web && npx tsc -b               # TypeScript type-check only
+cd web && npx prettier --write .   # Format frontend code
 ```
 
 ## Architecture Overview
@@ -70,3 +77,19 @@ Native web (SessionBridge) ──────────────┘        
 - Add module-level constants for non-trivial thresholds/limits; avoid magic numbers in flow logic.
 - Register new tools/providers through existing registries/factories (`hal/runtime/tool_factory.py`, provider registry).
 - Commit messages follow `type(scope): summary`; for frontend work, prefer `web-session`, `web-thread`, `web-ui`, `web-layout`, or `web-runtime` over plain `web` when the change is mainly in one area.
+
+## Frontend Engineering
+
+- For frontend work, read `docs/specs/design-system.md` and use the `hal-design` skill (`/hal-design`).
+- Reuse shared patterns before adding one-off classes: `web/src/components/ui/hal-patterns.ts` (layout widths, bounded paper-object variants), `web/src/components/ui/hal-markdown.tsx` (markdown rendering).
+- Do not split markdown behavior across multiple styling systems — `HalMarkdown` + `web/src/styles/globals.css` is the primary path.
+- Keep working-log and thread-detail body width aligned through shared constants; do not scatter raw width literals like `max-w-[49rem]`.
+- Change shared variants or tokens first, not scattered per-component padding values, when adjusting density.
+- Vite proxies `/threads` and `/sessions` to backend at `HAL_WEB_BACKEND_ORIGIN` (default `http://localhost:8765`).
+
+## Configuration & Security
+
+- Runtime config lives in `~/.hal/system/config.yaml`; secrets/tokens in `~/.hal/system/auth.yaml`. Never commit secrets.
+- New config keys go in `hal/infra/config/schema.py` with clear inline comments.
+- Avoid magic numbers in flow logic — define `UPPER_SNAKE_CASE` module-level constants.
+- If modifying filesystem or command-execution tools, validate with `tools.restrict_to_workspace` enabled.

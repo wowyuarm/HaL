@@ -5,41 +5,41 @@ import {
   useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
-} from "react";
+} from 'react'
 
-import { Check, Copy } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
-import remarkGfm from "remark-gfm";
+import { Check, Copy } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
+import remarkGfm from 'remark-gfm'
 
-import { cn } from "@/lib/utils";
+import { cn } from '@/lib/utils'
 
-type HalMarkdownTone = "conversation" | "brief";
+type HalMarkdownTone = 'conversation' | 'brief'
 
-const PROTECTED_MARKDOWN_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g;
-const CJK_OPEN_PUNCTUATION = "“‘「『《〈【（〔［｛";
-const CJK_CLOSE_PUNCTUATION = "：；，。！？、…）】」』》〉”’〕］｝";
+const PROTECTED_MARKDOWN_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g
+const CJK_OPEN_PUNCTUATION = '“‘「『《〈【（〔［｛'
+const CJK_CLOSE_PUNCTUATION = '：；，。！？、…）】」』》〉”’〕］｝'
 
 interface HalMarkdownProps {
-  children: string;
-  tone?: HalMarkdownTone;
-  className?: string;
-  onLinkClick?: (href: string) => void;
+  children: string
+  tone?: HalMarkdownTone
+  className?: string
+  onLinkClick?: (href: string) => void
 }
 
 export function HalMarkdown({
   children,
-  tone = "conversation",
+  tone = 'conversation',
   className,
   onLinkClick,
 }: HalMarkdownProps) {
-  const normalizedMarkdown = normalizeMarkdownEmphasis(children);
+  const normalizedMarkdown = normalizeMarkdownEmphasis(children)
 
   return (
     <div
       className={cn(
-        "hal-markdown max-w-none",
-        tone === "brief" ? "hal-markdown-brief" : "hal-markdown-conversation",
+        'hal-markdown max-w-none',
+        tone === 'brief' ? 'hal-markdown-brief' : 'hal-markdown-conversation',
         className,
       )}
     >
@@ -51,81 +51,69 @@ export function HalMarkdown({
         {normalizedMarkdown}
       </ReactMarkdown>
     </div>
-  );
+  )
 }
 
 function normalizeMarkdownEmphasis(source: string): string {
   return source
     .split(PROTECTED_MARKDOWN_SEGMENT_RE)
-    .map((segment, index) =>
-      index % 2 === 1 ? segment : normalizeEmphasisInTextSegment(segment),
-    )
-    .join("");
+    .map((segment, index) => (index % 2 === 1 ? segment : normalizeEmphasisInTextSegment(segment)))
+    .join('')
 }
 
 function normalizeEmphasisInTextSegment(segment: string): string {
-  let current = segment;
+  let current = segment
 
-  for (const delimiter of ["**", "__", "*", "_"]) {
-    current = normalizeDelimiterEdges(current, delimiter);
+  for (const delimiter of ['**', '__', '*', '_']) {
+    current = normalizeDelimiterEdges(current, delimiter)
   }
 
-  return current;
+  return current
 }
 
 function normalizeDelimiterEdges(text: string, delimiter: string): string {
-  const escaped = escapeForRegExp(delimiter);
-  const leadingPunctuationRe = new RegExp(
-    `(${escaped})([${CJK_OPEN_PUNCTUATION}]+)(.+?)\\1`,
-    "g",
-  );
-  const trailingPunctuationRe = new RegExp(
-    `(${escaped})(.+?)([${CJK_CLOSE_PUNCTUATION}]+)\\1`,
-    "g",
-  );
+  const escaped = escapeForRegExp(delimiter)
+  const leadingPunctuationRe = new RegExp(`(${escaped})([${CJK_OPEN_PUNCTUATION}]+)(.+?)\\1`, 'g')
+  const trailingPunctuationRe = new RegExp(`(${escaped})(.+?)([${CJK_CLOSE_PUNCTUATION}]+)\\1`, 'g')
 
-  let current = text;
+  let current = text
 
   for (let i = 0; i < 3; i += 1) {
     const next = current
-      .replace(leadingPunctuationRe, "$2$1$3$1")
-      .replace(trailingPunctuationRe, "$1$2$1$3");
+      .replace(leadingPunctuationRe, '$2$1$3$1')
+      .replace(trailingPunctuationRe, '$1$2$1$3')
 
     if (next === current) {
-      break;
+      break
     }
 
-    current = next;
+    current = next
   }
 
-  return current;
+  return current
 }
 
 function escapeForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function MarkdownPre({
-  className,
-  children,
-  ...props
-}: ComponentPropsWithoutRef<"pre">) {
-  const codeText = extractTextContent(children).replace(/\n$/, "");
-  const [copied, setCopied] = useState(false);
+function MarkdownPre({ className, children, ...props }: ComponentPropsWithoutRef<'pre'>) {
+  const codeText = extractTextContent(children).replace(/\n$/, '')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (!copied) return undefined;
-    const timer = window.setTimeout(() => setCopied(false), 1600);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
+    if (!copied) return undefined
+    const timer = window.setTimeout(() => setCopied(false), 1600)
+    return () => window.clearTimeout(timer)
+  }, [copied])
 
   async function handleCopy() {
-    if (!codeText.trim()) return;
+    if (!codeText.trim()) return
     try {
-      await navigator.clipboard.writeText(codeText);
-      setCopied(true);
+      await navigator.clipboard.writeText(codeText)
+      setCopied(true)
     } catch {
-      setCopied(false);
+      setCopied(false)
     }
   }
 
@@ -135,15 +123,15 @@ function MarkdownPre({
         type="button"
         onClick={handleCopy}
         className="hal-markdown-copy-button"
-        aria-label={copied ? "Copied code" : "Copy code"}
+        aria-label={copied ? 'Copied code' : 'Copy code'}
       >
         {copied ? <Check size={14} /> : <Copy size={14} />}
       </button>
-      <pre className={cn("hal-markdown-pre", className)} {...props}>
+      <pre className={cn('hal-markdown-pre', className)} {...props}>
         {children}
       </pre>
     </div>
-  );
+  )
 }
 
 function MarkdownCode({
@@ -151,38 +139,34 @@ function MarkdownCode({
   inline,
   children,
   ...props
-}: ComponentPropsWithoutRef<"code"> & { inline?: boolean }) {
-  const text = String(children ?? "");
-  const hasLanguageClass = Boolean(className && /language-/.test(className));
-  const isInlineCode = inline === true || (!hasLanguageClass && !text.includes("\n"));
+}: ComponentPropsWithoutRef<'code'> & { inline?: boolean }) {
+  const text = String(children ?? '')
+  const hasLanguageClass = Boolean(className && /language-/.test(className))
+  const isInlineCode = inline === true || (!hasLanguageClass && !text.includes('\n'))
 
   if (isInlineCode) {
     return (
-      <code className={cn("hal-markdown-inline-code", className)} {...props}>
+      <code className={cn('hal-markdown-inline-code', className)} {...props}>
         {children}
       </code>
-    );
+    )
   }
 
   return (
-    <code className={cn("hal-markdown-block-code", className)} {...props}>
+    <code className={cn('hal-markdown-block-code', className)} {...props}>
       {children}
     </code>
-  );
+  )
 }
 
-function MarkdownTable({
-  className,
-  children,
-  ...props
-}: ComponentPropsWithoutRef<"table">) {
+function MarkdownTable({ className, children, ...props }: ComponentPropsWithoutRef<'table'>) {
   return (
     <div className="hal-markdown-table-wrap">
-      <table className={cn("hal-markdown-table", className)} {...props}>
+      <table className={cn('hal-markdown-table', className)} {...props}>
         {children}
       </table>
     </div>
-  );
+  )
 }
 
 function MarkdownLink({
@@ -191,29 +175,29 @@ function MarkdownLink({
   children,
   onLinkClick,
   ...props
-}: ComponentPropsWithoutRef<"a"> & { onLinkClick?: (href: string) => void }) {
-  const openInNewTab = Boolean(href && !href.startsWith("#"));
-  const isEpisodeLink = Boolean(href && isEpisodeLinkHref(href));
+}: ComponentPropsWithoutRef<'a'> & { onLinkClick?: (href: string) => void }) {
+  const openInNewTab = Boolean(href && !href.startsWith('#'))
+  const isEpisodeLink = Boolean(href && isEpisodeLinkHref(href))
 
   return (
     <a
       href={href}
-      target={openInNewTab && !isEpisodeLink ? "_blank" : undefined}
-      rel={openInNewTab && !isEpisodeLink ? "noreferrer noopener" : undefined}
+      target={openInNewTab && !isEpisodeLink ? '_blank' : undefined}
+      rel={openInNewTab && !isEpisodeLink ? 'noreferrer noopener' : undefined}
       onClick={
         isEpisodeLink && href && onLinkClick
           ? (event) => {
-              event.preventDefault();
-              onLinkClick(href);
+              event.preventDefault()
+              onLinkClick(href)
             }
           : undefined
       }
-      className={cn("hal-markdown-link", className)}
+      className={cn('hal-markdown-link', className)}
       {...props}
     >
       {children}
     </a>
-  );
+  )
 }
 
 function buildMarkdownComponents(onLinkClick?: (href: string) => void) {
@@ -221,31 +205,29 @@ function buildMarkdownComponents(onLinkClick?: (href: string) => void) {
     pre: MarkdownPre,
     code: MarkdownCode,
     table: MarkdownTable,
-    a: (props: ComponentPropsWithoutRef<"a">) => (
+    a: (props: ComponentPropsWithoutRef<'a'>) => (
       <MarkdownLink {...props} onLinkClick={onLinkClick} />
     ),
-  } as const;
+  } as const
 }
 
 function isEpisodeLinkHref(href: string): boolean {
-  const normalized = href.startsWith("./") ? href.slice(2) : href;
-  return normalized.startsWith("episodes/");
+  const normalized = href.startsWith('./') ? href.slice(2) : href
+  return normalized.startsWith('episodes/')
 }
 
 function extractTextContent(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node)
   }
 
   if (Array.isArray(node)) {
-    return node.map(extractTextContent).join("");
+    return node.map(extractTextContent).join('')
   }
 
   if (isValidElement(node)) {
-    return extractTextContent(node.props.children as ReactNode);
+    return extractTextContent(node.props.children as ReactNode)
   }
 
-  return Children.toArray(node)
-    .map(extractTextContent)
-    .join("");
+  return Children.toArray(node).map(extractTextContent).join('')
 }

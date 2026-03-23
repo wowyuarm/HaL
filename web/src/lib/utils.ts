@@ -1,5 +1,5 @@
-import { type ClassValue, clsx } from "clsx";
-import { extendTailwindMerge } from "tailwind-merge";
+import { type ClassValue, clsx } from 'clsx'
+import { extendTailwindMerge } from 'tailwind-merge'
 
 /**
  * Custom tailwind-merge that recognises the design system's typography
@@ -10,24 +10,16 @@ import { extendTailwindMerge } from "tailwind-merge";
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
-      "font-size": [
+      'font-size': [
         {
-          text: [
-            "title",
-            "heading",
-            "subheading",
-            "body",
-            "reading",
-            "meta",
-            "caption",
-          ],
+          text: ['title', 'heading', 'subheading', 'body', 'reading', 'meta', 'caption'],
         },
       ],
     },
   },
-});
+})
 
 /** Merge Tailwind classes with conflict resolution. */
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+  return twMerge(clsx(inputs))
 }

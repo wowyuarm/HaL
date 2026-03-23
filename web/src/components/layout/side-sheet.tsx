@@ -1,17 +1,17 @@
-import type { ReactNode } from "react";
-import { X } from "lucide-react";
+import type { ReactNode } from 'react'
+import { X } from 'lucide-react'
 
-import { cn } from "@/lib/utils";
+import { cn } from '@/lib/utils'
 
 interface SideSheetProps {
-  open: boolean;
-  title: string;
-  description?: string | null;
-  meta?: ReactNode;
-  widthClassName?: string;
-  zIndexClassName?: string;
-  onClose?: () => void;
-  children: ReactNode;
+  open: boolean
+  title: string
+  description?: string | null
+  meta?: ReactNode
+  widthClassName?: string
+  zIndexClassName?: string
+  onClose?: () => void
+  children: ReactNode
 }
 
 export function SideSheet({
@@ -19,27 +19,27 @@ export function SideSheet({
   title,
   description,
   meta,
-  widthClassName = "w-[min(440px,36vw)]",
-  zIndexClassName = "z-20",
+  widthClassName = 'w-[min(440px,36vw)]',
+  zIndexClassName = 'z-20',
   onClose,
   children,
 }: SideSheetProps) {
   return (
     <aside
       className={cn(
-        "absolute inset-y-0 right-0 hidden overflow-hidden px-3 py-5 transition-[opacity,transform] duration-slow ease-standard lg:block motion-reduce:transition-none",
+        'absolute inset-y-0 right-0 hidden overflow-hidden px-3 py-5 transition-[opacity,transform] duration-slow ease-standard motion-reduce:transition-none lg:block',
         widthClassName,
         zIndexClassName,
         open
-          ? "pointer-events-auto translate-x-0 opacity-100"
-          : "pointer-events-none translate-x-4 opacity-0",
+          ? 'pointer-events-auto translate-x-0 opacity-100'
+          : 'pointer-events-none translate-x-4 opacity-0',
       )}
       aria-hidden={!open}
     >
       <div
         className={cn(
-          "hal-paper hal-sheet flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border shadow-popover transition-[opacity,transform,filter] duration-slow ease-standard motion-reduce:transition-none",
-          open ? "translate-x-0 opacity-100 blur-0" : "translate-x-3 opacity-0 blur-[2px]",
+          'hal-paper hal-sheet flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border shadow-popover transition-[opacity,transform,filter] duration-slow ease-standard motion-reduce:transition-none',
+          open ? 'translate-x-0 opacity-100 blur-0' : 'translate-x-3 opacity-0 blur-[2px]',
         )}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-subtle px-5 py-4">
@@ -65,5 +65,5 @@ export function SideSheet({
         </div>
       </div>
     </aside>
-  );
+  )
 }

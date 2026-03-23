@@ -9,14 +9,14 @@
  * and assistant-ui's rendering layer.
  */
 
-import { useMemo } from "react";
-import { useExternalStoreRuntime } from "@assistant-ui/react";
+import { useMemo } from 'react'
+import { useExternalStoreRuntime } from '@assistant-ui/react'
 
-import type { SessionEvent, SessionManifest } from "@/lib/types";
-import { convertSessionEvents, type SessionMessage } from "@/lib/session-adapter";
-import { submitSessionTurn } from "@/lib/api";
-import { useHalStore } from "@/lib/store";
-import type { ThreadMessageLike } from "@assistant-ui/react";
+import type { SessionEvent, SessionManifest } from '@/lib/types'
+import { convertSessionEvents, type SessionMessage } from '@/lib/session-adapter'
+import { submitSessionTurn } from '@/lib/api'
+import { useHalStore } from '@/lib/store'
+import type { ThreadMessageLike } from '@assistant-ui/react'
 
 // ---------------------------------------------------------------------------
 // SessionMessage → ThreadMessageLike converter
@@ -31,12 +31,10 @@ function toThreadMessageLike(msg: SessionMessage): ThreadMessageLike {
     metadata: {
       custom: msg.halMeta as Record<string, unknown>,
     },
-  };
+  }
 
   // assistant-ui throws if status is set on non-assistant messages.
-  return msg.role === "assistant" && msg.status
-    ? { ...base, status: msg.status }
-    : base;
+  return msg.role === 'assistant' && msg.status ? { ...base, status: msg.status } : base
 }
 
 // ---------------------------------------------------------------------------
@@ -47,11 +45,11 @@ function toThreadMessageLike(msg: SessionMessage): ThreadMessageLike {
 function detectRunningTurn(events: SessionEvent[]): boolean {
   // Walk backwards to find the most recent turn lifecycle event.
   for (let i = events.length - 1; i >= 0; i--) {
-    const type = events[i]!.type;
-    if (type === "turn.completed" || type === "turn.failed") return false;
-    if (type === "turn.started") return true;
+    const type = events[i]!.type
+    if (type === 'turn.completed' || type === 'turn.failed') return false
+    if (type === 'turn.started') return true
   }
-  return false;
+  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -71,20 +69,18 @@ export function useHalRuntime(sessionId: string | null) {
   // Store selectors — fine-grained to minimize re-renders.
   const events: SessionEvent[] = useHalStore(
     (s) => (sessionId ? s.sessionEvents[sessionId] : undefined) ?? EMPTY_EVENTS,
-  );
-  const manifest: SessionManifest | undefined = useHalStore(
-    (s) => (sessionId ? s.sessionManifests[sessionId] : undefined),
-  );
-  const setError = useHalStore((s) => s.setError);
+  )
+  const manifest: SessionManifest | undefined = useHalStore((s) =>
+    sessionId ? s.sessionManifests[sessionId] : undefined,
+  )
+  const setError = useHalStore((s) => s.setError)
 
   // Convert events → messages (memoized on events reference).
-  const messages = useMemo(() => convertSessionEvents(events), [events]);
+  const messages = useMemo(() => convertSessionEvents(events), [events])
 
   // Derived state.
-  const isRunning = Boolean(
-    sessionId && manifest?.status === "active" && detectRunningTurn(events),
-  );
-  const canSend = Boolean(sessionId && manifest?.status === "active");
+  const isRunning = Boolean(sessionId && manifest?.status === 'active' && detectRunningTurn(events))
+  const canSend = Boolean(sessionId && manifest?.status === 'active')
 
   // Build the adapter.
   const runtime = useExternalStoreRuntime<SessionMessage>({
@@ -94,41 +90,41 @@ export function useHalRuntime(sessionId: string | null) {
     isDisabled: !canSend,
 
     onNew: async (appendMessage) => {
-      if (!sessionId) return;
+      if (!sessionId) return
       // Extract text content from assistant-ui's AppendMessage.
       const textPart = appendMessage.content.find(
-        (p): p is { type: "text"; text: string } => p.type === "text",
-      );
-      if (!textPart?.text) return;
+        (p): p is { type: 'text'; text: string } => p.type === 'text',
+      )
+      if (!textPart?.text) return
 
       try {
         const submission = await submitSessionTurn(sessionId, {
           content: textPart.text,
-        });
+        })
         // Read latest store state to avoid stale closure on socketState.
         const {
           socketState: latestSocketState,
           applySessionManifest,
           loadSessionEvents,
-        } = useHalStore.getState();
-        if (latestSocketState !== "live") {
-          applySessionManifest(submission.session);
-          await loadSessionEvents(sessionId);
+        } = useHalStore.getState()
+        if (latestSocketState !== 'live') {
+          applySessionManifest(submission.session)
+          await loadSessionEvents(sessionId)
         }
       } catch (error) {
-        setError(error instanceof Error ? error.message : "Failed to submit turn.");
+        setError(error instanceof Error ? error.message : 'Failed to submit turn.')
       }
     },
 
     // HaL does not support turn cancellation yet.
     // onCancel: async () => {},
-  });
+  })
 
-  return runtime;
+  return runtime
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const EMPTY_EVENTS: SessionEvent[] = [];
+const EMPTY_EVENTS: SessionEvent[] = []

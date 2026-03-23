@@ -1,18 +1,18 @@
-import type { ReactNode } from "react";
+import type { ReactNode } from 'react'
 
-import { SideSheet } from "@/components/layout/side-sheet";
-import { cn } from "@/lib/utils";
+import { SideSheet } from '@/components/layout/side-sheet'
+import { cn } from '@/lib/utils'
 
 interface ReadingPanelProps {
-  open: boolean;
-  title: string;
-  description?: string | null;
-  meta?: ReactNode;
-  widthClassName?: string;
-  zIndexClassName?: string;
-  onClose?: () => void;
-  contentClassName?: string;
-  children: ReactNode;
+  open: boolean
+  title: string
+  description?: string | null
+  meta?: ReactNode
+  widthClassName?: string
+  zIndexClassName?: string
+  onClose?: () => void
+  contentClassName?: string
+  children: ReactNode
 }
 
 export function ReadingPanel({
@@ -36,7 +36,7 @@ export function ReadingPanel({
       zIndexClassName={zIndexClassName}
       onClose={onClose}
     >
-      <div className={cn("hal-side-sheet-content min-h-full", contentClassName)}>{children}</div>
+      <div className={cn('hal-side-sheet-content min-h-full', contentClassName)}>{children}</div>
     </SideSheet>
-  );
+  )
 }

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react'
 
-import { ReadingPanel } from "@/components/layout/reading-panel";
-import { HalMarkdown } from "@/components/ui/hal-markdown";
+import { ReadingPanel } from '@/components/layout/reading-panel'
+import { HalMarkdown } from '@/components/ui/hal-markdown'
 import {
   describeEvidenceEvent,
   EVIDENCE_CATEGORY_META,
@@ -9,84 +9,84 @@ import {
   evidenceCategory,
   evidenceCountEntries,
   summarizeEvidenceCounts,
-} from "@/lib/evidence";
-import { getThreadEpisode } from "@/lib/api";
-import { formatTimestamp } from "@/lib/runtime";
-import { EVIDENCE_EVENTS } from "@/lib/session-adapter";
-import { useHalStore } from "@/lib/store";
-import type { SessionEvent, ThreadEpisode } from "@/lib/types";
+} from '@/lib/evidence'
+import { getThreadEpisode } from '@/lib/api'
+import { formatTimestamp } from '@/lib/runtime'
+import { EVIDENCE_EVENTS } from '@/lib/session-adapter'
+import { useHalStore } from '@/lib/store'
+import type { SessionEvent, ThreadEpisode } from '@/lib/types'
 
-const REVIEW_PANEL_WIDTH = "w-[min(520px,42vw)]";
+const REVIEW_PANEL_WIDTH = 'w-[min(520px,42vw)]'
 
 interface ReviewPanelProps {
-  briefMarkdown: string | null;
-  threadSlug: string | null;
+  briefMarkdown: string | null
+  threadSlug: string | null
 }
 
 type EpisodeLoadState =
-  | { status: "idle"; episode: null; error: null }
-  | { status: "loading"; episode: null; error: null }
-  | { status: "ready"; episode: ThreadEpisode; error: null }
-  | { status: "error"; episode: null; error: string };
+  | { status: 'idle'; episode: null; error: null }
+  | { status: 'loading'; episode: null; error: null }
+  | { status: 'ready'; episode: ThreadEpisode; error: null }
+  | { status: 'error'; episode: null; error: string }
 
 const INITIAL_EPISODE_STATE: EpisodeLoadState = {
-  status: "idle",
+  status: 'idle',
   episode: null,
   error: null,
-};
+}
 
 export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
-  const reviewPanel = useHalStore((s) => s.reviewPanel);
-  const selectedSessionId = useHalStore((s) => s.selectedSessionId);
+  const reviewPanel = useHalStore((s) => s.reviewPanel)
+  const selectedSessionId = useHalStore((s) => s.selectedSessionId)
   const allEvents = useHalStore(
     (s) => (selectedSessionId ? s.sessionEvents[selectedSessionId] : undefined) ?? EMPTY_EVENTS,
-  );
-  const closeReviewPanel = useHalStore((s) => s.closeReviewPanel);
-  const openEpisode = useHalStore((s) => s.openEpisode);
-  const [episodeState, setEpisodeState] = useState<EpisodeLoadState>(INITIAL_EPISODE_STATE);
+  )
+  const closeReviewPanel = useHalStore((s) => s.closeReviewPanel)
+  const openEpisode = useHalStore((s) => s.openEpisode)
+  const [episodeState, setEpisodeState] = useState<EpisodeLoadState>(INITIAL_EPISODE_STATE)
 
   useEffect(() => {
-    if (reviewPanel?.kind !== "episode") {
-      setEpisodeState(INITIAL_EPISODE_STATE);
-      return;
+    if (reviewPanel?.kind !== 'episode') {
+      setEpisodeState(INITIAL_EPISODE_STATE)
+      return
     }
 
-    let cancelled = false;
-    setEpisodeState({ status: "loading", episode: null, error: null });
+    let cancelled = false
+    setEpisodeState({ status: 'loading', episode: null, error: null })
 
     void getThreadEpisode(reviewPanel.threadSlug, reviewPanel.episodePath)
       .then((episode) => {
-        if (cancelled) return;
-        setEpisodeState({ status: "ready", episode, error: null });
+        if (cancelled) return
+        setEpisodeState({ status: 'ready', episode, error: null })
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (cancelled) return
         setEpisodeState({
-          status: "error",
+          status: 'error',
           episode: null,
-          error: error instanceof Error ? error.message : "Failed to load episode preview.",
-        });
-      });
+          error: error instanceof Error ? error.message : 'Failed to load episode preview.',
+        })
+      })
 
     return () => {
-      cancelled = true;
-    };
-  }, [reviewPanel]);
+      cancelled = true
+    }
+  }, [reviewPanel])
 
-  if (!reviewPanel) return null;
+  if (!reviewPanel) return null
 
-  const activeThreadSlug = reviewPanel.kind === "episode" ? reviewPanel.threadSlug : threadSlug;
+  const activeThreadSlug = reviewPanel.kind === 'episode' ? reviewPanel.threadSlug : threadSlug
   const handleEpisodeLinkClick = (href: string) => {
-    const episodePath = normalizeEpisodeHref(href);
-    if (!episodePath || !activeThreadSlug) return;
+    const episodePath = normalizeEpisodeHref(href)
+    if (!episodePath || !activeThreadSlug) return
     openEpisode({
       threadSlug: activeThreadSlug,
       episodePath,
       episodeTitle: episodeTitleFromPath(episodePath),
-    });
-  };
+    })
+  }
 
-  if (reviewPanel.kind === "brief") {
+  if (reviewPanel.kind === 'brief') {
     return (
       <ReadingPanel
         open
@@ -97,14 +97,14 @@ export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
         onClose={closeReviewPanel}
       >
         <HalMarkdown tone="brief" onLinkClick={handleEpisodeLinkClick}>
-          {briefMarkdown || "_This thread does not have a brief yet._"}
+          {briefMarkdown || '_This thread does not have a brief yet._'}
         </HalMarkdown>
       </ReadingPanel>
-    );
+    )
   }
 
-  if (reviewPanel.kind === "episode") {
-    const episode = episodeState.episode;
+  if (reviewPanel.kind === 'episode') {
+    const episode = episodeState.episode
     return (
       <ReadingPanel
         open
@@ -114,11 +114,11 @@ export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
         zIndexClassName="z-30"
         onClose={closeReviewPanel}
       >
-        {episodeState.status === "loading" ? (
-          <div className="rounded-md border border-dashed border-subtle bg-hal-inset/70 px-4 py-6 text-center">
+        {episodeState.status === 'loading' ? (
+          <div className="bg-hal-inset/70 rounded-md border border-dashed border-subtle px-4 py-6 text-center">
             <p className="text-meta text-hal-muted">Loading episode preview...</p>
           </div>
-        ) : episodeState.status === "error" ? (
+        ) : episodeState.status === 'error' ? (
           <div className="rounded-md border border-danger bg-hal-danger-subtle px-4 py-6 text-center">
             <p className="text-meta font-medium text-danger">Episode could not be loaded.</p>
             <p className="mt-1 text-caption text-hal-muted">{episodeState.error}</p>
@@ -128,20 +128,22 @@ export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
             {episode.markdown}
           </HalMarkdown>
         ) : (
-          <div className="rounded-md border border-dashed border-subtle bg-hal-inset/70 px-4 py-6 text-center">
+          <div className="bg-hal-inset/70 rounded-md border border-dashed border-subtle px-4 py-6 text-center">
             <p className="text-meta text-hal-muted">No episode content available.</p>
           </div>
         )}
       </ReadingPanel>
-    );
+    )
   }
 
-  const turnId = reviewPanel.turnId;
-  const evidenceEvents = allEvents.filter((e) => e.turn_id === turnId && EVIDENCE_EVENTS.has(e.type));
-  const sections = buildEvidenceSections(evidenceEvents);
-  const counts = countByCategory(evidenceEvents);
-  const summary = summarizeEvidenceCounts(counts);
-  const compactEntries = evidenceCountEntries(counts);
+  const turnId = reviewPanel.turnId
+  const evidenceEvents = allEvents.filter(
+    (e) => e.turn_id === turnId && EVIDENCE_EVENTS.has(e.type),
+  )
+  const sections = buildEvidenceSections(evidenceEvents)
+  const counts = countByCategory(evidenceEvents)
+  const summary = summarizeEvidenceCounts(counts)
+  const compactEntries = evidenceCountEntries(counts)
 
   return (
     <ReadingPanel
@@ -167,7 +169,7 @@ export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
       onClose={closeReviewPanel}
     >
       {evidenceEvents.length === 0 ? (
-        <div className="rounded-md border border-dashed border-subtle bg-hal-inset/70 px-4 py-6 text-center">
+        <div className="bg-hal-inset/70 rounded-md border border-dashed border-subtle px-4 py-6 text-center">
           <p className="text-meta text-hal-muted">No evidence records for this turn.</p>
         </div>
       ) : (
@@ -182,7 +184,7 @@ export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
                   </p>
                 </div>
                 <span className="shrink-0 text-caption text-hal-muted">
-                  {section.events.length} record{section.events.length === 1 ? "" : "s"}
+                  {section.events.length} record{section.events.length === 1 ? '' : 's'}
                 </span>
               </div>
               <div className="space-y-0">
@@ -199,14 +201,16 @@ export function ReviewPanel({ briefMarkdown, threadSlug }: ReviewPanelProps) {
         </div>
       )}
     </ReadingPanel>
-  );
+  )
 }
 
 function EvidenceRow({ event, bordered }: { event: SessionEvent; bordered: boolean }) {
-  const descriptor = describeEvidenceEvent(event);
+  const descriptor = describeEvidenceEvent(event)
 
   return (
-    <article className={bordered ? "border-b border-subtle/80 pb-3 pt-3 first:pt-0" : "pt-3 first:pt-0"}>
+    <article
+      className={bordered ? 'border-subtle/80 border-b pb-3 pt-3 first:pt-0' : 'pt-3 first:pt-0'}
+    >
       <div className="grid grid-cols-[72px,minmax(0,1fr)] gap-3">
         <div className="pt-0.5 text-caption text-hal-muted">
           <span title={formatTimestamp(event.ts)}>{formatTime(event.ts)}</span>
@@ -215,66 +219,68 @@ function EvidenceRow({ event, bordered }: { event: SessionEvent; bordered: boole
           <p className="text-meta font-medium text-hal-primary">{descriptor.title}</p>
           <p className="mt-1 font-mono text-caption text-hal-muted">{event.type}</p>
           {descriptor.detail && (
-            <p className="mt-2 font-mono text-caption leading-6 text-hal-muted">{descriptor.detail}</p>
+            <p className="mt-2 font-mono text-caption leading-6 text-hal-muted">
+              {descriptor.detail}
+            </p>
           )}
         </div>
       </div>
     </article>
-  );
+  )
 }
 
 type EvidenceSection = {
-  key: (typeof EVIDENCE_CATEGORY_ORDER)[number];
-  events: SessionEvent[];
-};
-
-function buildEvidenceSections(events: SessionEvent[]): EvidenceSection[] {
-  return EVIDENCE_CATEGORY_ORDER
-    .map((key) => ({
-      key,
-      events: events.filter((event) => evidenceCategory(event.type) === key),
-    }))
-    .filter((section): section is EvidenceSection => section.events.length > 0);
+  key: (typeof EVIDENCE_CATEGORY_ORDER)[number]
+  events: SessionEvent[]
 }
 
-function countByCategory(events: SessionEvent[]): Record<(typeof EVIDENCE_CATEGORY_ORDER)[number], number> {
+function buildEvidenceSections(events: SessionEvent[]): EvidenceSection[] {
+  return EVIDENCE_CATEGORY_ORDER.map((key) => ({
+    key,
+    events: events.filter((event) => evidenceCategory(event.type) === key),
+  })).filter((section): section is EvidenceSection => section.events.length > 0)
+}
+
+function countByCategory(
+  events: SessionEvent[],
+): Record<(typeof EVIDENCE_CATEGORY_ORDER)[number], number> {
   const counts: Record<(typeof EVIDENCE_CATEGORY_ORDER)[number], number> = {
     context: 0,
     loop: 0,
     tool: 0,
     injection: 0,
     worker: 0,
-  };
-  for (const event of events) {
-    const category = evidenceCategory(event.type);
-    if (category in counts) counts[category as keyof typeof counts] += 1;
   }
-  return counts;
+  for (const event of events) {
+    const category = evidenceCategory(event.type)
+    if (category in counts) counts[category as keyof typeof counts] += 1
+  }
+  return counts
 }
 
 function formatTime(ts: string): string {
   try {
-    return new Date(ts).toLocaleTimeString("en-US", {
+    return new Date(ts).toLocaleTimeString('en-US', {
       hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
   } catch {
-    return ts;
+    return ts
   }
 }
 
 function normalizeEpisodeHref(href: string): string | null {
-  const normalized = href.startsWith("./") ? href.slice(2) : href;
-  if (!normalized.startsWith("episodes/")) return null;
-  return normalized;
+  const normalized = href.startsWith('./') ? href.slice(2) : href
+  if (!normalized.startsWith('episodes/')) return null
+  return normalized
 }
 
 function episodeTitleFromPath(episodePath: string): string {
-  const lastSegment = episodePath.split("/").filter(Boolean).at(-1);
-  if (!lastSegment) return "Episode";
-  return lastSegment.replace(/\.md$/i, "");
+  const lastSegment = episodePath.split('/').filter(Boolean).at(-1)
+  if (!lastSegment) return 'Episode'
+  return lastSegment.replace(/\.md$/i, '')
 }
 
-const EMPTY_EVENTS: SessionEvent[] = [];
+const EMPTY_EVENTS: SessionEvent[] = []

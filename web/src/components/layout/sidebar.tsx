@@ -5,22 +5,22 @@
  * thread detail panel in the main area. Supports collapse to icon rail.
  */
 
-import { PanelLeftClose, PanelLeft } from "lucide-react";
+import { PanelLeftClose, PanelLeft } from 'lucide-react'
 
-import { StatusDot } from "@/components/ui/status-dot";
-import type { ThreadSummary } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { StatusDot } from '@/components/ui/status-dot'
+import type { ThreadSummary } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface SidebarProps {
-  threads: ThreadSummary[];
-  activeThreadSlug: string | null;
-  collapsed: boolean;
-  onSelectThread: (slug: string) => void;
-  onToggleCollapse: () => void;
+  threads: ThreadSummary[]
+  activeThreadSlug: string | null
+  collapsed: boolean
+  onSelectThread: (slug: string) => void
+  onToggleCollapse: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ export function Sidebar({
 
         <div className="flex flex-1 flex-col items-center gap-2 overflow-y-auto px-2 py-2">
           {threads.map((thread) => {
-            const isActive = thread.slug === activeThreadSlug;
+            const isActive = thread.slug === activeThreadSlug
             return (
               <button
                 key={thread.slug}
@@ -56,19 +56,19 @@ export function Sidebar({
                 onClick={() => onSelectThread(thread.slug)}
                 title={thread.slug}
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-lg border text-caption font-semibold uppercase tracking-[0.12em] transition-colors",
+                  'flex h-10 w-10 items-center justify-center rounded-lg border text-caption font-semibold uppercase tracking-[0.12em] transition-colors',
                   isActive
-                    ? "border-accent bg-hal-float text-hal-primary"
-                    : "border-subtle text-hal-muted hover:border-border hover:text-hal-primary",
+                    ? 'border-accent bg-hal-float text-hal-primary'
+                    : 'border-subtle text-hal-muted hover:border-border hover:text-hal-primary',
                 )}
               >
                 {threadMonogram(thread.slug)}
               </button>
-            );
+            )
           })}
         </div>
       </aside>
-    );
+    )
   }
 
   return (
@@ -93,8 +93,8 @@ export function Sidebar({
         ) : (
           <div className="space-y-0.5">
             {threads.map((thread) => {
-              const isActive = thread.slug === activeThreadSlug;
-              const hasActiveSessions = (thread.session_counts.active ?? 0) > 0;
+              const isActive = thread.slug === activeThreadSlug
+              const hasActiveSessions = (thread.session_counts.active ?? 0) > 0
 
               return (
                 <button
@@ -103,13 +103,13 @@ export function Sidebar({
                   onClick={() => onSelectThread(thread.slug)}
                   title={thread.name}
                   className={cn(
-                    "flex w-full min-w-0 items-center gap-2 rounded-lg border-l-2 border-l-transparent px-2 py-1.5 text-left transition-colors",
+                    'flex w-full min-w-0 items-center gap-2 rounded-lg border-l-2 border-l-transparent px-2 py-1.5 text-left transition-colors',
                     isActive
-                      ? "border-l-accent bg-hal-selection text-hal-primary"
-                      : "text-hal-muted hover:bg-hal-hover hover:text-hal-primary",
+                      ? 'border-l-accent bg-hal-selection text-hal-primary'
+                      : 'text-hal-muted hover:bg-hal-hover hover:text-hal-primary',
                   )}
                 >
-                  <StatusDot state={hasActiveSessions ? "live" : "muted"} />
+                  <StatusDot state={hasActiveSessions ? 'live' : 'muted'} />
                   <span className="min-w-0 truncate font-mono text-meta font-medium tracking-[0.01em]">
                     {thread.slug}
                   </span>
@@ -117,28 +117,28 @@ export function Sidebar({
                     {formatSessionCount(thread.session_counts)}
                   </span>
                 </button>
-              );
+              )
             })}
           </div>
         )}
       </nav>
     </aside>
-  );
+  )
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function formatSessionCount(counts: ThreadSummary["session_counts"]): string {
+function formatSessionCount(counts: ThreadSummary['session_counts']): string {
   const total =
-    (counts.active ?? 0) + (counts.briefing ?? 0) + (counts.ended ?? 0) + (counts.dropped ?? 0);
-  return total.toString();
+    (counts.active ?? 0) + (counts.briefing ?? 0) + (counts.ended ?? 0) + (counts.dropped ?? 0)
+  return total.toString()
 }
 
 function threadMonogram(slug: string): string {
-  const parts = slug.split("-").filter(Boolean);
-  if (parts.length >= 2) return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase();
-  const clean = slug.replace(/[^A-Za-z0-9]/g, "").trim();
-  return clean.length >= 2 ? clean.slice(0, 2).toUpperCase() : clean[0]?.toUpperCase() ?? "?";
+  const parts = slug.split('-').filter(Boolean)
+  if (parts.length >= 2) return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase()
+  const clean = slug.replace(/[^A-Za-z0-9]/g, '').trim()
+  return clean.length >= 2 ? clean.slice(0, 2).toUpperCase() : (clean[0]?.toUpperCase() ?? '?')
 }
