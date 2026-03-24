@@ -4,6 +4,7 @@ import type {
   ThreadDetail,
   ThreadEpisode,
   ThreadSummary,
+  WebAttachmentInput,
 } from '@/lib/types'
 
 export interface SessionTurnSubmission {
@@ -62,7 +63,7 @@ export async function updateSessionTitle(
 
 export async function submitSessionTurn(
   sessionId: string,
-  input: { content: string },
+  input: { content: string; attachments?: WebAttachmentInput[] },
 ): Promise<SessionTurnSubmission> {
   return await requestJson<SessionTurnSubmission>(
     `/sessions/${encodeURIComponent(sessionId)}/turns`,

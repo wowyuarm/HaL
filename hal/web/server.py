@@ -13,6 +13,7 @@ from loguru import logger
 from hal.domain.session import SessionManifest
 from hal.infra.config.schema import WebConfig
 
+from .attachments import parse_web_attachments
 from .bridge import SessionBridge, SessionBusyError
 from .protocol import (
     WS_END_SESSION,
@@ -177,10 +178,11 @@ class WebServer:
         self._require_manifest(session_id)
         payload = await self._read_json(request)
         content = self._optional_string(payload.get("content"))
-        if not content:
-            raise web.HTTPBadRequest(text="submit_turn requires non-empty content")
+        attachments = parse_web_attachments(payload.get("attachments"))
+        if not content and not attachments:
+            raise web.HTTPBadRequest(text="submit_turn requires content or attachments")
         try:
-            submission = await self._bridge.submit_turn(session_id, content)
+            submission = await self._bridge.submit_turn(session_id, content or "", attachments)
         except ValueError as exc:
             raise web.HTTPBadRequest(text=str(exc)) from exc
         return web.json_response(
@@ -288,7 +290,11 @@ class WebServer:
             data = self._decode_json(raw)
             message_type, payload = parse_ws_message(data)
             if message_type == WS_SUBMIT_TURN:
-                await self._bridge.submit_turn(session_id, payload["content"])
+                await self._bridge.submit_turn(
+                    session_id,
+                    payload["content"],
+                    payload.get("attachments"),
+                )
                 return
             if message_type == WS_END_SESSION:
                 await self._bridge.end_session(

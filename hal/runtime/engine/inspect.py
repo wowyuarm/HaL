@@ -79,6 +79,7 @@ async def build_context_inspection(
             history=history,
             current_message=current_message,
             media=None,
+            attachments=None,
             channel=channel,
             chat_id=chat_id,
             token_model=resolved_model,

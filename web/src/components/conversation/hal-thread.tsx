@@ -67,7 +67,7 @@ export function HalThread({
         onToggleBriefPanel={onToggleBriefPanel}
       />
 
-      <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
+      <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col">
         <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-3 py-6 md:px-5 md:py-7">
           <ThreadPrimitive.Empty>
             <EmptyState />
@@ -83,10 +83,18 @@ export function HalThread({
             />
           </div>
 
-          <ThreadPrimitive.ViewportFooter className="h-4" />
+          <ThreadPrimitive.ViewportFooter className="h-36 md:h-40" />
         </ThreadPrimitive.Viewport>
 
-        {interactive && <HalComposer />}
+        {interactive && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-4 pt-8 md:px-5 md:pb-5">
+            <div className="pointer-events-none mx-auto w-full max-w-[56rem] bg-gradient-to-t from-hal-canvas via-hal-canvas/92 to-transparent pt-8">
+              <div className="pointer-events-auto">
+                <HalComposer />
+              </div>
+            </div>
+          </div>
+        )}
       </ThreadPrimitive.Root>
     </section>
   )

@@ -112,6 +112,9 @@ Surface rules:
 - The navigation panel uses `--surface-veil` for glass-like depth on the
   shared base surface
 - Composer is present only for interactive sessions — absent otherwise
+- When the composer is treated as a detached writing object, it should sit in
+  its own bottom breathing room rather than feeling boxed into the scrolling
+  message field
 
 ---
 
@@ -120,8 +123,8 @@ Surface rules:
 Two layers: **functional foundation** and **HaL semantic aliases**.
 
 The two-layer split currently covers color and structural semantics. Component-
-level semantic tokens (e.g., `--hal-turn-surface`, `--hal-brief-gap`) will be
-added as components are built and patterns stabilize.
+level semantic tokens (e.g., `--hal-turn-surface`, `--hal-brief-gap`) should be
+added only when a pattern is clearly reused across multiple surfaces.
 
 ### 5.1 Foundation Tokens
 
@@ -365,7 +368,9 @@ Borders are the **primary depth and grouping device**.
 ```
 
 - Default components: **no shadow**
-- Scroll-anchored elements (e.g. composer): `--shadow-sm` when sitting above scrolling content
+- Scroll-anchored elements use `--shadow-sm` when they stay visually attached to
+  the scrolling surface
+- Detached floating writing objects may use `--shadow-popover`
 - Floating elements (popovers, menus, pull-out BRIEF): `--shadow-popover`
 
 ---
@@ -385,6 +390,10 @@ Borders are the **primary depth and grouping device**.
 | 4px | Badges, tags, compact buttons, evidence fragments |
 | 8px | Cards, turn containers, list items, inputs |
 | 12px | Popovers, floating BRIEF, dialogs |
+
+Composer may intentionally exceed the shared radius when it is treated as the
+primary writing object of the page. That exception should stay limited to the
+outer composer shell, not spread to ordinary cards or message containers.
 
 ---
 
@@ -618,7 +627,19 @@ is a design error.
 - Use identical visual treatment for hover and selected on the same element
 - Apply `--shadow-popover` to non-floating elements
 
-### 14.6 Markdown and Embedded Content
+### 14.6 Composer Attachment Grammar
+
+Composer attachments are part of the same writing surface, not a detached upload bar.
+
+- Attachment previews sit **inside** the composer shell, above the text row.
+- Attachment and send controls stay on a dedicated action row, aligned to the same horizontal inset as the writing area.
+- Default preview grammar is compact and low-noise: keep the file name and format, and avoid extra type badges or nested preview cards.
+- Thumbnails are optional, not the default. Only use them when visual recognition is genuinely important.
+- Composer and user-message attachments should share the same compact grammar. The composer version may expose remove controls; the message version should not.
+- Avoid nested bordered objects inside the composer shell unless a specific attachment workflow truly needs another level of containment.
+- On narrow screens, previews wrap before the text row grows taller than necessary.
+
+### 14.7 Markdown and Embedded Content
 
 Markdown is not a browser default and not a generic `prose` dump. It is a first-class reading surface.
 

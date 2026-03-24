@@ -32,6 +32,7 @@ class SessionTurnRequest:
     history: list[dict[str, object]]
     current_message: str
     media: list[str] | None
+    attachments: list[dict[str, object]] | None
     channel: str | None
     chat_id: str | None
     token_model: str | None
@@ -91,6 +92,7 @@ class ContextCompiler:
             history=history,
             current_message=request.current_message,
             media=request.media,
+            attachments=request.attachments,
             channel=request.channel,
             chat_id=request.chat_id,
             recall_results=search_results or None,

@@ -60,7 +60,9 @@ class ContextBuilder:
         related_thread_hops: int = 1,
     ):
         self.workspace = workspace
-        self._system_memory_repository = system_memory_repository or SystemMemoryRepository(workspace)
+        self._system_memory_repository = system_memory_repository or SystemMemoryRepository(
+            workspace
+        )
         self.skills = SkillsLoader(workspace)
         self.system = SystemRepository(workspace)
         self._max_thread_registry_size = max(1, max_thread_registry_size)
@@ -102,6 +104,7 @@ class ContextBuilder:
         history: list[dict[str, Any]],
         current_message: str,
         media: list[str] | None = None,
+        attachments: list[dict[str, object]] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
         recall_results: list[Any] | None = None,
@@ -131,6 +134,7 @@ class ContextBuilder:
             user_message=self._build_user_message(
                 current_message=current_message,
                 media=media,
+                attachments=attachments,
                 channel=channel,
                 chat_id=chat_id,
                 recall_results=recall_results,
@@ -182,6 +186,7 @@ class ContextBuilder:
         *,
         current_message: str,
         media: list[str] | None,
+        attachments: list[dict[str, object]] | None,
         channel: str | None,
         chat_id: str | None,
         recall_results: list[Any] | None,
@@ -207,7 +212,12 @@ class ContextBuilder:
         )
         return {
             "role": "user",
-            "content": build_user_message_content(current_message, media, dynamic_ctx),
+            "content": build_user_message_content(
+                current_message,
+                media,
+                dynamic_ctx,
+                attachments=attachments,
+            ),
         }
 
     # ------------------------------------------------------------------

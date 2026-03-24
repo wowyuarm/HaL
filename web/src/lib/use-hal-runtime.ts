@@ -12,6 +12,7 @@
 import { useMemo } from 'react'
 import { useExternalStoreRuntime } from '@assistant-ui/react'
 
+import { createHalAttachmentAdapter, serializeComposerAttachments } from '@/lib/attachments'
 import type { SessionEvent, SessionManifest } from '@/lib/types'
 import { convertSessionEvents, type SessionMessage } from '@/lib/session-adapter'
 import { submitSessionTurn } from '@/lib/api'
@@ -28,6 +29,9 @@ function toThreadMessageLike(msg: SessionMessage): ThreadMessageLike {
     id: msg.id,
     content: msg.content,
     createdAt: msg.createdAt,
+    ...(msg.role === 'user' && msg.attachments?.length
+      ? { attachments: msg.attachments }
+      : undefined),
     metadata: {
       custom: msg.halMeta as Record<string, unknown>,
     },
@@ -81,6 +85,7 @@ export function useHalRuntime(sessionId: string | null) {
   // Derived state.
   const isRunning = Boolean(sessionId && manifest?.status === 'active' && detectRunningTurn(events))
   const canSend = Boolean(sessionId && manifest?.status === 'active')
+  const attachmentsAdapter = useMemo(() => createHalAttachmentAdapter(), [])
 
   // Build the adapter.
   const runtime = useExternalStoreRuntime<SessionMessage>({
@@ -88,18 +93,23 @@ export function useHalRuntime(sessionId: string | null) {
     convertMessage: toThreadMessageLike,
     isRunning,
     isDisabled: !canSend,
+    adapters: {
+      attachments: attachmentsAdapter,
+    },
 
     onNew: async (appendMessage) => {
       if (!sessionId) return
-      // Extract text content from assistant-ui's AppendMessage.
       const textPart = appendMessage.content.find(
         (p): p is { type: 'text'; text: string } => p.type === 'text',
       )
-      if (!textPart?.text) return
+      const content = textPart?.text ?? ''
+      const attachments = serializeComposerAttachments(appendMessage.attachments)
+      if (!content.trim() && attachments.length === 0) return
 
       try {
         const submission = await submitSessionTurn(sessionId, {
-          content: textPart.text,
+          content,
+          attachments,
         })
         // Read latest store state to avoid stale closure on socketState.
         const {

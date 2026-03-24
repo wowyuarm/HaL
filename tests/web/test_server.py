@@ -194,6 +194,41 @@ async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thr
 
 
 @pytest.mark.asyncio
+async def test_http_turn_accepts_attachment_only_submission(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    response = await server._submit_turn(  # type: ignore[attr-defined]
+        _FakeRequest(
+            payload={
+                "content": "",
+                "attachments": [
+                    {
+                        "type": "image",
+                        "name": "diagram.png",
+                        "content": [
+                            {
+                                "type": "image",
+                                "image": "data:image/png;base64,abc",
+                                "filename": "diagram.png",
+                            }
+                        ],
+                    }
+                ],
+            },
+            match_info={"session_id": manifest.session_id},
+        )
+    )
+
+    assert response.status == 200
+    events = bridge.get_events(manifest.session_id)
+    user_event = next(event for event in events if event.type == "user.message")
+    assert user_event.payload["attachment_count"] == 1
+    assert user_event.payload["attachments"][0]["type"] == "image"
+
+
+@pytest.mark.asyncio
 async def test_http_thread_episode_endpoint_roundtrips_markdown_and_rejects_traversal(
     bridge,
     thread_repo,

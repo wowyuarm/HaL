@@ -119,6 +119,11 @@
   --duration-slow: 300ms;
   --ease-standard: ease-out;
 
+  /* ── Composer detail tokens ── */
+  --hal-composer-action-size: 34px;
+  --hal-composer-attachment-thumb: 48px;
+  --hal-composer-attachment-gap: 8px;
+
   /* ── Evidence seam ── */
   --turn-seam-width: 2px;
   --turn-seam-color: var(--hal-evidence-seam);

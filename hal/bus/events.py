@@ -19,6 +19,7 @@ class InboundMessage:
     content: str  # Message text
     timestamp: datetime = field(default_factory=datetime.now)
     media: list[str] = field(default_factory=list)  # Media URLs
+    attachments: list[dict[str, Any]] = field(default_factory=list)  # Structured user attachments
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     origin: Literal["user"] = "user"  # Message source
     session_id: str | None = None  # Session-first identity (set by transport adapter)

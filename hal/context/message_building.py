@@ -14,23 +14,35 @@ def build_user_message_content(
     text: str,
     media: list[str] | None,
     dynamic_context: str | None = None,
+    *,
+    attachments: list[dict[str, object]] | None = None,
 ) -> str | list[dict[str, Any]]:
     """Build user message content with optional dynamic context and images."""
-    if dynamic_context:
-        text = f"{dynamic_context}\n\n{text}"
+    image_parts: list[dict[str, Any]] = []
+    attachment_texts: list[str] = []
 
-    if not media:
-        return text
+    for attachment in attachments or []:
+        for part in _attachment_prompt_parts(attachment):
+            if part.get("type") == "image_url":
+                image_parts.append(part)
+            elif part.get("type") == "text":
+                attachment_text = str(part.get("text", "")).strip()
+                if attachment_text:
+                    attachment_texts.append(attachment_text)
 
-    images: list[dict[str, Any]] = []
-    for path in media:
+    for path in media or []:
         image_payload = _load_image_payload(path)
         if image_payload is not None:
-            images.append(image_payload)
+            image_parts.append(image_payload)
 
-    if not images:
-        return text
-    return images + [{"type": "text", "text": text}]
+    text_segments = [segment for segment in [dynamic_context, *attachment_texts, text] if segment]
+    combined_text = "\n\n".join(text_segments)
+
+    if not image_parts:
+        return combined_text
+    if combined_text:
+        return image_parts + [{"type": "text", "text": combined_text}]
+    return image_parts
 
 
 def _load_image_payload(path: str) -> dict[str, Any] | None:
@@ -43,6 +55,54 @@ def _load_image_payload(path: str) -> dict[str, Any] | None:
         "type": "image_url",
         "image_url": {"url": f"data:{mime};base64,{b64}"},
     }
+
+
+def _attachment_prompt_parts(attachment: dict[str, object]) -> list[dict[str, Any]]:
+    name = str(attachment.get("name", "")).strip() or "attachment"
+    content_type = str(attachment.get("contentType", "")).strip()
+    path = str(attachment.get("path", "")).strip()
+    parts = attachment.get("content")
+    if not isinstance(parts, list):
+        return []
+
+    prompt_parts: list[dict[str, Any]] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        part_type = str(part.get("type", "")).strip()
+        if part_type == "image":
+            image = str(part.get("image", "")).strip()
+            if image:
+                prompt_parts.append(
+                    {
+                        "type": "text",
+                        "text": _attachment_label(name, content_type or "image", path, kind="image"),
+                    }
+                )
+                prompt_parts.append({"type": "image_url", "image_url": {"url": image}})
+            continue
+        if part_type == "text":
+            text = str(part.get("text", ""))
+            if text.strip():
+                label = _attachment_label(name, content_type or "text/plain", path, kind="text")
+                prompt_parts.append({"type": "text", "text": f"{label}\n{text}"})
+            continue
+        if part_type == "file":
+            mime_type = (
+                str(part.get("mimeType", "")).strip() or content_type or "application/octet-stream"
+            )
+            filename = str(part.get("filename", "")).strip() or name
+            prompt_parts.append(
+                {"type": "text", "text": _attachment_label(filename, mime_type, path, kind="file")}
+            )
+
+    return prompt_parts
+
+
+def _attachment_label(name: str, mime_type: str, path: str, *, kind: str) -> str:
+    if path:
+        return f"[Attached {kind}: {name} ({mime_type}, path: {path})]"
+    return f"[Attached {kind}: {name} ({mime_type})]"
 
 
 # ---------------------------------------------------------------------------

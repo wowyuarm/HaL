@@ -70,6 +70,31 @@ export interface SessionEvent {
   payload: JsonObject
 }
 
+export type WebAttachmentPart =
+  | {
+      type: 'text'
+      text: string
+    }
+  | {
+      type: 'image'
+      image: string
+      filename?: string
+    }
+  | {
+      type: 'file'
+      filename?: string
+      data: string
+      mimeType: string
+    }
+
+export interface WebAttachmentInput {
+  type: 'image' | 'document' | 'file'
+  name: string
+  contentType?: string
+  path?: string
+  content: WebAttachmentPart[]
+}
+
 /** Initial WebSocket frame for a live session connection. */
 export interface SessionSnapshotEnvelope {
   type: 'session_snapshot'
@@ -98,6 +123,7 @@ export type SessionServerEnvelope =
 export interface SubmitTurnEnvelope {
   type: 'submit_turn'
   content: string
+  attachments?: WebAttachmentInput[]
 }
 
 /** Inbound lifecycle control command. */

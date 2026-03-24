@@ -8,6 +8,8 @@ from hal.domain.events import SessionEvent
 from hal.domain.session import SessionManifest
 from hal.workspace.threads import ThreadEpisodeDocument, ThreadEpisodeRef, ThreadRegistryEntry
 
+from .attachments import parse_web_attachments
+
 SESSION_SNAPSHOT = "session_snapshot"
 SESSION_EVENT = "session_event"
 
@@ -91,9 +93,10 @@ def parse_ws_message(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
     if message_type == WS_SUBMIT_TURN:
         content = str(data.get("content", "")).strip()
-        if not content:
-            raise ValueError("submit_turn requires non-empty 'content'")
-        return message_type, {"content": content}
+        attachments = parse_web_attachments(data.get("attachments"))
+        if not content and not attachments:
+            raise ValueError("submit_turn requires content or attachments")
+        return message_type, {"content": content, "attachments": attachments}
 
     if message_type == WS_END_SESSION:
         reason = str(data.get("reason", "")).strip()

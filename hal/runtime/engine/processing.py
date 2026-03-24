@@ -164,7 +164,12 @@ def build_engine_error_response(*, msg: Any, error: Exception) -> OutboundMessag
 
 
 def build_direct_inbound_message(
-    *, channel: str, chat_id: str, content: str, session_id: str | None = None
+    *,
+    channel: str,
+    chat_id: str,
+    content: str,
+    session_id: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> object:
     """Build an inbound message object for direct CLI processing."""
     from hal.bus.events import InboundMessage
@@ -174,6 +179,7 @@ def build_direct_inbound_message(
         sender_id="user",
         chat_id=chat_id,
         content=content,
+        attachments=attachments or [],
         session_id=session_id,
     )
 
@@ -287,6 +293,8 @@ async def _start_turn(*, msg: Any, session_state: Any, trigger: str = "message")
         payload={
             "content": msg.content,
             "media_count": len(getattr(msg, "media", []) or []),
+            "attachment_count": len(getattr(msg, "attachments", []) or []),
+            "attachments": list(getattr(msg, "metadata", {}).get("event_attachments", []) or []),
             "origin": getattr(msg, "origin", "user"),
         },
     )
@@ -421,6 +429,7 @@ async def _prepare_messages_for_request(
             history=compacted_history,
             current_message=request.current_message,
             media=request.media,
+            attachments=request.attachments,
             channel=request.channel,
             chat_id=request.chat_id,
             token_model=request.token_model,
@@ -534,6 +543,7 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                 history=history,
                 current_message=msg.content,
                 media=msg.media if msg.media else None,
+                attachments=msg.attachments if msg.attachments else None,
                 channel=channel,
                 chat_id=chat_id,
                 token_model=resolved_model,

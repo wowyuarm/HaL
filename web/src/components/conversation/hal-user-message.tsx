@@ -8,6 +8,7 @@
 
 import { MessagePrimitive, useMessage } from '@assistant-ui/react'
 
+import { HalMessageAttachmentShelf } from '@/components/conversation/hal-attachment-shelf'
 import { HalMarkdown } from '@/components/ui/hal-markdown'
 import { halPaperObjectVariants } from '@/components/ui/hal-patterns'
 import type { HalMessageMeta } from '@/lib/session-adapter'
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils'
 
 export function HalUserMessage() {
   const custom = useMessage((s) => s.metadata?.custom as HalMessageMeta | undefined)
+  const hasAttachments = useMessage((s) => s.role === 'user' && s.attachments.length > 0)
   const firstText = useMessage((s) => {
     const part = s.content[0]
     return part?.type === 'text' ? part.text : ''
@@ -37,16 +39,20 @@ export function HalUserMessage() {
   return (
     <MessagePrimitive.Root
       className={cn(
+        'space-y-2.5',
         halPaperObjectVariants({ surface: 'panel', density: 'comfortable', seam: 'human' }),
       )}
     >
+      {hasAttachments && <HalMessageAttachmentShelf />}
       <MessagePrimitive.Content components={USER_CONTENT_COMPONENTS} />
     </MessagePrimitive.Root>
   )
 }
 
 function UserTextPart({ text }: TextMessagePartProps) {
-  return <HalMarkdown>{text || '_No content_'}</HalMarkdown>
+  if (!text?.trim()) return null
+
+  return <HalMarkdown>{text}</HalMarkdown>
 }
 
 const USER_CONTENT_COMPONENTS = { Text: UserTextPart } as const

@@ -12,6 +12,7 @@ from hal.domain.event_sink import SessionEventSink
 from hal.domain.events import SessionEvent
 from hal.domain.session import SessionManifest
 from hal.runtime.engine.processing import build_direct_inbound_message
+from hal.web.attachments import materialize_web_attachments, sanitize_event_attachments
 from hal.web.protocol import serialize_thread_episode_document, serialize_thread_episode_ref
 from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.session_store import SessionStore
@@ -111,8 +112,14 @@ class SessionBridge:
         """Return durable working-log events for one session."""
         return self._session_store.read_events(session_id, after_seq=after_seq)
 
-    async def submit_turn(self, session_id: str, content: str) -> SessionTurnSubmission:
+    async def submit_turn(
+        self,
+        session_id: str,
+        content: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> SessionTurnSubmission:
         """Submit user text into a session or queue it as an active-turn intervention."""
+        attachments = materialize_web_attachments(self._layout, session_id, attachments or [])
         manifest = self._require_session(session_id)
         if manifest.status != "active":
             raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
@@ -120,15 +127,15 @@ class SessionBridge:
         # in-flight turn.  The second check inside the lock prevents races
         # with concurrent writers that may activate between the two checks.
         if self._engine.is_session_active(session_id):
-            return await self._queue_intervention(session_id, content)
+            return await self._queue_intervention(session_id, content, attachments)
 
         async with self._session_lock(session_id):
             manifest = self._require_session(session_id)
             if manifest.status != "active":
                 raise ValueError(f"Session {session_id} is not active (status={manifest.status})")
             if self._engine.is_session_active(session_id):
-                return await self._queue_intervention(session_id, content)
-            return await self._start_user_turn(session_id, content)
+                return await self._queue_intervention(session_id, content, attachments)
+            return await self._start_user_turn(session_id, content, attachments)
 
     async def end_session(
         self,
@@ -285,15 +292,23 @@ class SessionBridge:
             raise ValueError(f"Unknown session_id: {session_id}")
         return manifest
 
-    async def _start_user_turn(self, session_id: str, content: str) -> SessionTurnSubmission:
+    async def _start_user_turn(
+        self,
+        session_id: str,
+        content: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> SessionTurnSubmission:
         """Start a fresh user turn for an idle active session."""
+        event_attachments = sanitize_event_attachments(attachments or [])
         msg = build_direct_inbound_message(
             channel=_WEB_CHANNEL,
             chat_id=session_id,
             content=content,
             session_id=session_id,
+            attachments=attachments,
         )
         msg.sender_id = _WEB_SENDER_ID
+        msg.metadata["event_attachments"] = event_attachments
         self._engine._set_session_active(session_id, True)
         try:
             await self._engine.process(msg)
@@ -314,15 +329,23 @@ class SessionBridge:
         msg.sender_id = _WEB_SENDER_ID
         await self._engine.process(msg)
 
-    async def _queue_intervention(self, session_id: str, content: str) -> SessionTurnSubmission:
+    async def _queue_intervention(
+        self,
+        session_id: str,
+        content: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> SessionTurnSubmission:
         """Queue one mid-turn user intervention for later loop injection."""
+        event_attachments = sanitize_event_attachments(attachments or [])
         msg = build_direct_inbound_message(
             channel=_WEB_CHANNEL,
             chat_id=session_id,
             content=content,
             session_id=session_id,
+            attachments=attachments,
         )
         msg.sender_id = _WEB_SENDER_ID
+        msg.metadata["event_attachments"] = event_attachments
         await self._engine.bus.publish_inbound(msg)
         return SessionTurnSubmission(
             manifest=self._require_session(session_id),

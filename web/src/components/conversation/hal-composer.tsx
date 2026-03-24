@@ -1,48 +1,40 @@
 /**
  * HalComposer — message input using assistant-ui ComposerPrimitive.
  *
- * Styled with HaL design tokens. Replaces the custom composer.tsx.
- * The ComposerPrimitive automatically handles send/cancel state
- * through the ExternalStoreRuntime.
+ * Keeps attachment preview, writing area, and actions inside one restrained
+ * paper object, with the action row separated so spacing stays calm and even.
  */
 
 import { ComposerPrimitive } from '@assistant-ui/react'
+import { ArrowUp, Plus } from 'lucide-react'
 
-import { HAL_READING_COLUMN_CLASS, halPaperObjectVariants } from '@/components/ui/hal-patterns'
+import { HalComposerAttachmentShelf } from '@/components/conversation/hal-attachment-shelf'
+import { HAL_READING_COLUMN_CLASS } from '@/components/ui/hal-patterns'
 import { cn } from '@/lib/utils'
 
 export function HalComposer() {
   return (
-    <ComposerPrimitive.Root
-      className={cn(HAL_READING_COLUMN_CLASS, 'shrink-0 px-3 pb-4 pt-2 md:px-5')}
-    >
-      <div
-        className={cn(
-          'hal-paper flex items-end gap-2 shadow-sm',
-          halPaperObjectVariants({ surface: 'panel', density: 'comfortable' }),
-        )}
-      >
-        <ComposerPrimitive.Input
-          autoFocus
-          placeholder="Describe the next step, question, or direction for this session..."
-          className="max-h-[200px] min-h-[34px] flex-1 resize-none border-0 bg-transparent text-body text-hal-primary placeholder:text-hal-muted focus:outline-none"
-          rows={1}
-        />
-        <ComposerPrimitive.Send className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors duration-fast ease-standard hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-4 w-4"
-          >
-            <path d="m5 12 7-7 7 7" />
-            <path d="M12 19V5" />
-          </svg>
-        </ComposerPrimitive.Send>
+    <ComposerPrimitive.Root className={cn(HAL_READING_COLUMN_CLASS, 'shrink-0')}>
+      <div className="hal-paper rounded-[20px] border border-border bg-hal-float px-3 py-2 shadow-popover">
+        <div className="flex flex-col">
+          <HalComposerAttachmentShelf />
+          <ComposerPrimitive.Input
+            autoFocus
+            placeholder="Describe the next step, question, or direction for this session..."
+            className="max-h-[128px] min-h-[46px] w-full resize-none overflow-y-auto border-0 bg-transparent px-0 py-1 text-body leading-6 text-hal-primary placeholder:text-hal-muted focus:outline-none"
+            rows={1}
+          />
+
+          <div className="-mx-1 mt-0.5 flex items-center justify-between">
+            <ComposerPrimitive.AddAttachment className="flex h-8 w-8 items-center justify-center text-hal-muted transition-colors duration-fast ease-standard hover:text-hal-primary">
+              <Plus className="h-5 w-5" />
+            </ComposerPrimitive.AddAttachment>
+
+            <ComposerPrimitive.Send className="flex h-8 w-8 shrink-0 items-center justify-center text-accent transition-colors duration-fast ease-standard disabled:cursor-not-allowed disabled:text-hal-muted disabled:opacity-40">
+              <ArrowUp className="h-5 w-5" />
+            </ComposerPrimitive.Send>
+          </div>
+        </div>
       </div>
     </ComposerPrimitive.Root>
   )

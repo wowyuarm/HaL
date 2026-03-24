@@ -13,7 +13,9 @@
  *   - evidence events      → NOT mapped; available via halMeta for inspector
  */
 
-import type { SessionEvent } from '@/lib/types'
+import type { CompleteAttachment } from '@assistant-ui/react'
+
+import type { SessionEvent, WebAttachmentInput, WebAttachmentPart } from '@/lib/types'
 import { bySeq, getFiniteNumber, getString, getStringArray } from '@/lib/event-helpers'
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,7 @@ export interface SessionMessage {
   readonly turnId: string | null
   readonly createdAt: Date
   readonly content: readonly ContentPart[]
+  readonly attachments?: readonly CompleteAttachment[]
   /** Status is only valid for assistant messages — assistant-ui throws on others. */
   readonly status?: SessionMessageStatus
   readonly halMeta: HalMessageMeta
@@ -209,12 +212,14 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
   const userEvent = sorted.find((e) => e.type === 'user.message')
   if (userEvent) {
     const content = getString(userEvent.payload, 'content') ?? ''
+    const attachments = readUserAttachments(userEvent.payload.attachments)
     messages.push({
       id: `${turnId}_user`,
       role: 'user',
       turnId,
       createdAt: new Date(userEvent.ts),
       content: [{ type: 'text', text: content }],
+      ...(attachments.length > 0 ? { attachments } : undefined),
       halMeta: { origin, isCommand },
     })
   }
@@ -290,6 +295,76 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
   }
 
   return messages
+}
+
+function readUserAttachments(value: unknown): CompleteAttachment[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((item, index) => toCompleteAttachment(item, index))
+    .filter((item): item is CompleteAttachment => item !== null)
+}
+
+function toCompleteAttachment(value: unknown, index: number): CompleteAttachment | null {
+  if (!value || typeof value !== 'object') return null
+
+  const input = value as WebAttachmentInput
+  const name = typeof input.name === 'string' ? input.name.trim() : ''
+  if (!name) return null
+
+  const type =
+    input.type === 'image' || input.type === 'document' || input.type === 'file'
+      ? input.type
+      : 'file'
+  const content = Array.isArray(input.content)
+    ? input.content
+        .map((part) => toAttachmentPart(part))
+        .filter((part): part is CompleteAttachment['content'][number] => part !== null)
+    : []
+  if (content.length === 0) return null
+
+  return {
+    id: `${name}:${index}`,
+    type,
+    name,
+    ...(typeof input.contentType === 'string' && input.contentType.trim()
+      ? { contentType: input.contentType }
+      : undefined),
+    status: { type: 'complete' },
+    content,
+  }
+}
+
+function toAttachmentPart(
+  part: WebAttachmentPart | null | undefined,
+): CompleteAttachment['content'][number] | null {
+  if (!part) return null
+
+  switch (part.type) {
+    case 'text':
+      return typeof part.text === 'string' ? { type: 'text', text: part.text } : null
+    case 'image':
+      if (typeof part.image !== 'string' || !part.image.trim()) return null
+      return {
+        type: 'image',
+        image: part.image,
+        ...(typeof part.filename === 'string' && part.filename.trim()
+          ? { filename: part.filename }
+          : undefined),
+      }
+    case 'file':
+      if (typeof part.mimeType !== 'string' || !part.mimeType.trim()) return null
+      return {
+        type: 'file',
+        mimeType: part.mimeType,
+        data: typeof part.data === 'string' ? part.data : '',
+        ...(typeof part.filename === 'string' && part.filename.trim()
+          ? { filename: part.filename }
+          : undefined),
+      }
+    default:
+      return null
+  }
 }
 
 // ---------------------------------------------------------------------------

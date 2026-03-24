@@ -133,6 +133,12 @@ class WorkspaceLayout:
     def received_media_dir(self) -> Path:
         return self.media_dir() / "received"
 
+    def web_media_dir(self) -> Path:
+        return self.media_dir() / "web"
+
+    def web_session_media_dir(self, session_id: str) -> Path:
+        return self.web_media_dir() / session_id
+
     def projects_dir(self) -> Path:
         return self.root / "projects"
 
@@ -160,6 +166,7 @@ class WorkspaceLayout:
             self.data_dir(),
             self.media_dir(),
             self.received_media_dir(),
+            self.web_media_dir(),
             self.projects_dir(),
             self.scripts_dir(),
             self.tmp_dir(),
