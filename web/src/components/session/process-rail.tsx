@@ -15,16 +15,6 @@ const PROCESS_RAIL_WIDTH = 'lg:w-[min(460px,36vw)]'
 const PROCESS_TIMELINE_GRID = 'grid grid-cols-[20px,minmax(0,1fr)] gap-2.5'
 const PROCESS_TIMELINE_AXIS = 'left-[10px] -translate-x-1/2'
 const STEP_ITEM_PREVIEW_LIMIT = 5
-const BORING_SUCCESS_RESULTS = new Set([
-  'entries returned',
-  'file updated',
-  'finished',
-  'page returned',
-  'results returned',
-  'returned',
-  'subtask started',
-  'text returned',
-])
 
 export function ProcessRail() {
   const reviewPanel = useHalStore((s) => s.reviewPanel)
@@ -257,9 +247,7 @@ function ProcessItemRow({ item }: { item: GroupedProcessItem }) {
 
 function shouldShowItemResult(item: ProcessStep['items'][number]): boolean {
   const result = item.result?.trim()
-  if (!result) return false
-  if (item.status !== 'completed') return true
-  return !BORING_SUCCESS_RESULTS.has(result.toLowerCase())
+  return Boolean(result)
 }
 
 function groupProcessItems(items: ProcessStep['items']): GroupedProcessItem[] {

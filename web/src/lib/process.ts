@@ -61,6 +61,8 @@ interface MutableStep {
   id: string
   intent: string | null
   items: Map<string, ProcessToolItem>
+  // Some completed events omit tool_call_id, so keep a stable fallback queue per tool signature.
+  itemIdsByBaseKey: Map<string, string[]>
   rawEventSeqs: number[]
 }
 
@@ -198,6 +200,7 @@ function createStep(event: SessionEvent, intent: string | null): MutableStep {
     id: `step_${event.seq}`,
     intent,
     items: new Map<string, ProcessToolItem>(),
+    itemIdsByBaseKey: new Map<string, string[]>(),
     rawEventSeqs: [],
   }
 }
@@ -209,7 +212,8 @@ function addOrUpdateToolItem(
 ): void {
   const toolName = getString(event.payload, 'tool') ?? getString(event.refs, 'tool_name') ?? 'tool'
   const args = readArgs(event.payload)
-  const key = deriveToolItemKey(step, event, toolName, args, status)
+  const baseKey = buildToolItemBaseKey(toolName, args)
+  const key = deriveToolItemKey(step, event, baseKey, status)
   const existing = step.items.get(key)
   const next = existing ?? {
     id: key,
@@ -239,6 +243,7 @@ function addOrUpdateToolItem(
   }
 
   step.items.set(key, next)
+  syncToolItemQueue(step, baseKey, key, status)
 }
 
 function appendPendingSubtaskResult(
@@ -269,14 +274,19 @@ function appendPendingSubtaskResult(
 function deriveToolItemKey(
   step: MutableStep,
   event: SessionEvent,
-  toolName: string,
-  args: Record<string, unknown> | null,
+  baseKey: string,
   status: ProcessEntryStatus,
 ): string {
   const explicitId = getString(event.refs, 'tool_call_id')
   if (explicitId) return explicitId
 
-  const baseKey = `${toolName}:${stableArgSignature(args)}`
+  if (status !== 'running') {
+    const queued = step.itemIdsByBaseKey.get(baseKey) ?? []
+    const runningKey =
+      queued.find((candidate) => step.items.get(candidate)?.status === 'running') ?? queued[0]
+    if (runningKey) return runningKey
+  }
+
   const existing = step.items.get(baseKey)
 
   if (existing && existing.status !== 'running' && status === 'running') {
@@ -284,6 +294,33 @@ function deriveToolItemKey(
   }
 
   return existing ? existing.id : baseKey
+}
+
+function buildToolItemBaseKey(toolName: string, args: Record<string, unknown> | null): string {
+  return `${toolName}:${stableArgSignature(args)}`
+}
+
+function syncToolItemQueue(
+  step: MutableStep,
+  baseKey: string,
+  itemId: string,
+  status: ProcessEntryStatus,
+): void {
+  const queue = [...(step.itemIdsByBaseKey.get(baseKey) ?? [])]
+
+  if (status === 'running') {
+    if (!queue.includes(itemId)) queue.push(itemId)
+  } else {
+    const nextQueue = queue.filter((candidate) => candidate !== itemId)
+    if (nextQueue.length > 0) {
+      step.itemIdsByBaseKey.set(baseKey, nextQueue)
+    } else {
+      step.itemIdsByBaseKey.delete(baseKey)
+    }
+    return
+  }
+
+  step.itemIdsByBaseKey.set(baseKey, queue)
 }
 
 function finalizeStep(step: MutableStep, turnState: TurnState): ProcessStep {
@@ -650,20 +687,10 @@ function summarizeToolResult(
   resultSize: number | null,
   exitCode: number | null,
 ): string | null {
-  if (toolName === 'fs') {
-    const action = getString(args ?? {}, 'action')
-    if (action === 'read') return 'text returned'
-    if (action === 'list') return 'entries returned'
-    if (action === 'edit' || action === 'write') return 'file updated'
-  }
-  if (toolName === 'spawn') return 'subtask started'
   if (toolName === 'exec') {
     if (exitCode != null && exitCode !== 0) return `exit ${exitCode}`
-    return 'finished'
   }
-  if (toolName === 'web_search') return 'results returned'
-  if (toolName === 'web_fetch') return 'page returned'
-  return resultSize != null ? `${formatCount(resultSize)} chars returned` : 'returned'
+  return null
 }
 
 function allowInlineResultPreview(toolName: string, args: Record<string, unknown> | null): boolean {
