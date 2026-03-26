@@ -8,19 +8,23 @@
 import { MessagePrimitive, useMessage } from '@assistant-ui/react'
 
 import { halPaperObjectVariants } from '@/components/ui/hal-patterns'
+import type { HalMessageMeta } from '@/lib/session-adapter'
 import { cn } from '@/lib/utils'
 
 export function HalSystemMessage() {
+  const custom = useMessage((s) => s.metadata?.custom as HalMessageMeta | undefined)
   const firstText = useMessage((s) => {
     const part = s.content[0]
     return part?.type === 'text' ? part.text : ''
   })
 
-  const badgeState = firstText.startsWith('Scope')
-    ? 'warning'
-    : firstText.startsWith('Brief')
-      ? 'success'
-      : 'muted'
+  const badgeState =
+    custom?.systemTone ??
+    (firstText.startsWith('Scope')
+      ? 'warning'
+      : firstText.startsWith('Brief')
+        ? 'success'
+        : 'muted')
 
   const title = firstText.startsWith('Scope')
     ? 'Scope'

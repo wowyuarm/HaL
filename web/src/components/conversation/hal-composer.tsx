@@ -20,7 +20,7 @@ export function HalComposer() {
           <HalComposerAttachmentShelf />
           <ComposerPrimitive.Input
             autoFocus
-            placeholder="Describe the next step, question, or direction for this session..."
+            placeholder="Continue collaborating..."
             className="max-h-[128px] min-h-[46px] w-full resize-none overflow-y-auto border-0 bg-transparent px-0 py-1 text-body leading-6 text-hal-primary placeholder:text-hal-muted focus:outline-none"
             rows={1}
           />

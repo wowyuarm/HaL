@@ -12,6 +12,7 @@ import { AssistantRuntimeProvider } from '@assistant-ui/react'
 
 import { HalThread } from '@/components/conversation/hal-thread'
 import { Sidebar } from '@/components/layout/sidebar'
+import { ProcessRail } from '@/components/session/process-rail'
 import { ReviewPanel } from '@/components/session/review-panel'
 import { SessionMountedThreadsDialog } from '@/components/session/session-mounted-threads-dialog'
 import { ThreadDetailPanel } from '@/components/thread/thread-detail'
@@ -245,42 +246,46 @@ export default function App() {
           onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
         />
 
-        {/* Main area */}
-        <main className="relative z-10 min-h-0 min-w-0 flex-1 overflow-hidden">
-          {lastError && (
-            <div className="mx-3 mt-3 rounded-xl border border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger md:mx-5 lg:mx-7">
-              {lastError}
-            </div>
-          )}
-          {hasSession && selectedSession ? (
-            <HalThread
-              key={selectedSession.session_id}
-              session={selectedSession}
-              threadName={activeThread?.name ?? null}
-              socketState={socketState}
-              briefPanelOpen={briefPanelOpen}
-              onBack={handleBack}
-              onEditScope={handleOpenScopeEditor}
-              onBrief={handleBrief}
-              onDrop={handleDrop}
-              onToggleBriefPanel={toggleBriefPanel}
-            />
-          ) : (
-            <div className="h-full px-3 py-4 md:px-5 md:py-5 lg:px-7 lg:py-7">
-              <ThreadDetailPanel
-                thread={activeThread}
-                selectedSessionId={selectedSessionId}
-                onSelectSession={handleSelectSession}
-                onCreateSession={handleCreateSession}
-                onUpdateSessionTitle={handleUpdateSessionTitle}
-                onEndSession={handleEndSessionFromThreadDetail}
-                onPreviewEpisode={handlePreviewEpisode}
-                creatingSession={creatingSession}
+        <div className="relative z-10 flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          {/* Main area */}
+          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {lastError && (
+              <div className="mx-3 mt-3 rounded-xl border border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger md:mx-5 lg:mx-7">
+                {lastError}
+              </div>
+            )}
+            {hasSession && selectedSession ? (
+              <HalThread
+                key={selectedSession.session_id}
+                session={selectedSession}
+                threadName={activeThread?.name ?? null}
+                socketState={socketState}
+                briefPanelOpen={briefPanelOpen}
+                onBack={handleBack}
+                onEditScope={handleOpenScopeEditor}
+                onBrief={handleBrief}
+                onDrop={handleDrop}
                 onToggleBriefPanel={toggleBriefPanel}
               />
-            </div>
-          )}
-        </main>
+            ) : (
+              <div className="h-full px-3 py-4 md:px-5 md:py-5 lg:px-7 lg:py-7">
+                <ThreadDetailPanel
+                  thread={activeThread}
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={handleSelectSession}
+                  onCreateSession={handleCreateSession}
+                  onUpdateSessionTitle={handleUpdateSessionTitle}
+                  onEndSession={handleEndSessionFromThreadDetail}
+                  onPreviewEpisode={handlePreviewEpisode}
+                  creatingSession={creatingSession}
+                  onToggleBriefPanel={toggleBriefPanel}
+                />
+              </div>
+            )}
+          </main>
+
+          <ProcessRail />
+        </div>
 
         {/* External review panel */}
         <ReviewPanel

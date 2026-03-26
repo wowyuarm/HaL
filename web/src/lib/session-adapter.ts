@@ -5,17 +5,16 @@
  * SessionMessage objects that can be fed to assistant-ui's
  * ExternalStoreRuntime via a `convertMessage` callback.
  *
- * This replaces the dual-layer view-models.ts approach with a simpler
- * linear message model:
- *   - user.message        → user message
- *   - assistant output     → assistant message (with tool-call parts)
- *   - session-level events → system messages
- *   - evidence events      → NOT mapped; available via halMeta for inspector
+ * The adapter keeps the main thread focused on user / assistant / system
+ * messages, while turn-level process detail is derived separately from the
+ * underlying SessionEvents.
  */
 
 import type { CompleteAttachment } from '@assistant-ui/react'
 
 import type { SessionEvent, WebAttachmentInput, WebAttachmentPart } from '@/lib/types'
+import type { ProcessPreview, ProcessTone } from '@/lib/process'
+import { buildTurnProcessView } from '@/lib/process'
 import { bySeq, getFiniteNumber, getString, getStringArray } from '@/lib/event-helpers'
 
 // ---------------------------------------------------------------------------
@@ -23,21 +22,11 @@ import { bySeq, getFiniteNumber, getString, getStringArray } from '@/lib/event-h
 // ---------------------------------------------------------------------------
 
 /** Content part compatible with assistant-ui ThreadMessageLike. */
-export type ContentPart = TextPart | ToolCallPart
+export type ContentPart = TextPart
 
 export interface TextPart {
   readonly type: 'text'
   readonly text: string
-}
-
-export interface ToolCallPart {
-  readonly type: 'tool-call'
-  readonly toolCallId: string
-  readonly toolName: string
-  readonly args?: Readonly<Record<string, JsonValue>>
-  readonly argsText?: string
-  readonly result?: JsonValue
-  readonly isError?: boolean
 }
 
 /** JSON-safe value type compatible with assistant-ui's ReadonlyJSONValue. */
@@ -56,15 +45,6 @@ export type SessionMessageStatus =
       readonly error?: JsonValue
     }
 
-/** Evidence event counts by category, for the inspector panel. */
-export interface EvidenceCounts {
-  context: number
-  loop: number
-  tool: number
-  injection: number
-  worker: number
-}
-
 /** HaL-specific metadata attached to each SessionMessage. */
 export interface HalMessageMeta {
   turnId?: string
@@ -73,8 +53,8 @@ export interface HalMessageMeta {
   isCommand?: boolean
   lifecycleKind?: 'brief'
   lifecycleState?: 'start' | 'complete' | 'failed'
-  evidenceCounts?: EvidenceCounts
-  toolSummaries?: Array<{ name: string; status: string }>
+  processPreview?: ProcessPreview
+  systemTone?: ProcessTone
 }
 
 /**
@@ -99,26 +79,11 @@ export interface SessionMessage {
 // Event classification
 // ---------------------------------------------------------------------------
 
-/** Event types counted as diagnostic evidence (not shown in message flow). */
-export const EVIDENCE_EVENTS = new Set([
-  'context.compiled',
-  'loop.started',
-  'loop.iteration_started',
-  'llm.request_started',
-  'llm.response_completed',
-  'tool.call_started',
-  'assistant.message_started',
-  'hook.injected',
-  'message.injected',
-  'subagent.spawned',
-  'brief.started',
-])
-
 /** Session-level activity events (standalone, no turn_id). */
 const SESSION_ACTIVITY_EVENTS = new Set([
+  'message.injected',
   'session.scope_updated',
   'brief.completed',
-  'message.injected',
   'status.changed',
 ])
 
@@ -205,8 +170,7 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
   const trigger = getString(startedEvent?.payload ?? {}, 'trigger')
   const isCommand = trigger === 'command'
 
-  // Collect evidence counts for halMeta.
-  const evidenceCounts = countEvidence(sorted)
+  const processView = buildTurnProcessView(sorted, turnState)
 
   // --- User message ---
   const userEvent = sorted.find((e) => e.type === 'user.message')
@@ -224,34 +188,12 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
     })
   }
 
-  // --- Injected messages within a turn ---
-  for (const event of sorted) {
-    if (event.type === 'message.injected') {
-      const content = getString(event.payload, 'content') ?? ''
-      messages.push({
-        id: `evt_${event.seq}`,
-        role: 'system',
-        turnId,
-        createdAt: new Date(event.ts),
-        content: [{ type: 'text', text: content }],
-        halMeta: {},
-      })
-    }
-  }
-
-  // --- Assistant message (with tool-call parts) ---
+  // --- Assistant message (process summary + final output) ---
   const assistantEvent = sorted.find((e) => e.type === 'assistant.message_completed')
-  const toolParts = collectToolCallParts(sorted)
-  const toolSummaries = buildToolSummaries(sorted)
 
-  // Produce an assistant message if we have output, tool calls, or a failure.
-  if (assistantEvent || toolParts.length > 0 || failedEvent) {
+  if (assistantEvent || processView.entries.length > 0 || failedEvent) {
     const contentParts: ContentPart[] = []
 
-    // Tool call parts come first (they happened during the loop).
-    contentParts.push(...toolParts)
-
-    // Then the assistant's text output.
     if (assistantEvent) {
       const text = getString(assistantEvent.payload, 'content') ?? ''
       if (text) {
@@ -288,8 +230,7 @@ function buildTurnMessages(turnId: string, events: SessionEvent[]): SessionMessa
         turnState,
         origin,
         isCommand,
-        evidenceCounts: hasEvidence(evidenceCounts) ? evidenceCounts : undefined,
-        toolSummaries: toolSummaries.length > 0 ? toolSummaries : undefined,
+        processPreview: processView.preview,
       },
     })
   }
@@ -368,109 +309,20 @@ function toAttachmentPart(
 }
 
 // ---------------------------------------------------------------------------
-// Tool call part collection
-// ---------------------------------------------------------------------------
-
-/** Collect tool.call_completed and tool.call_failed events as tool-call content parts. */
-function collectToolCallParts(events: SessionEvent[]): ToolCallPart[] {
-  const parts: ToolCallPart[] = []
-
-  for (const event of events) {
-    if (event.type === 'tool.call_completed') {
-      const toolName =
-        getString(event.payload, 'tool') ?? getString(event.refs, 'tool_name') ?? 'unknown'
-      const toolCallId = getString(event.refs, 'tool_call_id') ?? `tc_${event.seq}`
-      const resultPreview = getString(event.payload, 'result_preview')
-      const resultSize = getFiniteNumber(event.payload, 'result_size')
-      const args = extractArgs(event.payload)
-
-      parts.push({
-        type: 'tool-call',
-        toolCallId,
-        toolName,
-        args,
-        result: resultPreview ?? (resultSize != null ? `${resultSize} chars` : 'completed'),
-        isError: false,
-      })
-    } else if (event.type === 'tool.call_failed') {
-      const toolName =
-        getString(event.payload, 'tool') ?? getString(event.refs, 'tool_name') ?? 'unknown'
-      const toolCallId = getString(event.refs, 'tool_call_id') ?? `tc_${event.seq}`
-      const error = getString(event.payload, 'error') ?? 'Tool call failed'
-      const args = extractArgs(event.payload)
-
-      parts.push({
-        type: 'tool-call',
-        toolCallId,
-        toolName,
-        args,
-        result: error,
-        isError: true,
-      })
-    } else if (event.type === 'subagent.completed') {
-      const label = getString(event.payload, 'label') ?? 'subagent'
-      const status = getString(event.payload, 'status') ?? 'completed'
-      const content = getString(event.payload, 'content')
-      const toolCallId = `subagent_${event.seq}`
-
-      parts.push({
-        type: 'tool-call',
-        toolCallId,
-        toolName: `subagent:${label}`,
-        result: content ?? status,
-        isError: status === 'failed',
-      })
-    }
-  }
-
-  return parts
-}
-
-/** Extract args object from a tool event payload, if present. */
-function extractArgs(
-  payload: Record<string, unknown>,
-): Readonly<Record<string, JsonValue>> | undefined {
-  const raw = payload.args
-  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Readonly<Record<string, JsonValue>>
-  }
-  return undefined
-}
-
-/** Build compact tool summaries for halMeta. */
-function buildToolSummaries(events: SessionEvent[]): Array<{ name: string; status: string }> {
-  const summaries: Array<{ name: string; status: string }> = []
-  for (const event of events) {
-    if (event.type === 'tool.call_completed') {
-      summaries.push({
-        name: getString(event.payload, 'tool') ?? getString(event.refs, 'tool_name') ?? 'unknown',
-        status: 'completed',
-      })
-    } else if (event.type === 'tool.call_failed') {
-      summaries.push({
-        name: getString(event.payload, 'tool') ?? getString(event.refs, 'tool_name') ?? 'unknown',
-        status: 'failed',
-      })
-    }
-  }
-  return summaries
-}
-
-// ---------------------------------------------------------------------------
 // Standalone (session-level) messages
 // ---------------------------------------------------------------------------
 
 function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
   switch (event.type) {
     case 'message.injected': {
-      const content = getString(event.payload, 'content') ?? ''
+      const summary = summarizeStandaloneInject(event)
       return {
         id: `evt_${event.seq}`,
         role: 'system',
         turnId: null,
         createdAt: new Date(event.ts),
-        content: [{ type: 'text', text: content }],
-        halMeta: {},
+        content: [{ type: 'text', text: summary.text }],
+        halMeta: { systemTone: summary.tone },
       }
     }
 
@@ -487,7 +339,7 @@ function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
         turnId: null,
         createdAt: new Date(event.ts),
         content: [{ type: 'text', text }],
-        halMeta: {},
+        halMeta: { systemTone: 'warning' },
       }
     }
 
@@ -502,7 +354,7 @@ function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
         turnId: null,
         createdAt: new Date(event.ts),
         content: [{ type: 'text', text: parts.join(' \u00b7 ') }],
-        halMeta: {},
+        halMeta: { systemTone: 'success' },
       }
     }
 
@@ -548,7 +400,7 @@ function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
         turnId: null,
         createdAt: new Date(event.ts),
         content: [{ type: 'text', text }],
-        halMeta: {},
+        halMeta: { systemTone: 'muted' },
       }
     }
 
@@ -557,43 +409,86 @@ function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Evidence counting (for halMeta, not for rendering)
-// ---------------------------------------------------------------------------
+function summarizeStandaloneInject(event: SessionEvent): {
+  text: string
+  tone: HalMessageMeta['systemTone']
+} {
+  const kind = getString(event.payload, 'kind') ?? 'runtime'
+  const threads = getStringArray(event.refs, 'threads')
 
-function countEvidence(events: SessionEvent[]): EvidenceCounts {
-  const counts: EvidenceCounts = { context: 0, loop: 0, tool: 0, injection: 0, worker: 0 }
-  for (const event of events) {
-    if (!EVIDENCE_EVENTS.has(event.type)) continue
-    switch (event.type) {
-      case 'context.compiled':
-        counts.context++
-        break
-      case 'loop.started':
-      case 'loop.iteration_started':
-      case 'llm.request_started':
-      case 'llm.response_completed':
-      case 'assistant.message_started':
-        counts.loop++
-        break
-      case 'tool.call_started':
-        counts.tool++
-        break
-      case 'hook.injected':
-      case 'message.injected':
-        counts.injection++
-        break
-      case 'subagent.spawned':
-      case 'brief.started':
-        counts.worker++
-        break
-    }
+  switch (kind) {
+    case 'primary_thread_snapshot':
+      return {
+        text:
+          threads.length > 0
+            ? `Primary thread snapshot added: ${threads.join(', ')}`
+            : 'Primary thread snapshot added',
+        tone: 'warning',
+      }
+    case 'scope_add_snapshot':
+      return {
+        text:
+          threads.length > 0
+            ? `Scope snapshot added: ${threads.join(', ')}`
+            : 'Scope snapshot added',
+        tone: 'warning',
+      }
+    case 'scope_remove':
+      return {
+        text: threads.length > 0 ? `Scope removed: ${threads.join(', ')}` : 'Scope updated',
+        tone: 'warning',
+      }
+    case 'context_hint':
+      return {
+        text: summarizeStandaloneInjectBody(event) ?? 'Context hint added',
+        tone: 'muted',
+      }
+    case 'system_reminder':
+      return {
+        text: summarizeStandaloneInjectBody(event) ?? 'System reminder added',
+        tone: 'warning',
+      }
+    case 'subagent_runtime':
+      return {
+        text:
+          getString(event.payload, 'label') ??
+          summarizeStandaloneInjectBody(event) ??
+          'Subtask update added',
+        tone: getString(event.payload, 'status') === 'failed' ? 'danger' : 'muted',
+      }
+    case 'user_follow_up':
+      return {
+        text:
+          getString(event.payload, 'raw_content') ??
+          summarizeStandaloneInjectBody(event) ??
+          'Follow-up input added',
+        tone: 'warning',
+      }
+    default:
+      return {
+        text: summarizeStandaloneInjectBody(event) ?? 'Injected message added',
+        tone: 'muted',
+      }
   }
-  return counts
 }
 
-function hasEvidence(counts: EvidenceCounts): boolean {
-  return counts.context + counts.loop + counts.tool + counts.injection + counts.worker > 0
+function summarizeStandaloneInjectBody(event: SessionEvent): string | null {
+  const content =
+    getString(event.payload, 'content') ?? getString(event.payload, 'prefixed_content') ?? ''
+  const normalized = content.trim()
+  if (!normalized) return null
+
+  const [, ...rest] = normalized.split(/\n\s*\n/)
+  const body = rest.join(' ').replace(/\s+/g, ' ').trim()
+  if (body) return compactStandaloneText(body)
+
+  return compactStandaloneText(normalized.replace(/\s+/g, ' '))
+}
+
+function compactStandaloneText(text: string): string {
+  const normalized = text.trim()
+  if (normalized.length <= 160) return normalized
+  return `${normalized.slice(0, 157)}...`
 }
 
 // ---------------------------------------------------------------------------

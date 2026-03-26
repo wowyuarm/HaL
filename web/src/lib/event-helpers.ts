@@ -2,7 +2,7 @@
  * Safe payload access helpers for SessionEvent records.
  *
  * Extracted from view-models.ts as a shared utility — used by both
- * the session-adapter (Phase 0) and the evidence inspector (Phase 4).
+ * the session-adapter and the process view model.
  */
 
 import type { SessionEvent } from '@/lib/types'

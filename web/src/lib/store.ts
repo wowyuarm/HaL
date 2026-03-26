@@ -19,7 +19,7 @@ import type {
 
 export type ReviewPanelState =
   | { kind: 'brief' }
-  | { kind: 'evidence'; turnId: string }
+  | { kind: 'process'; turnId: string }
   | {
       kind: 'episode'
       threadSlug: string
@@ -49,7 +49,7 @@ interface HalStore {
   selectSession: (sessionId: string | null) => void
   toggleBriefPanel: () => void
   closeReviewPanel: () => void
-  openInspector: (turnId: string) => void
+  openProcessPanel: (turnId: string) => void
   openEpisode: (input: {
     threadSlug: string
     episodePath: string
@@ -333,12 +333,12 @@ export const useHalStore = create<HalStore>((set, get) => ({
       reviewPanel: state.reviewPanel?.kind === 'brief' ? null : { kind: 'brief' },
     })),
   closeReviewPanel: () => set({ reviewPanel: null }),
-  openInspector: (turnId) =>
+  openProcessPanel: (turnId) =>
     set((state) => ({
       reviewPanel:
-        state.reviewPanel?.kind === 'evidence' && state.reviewPanel.turnId === turnId
+        state.reviewPanel?.kind === 'process' && state.reviewPanel.turnId === turnId
           ? null
-          : { kind: 'evidence', turnId },
+          : { kind: 'process', turnId },
     })),
   openEpisode: ({ threadSlug, episodePath, episodeTitle }) =>
     set({

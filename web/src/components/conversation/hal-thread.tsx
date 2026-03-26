@@ -17,7 +17,6 @@ import { HAL_READING_COLUMN_CLASS } from '@/components/ui/hal-patterns'
 import { Panel } from '@/components/ui/panel'
 import { cn } from '@/lib/utils'
 import { isInteractiveSession } from '@/lib/runtime'
-import { useHalStore } from '@/lib/store'
 import type { SessionManifest, SocketState } from '@/lib/types'
 
 // ---------------------------------------------------------------------------

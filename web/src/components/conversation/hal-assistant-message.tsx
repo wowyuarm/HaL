@@ -1,18 +1,17 @@
 /**
- * HalAssistantMessage — renders an assistant message with tool call parts.
+ * HalAssistantMessage — renders assistant output with a lightweight process strip.
  *
- * Uses assistant-ui primitives for context binding. Tool calls render as
- * compact rows. Text parts render through the shared HaL markdown renderer.
- * Command responses render as compact inline rows without bubble chrome.
+ * Uses assistant-ui primitives for context binding. Text parts render through
+ * the shared HaL markdown renderer. Process visibility is handled by a quiet
+ * evidence seam strip above the answer body.
  */
 
 import { MessagePrimitive, useMessage } from '@assistant-ui/react'
-import type { TextMessagePartProps, ToolCallMessagePartProps } from '@assistant-ui/react'
+import type { TextMessagePartProps } from '@assistant-ui/react'
+import { ChevronRight } from 'lucide-react'
 
 import { HalMarkdown } from '@/components/ui/hal-markdown'
-import { halPaperObjectVariants } from '@/components/ui/hal-patterns'
 import { StatusDot } from '@/components/ui/status-dot'
-import { summarizeEvidenceKinds } from '@/lib/evidence'
 import type { HalMessageMeta } from '@/lib/session-adapter'
 import { useHalStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -25,7 +24,8 @@ export function HalAssistantMessage() {
     const part = s.content.find((item) => item.type === 'text')
     return part?.type === 'text' ? part.text : ''
   })
-  const openInspector = useHalStore((s) => s.openInspector)
+  const openProcessPanel = useHalStore((s) => s.openProcessPanel)
+  const processPanel = useHalStore((s) => s.reviewPanel)
   const isCommand = custom?.isCommand === true
   const isBriefLifecycle = custom?.lifecycleKind === 'brief'
   const currentSessionStatus = useHalStore((s) =>
@@ -33,11 +33,12 @@ export function HalAssistantMessage() {
   )
   const showBriefLiveDot =
     isBriefLifecycle && custom?.lifecycleState === 'start' && currentSessionStatus === 'briefing'
-
-  const evidenceCounts = custom?.evidenceCounts
-  const totalEvidence = evidenceCounts
-    ? Object.values(evidenceCounts).reduce((a, b) => a + b, 0)
-    : 0
+  const processPreview = custom?.processPreview
+  const processOpen = processPanel?.kind === 'process' && processPanel.turnId === custom?.turnId
+  const directOnlyProcess =
+    processPreview?.summaryText === 'direct reply' &&
+    processPreview.stepCount === 1 &&
+    processPreview.noteCount === 0
 
   // Command responses: compact inline row, no bubble.
   if (isCommand) {
@@ -68,39 +69,67 @@ export function HalAssistantMessage() {
         isFailed ? 'rounded-md border border-danger bg-hal-danger-subtle px-4 py-3.5' : 'px-1 py-2'
       }
     >
-      {(isRunning || custom?.origin === 'background_resume') && (
-        <div className="mb-2 flex items-center gap-2">
-          {isRunning && <StatusDot state="live" />}
-          {custom?.origin === 'background_resume' && (
-            <span className="text-caption font-medium uppercase tracking-[0.1em] text-hal-muted">
-              background
-            </span>
-          )}
-        </div>
-      )}
-
-      <MessagePrimitive.Content components={ASSISTANT_CONTENT_COMPONENTS} />
-
-      {totalEvidence > 0 && custom?.turnId && evidenceCounts && (
+      {custom?.turnId && processPreview && (
         <button
           type="button"
-          onClick={() => openInspector(custom.turnId!)}
-          className="group mt-3 flex w-full items-stretch overflow-hidden rounded-md border border-subtle bg-hal-paper text-left transition-all duration-fast ease-standard hover:border-accent hover:bg-hal-hover"
+          onClick={() => openProcessPanel(custom.turnId!)}
+          aria-label={`Turn process: ${processPreview.summaryText}`}
+          className={cn(
+            "group relative isolate mb-1 flex w-full items-center gap-2 py-1 pr-1.5 text-left transition-all duration-fast ease-standard before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:content-[''] before:transition-all before:duration-fast before:ease-standard",
+            processOpen
+              ? 'before:-inset-x-0.5 before:-inset-y-0.5 before:rounded-xl before:bg-hal-hover'
+              : directOnlyProcess
+                ? 'opacity-45 hover:opacity-75 hover:before:-inset-x-0.5 hover:before:-inset-y-0.5 hover:before:rounded-xl hover:before:bg-hal-hover'
+                : 'hover:before:-inset-x-0.5 hover:before:-inset-y-0.5 hover:before:rounded-xl hover:before:bg-hal-hover',
+          )}
         >
-          <span className="w-[3px] shrink-0 bg-[color:var(--turn-seam-color)] transition-colors duration-fast ease-standard group-hover:bg-[color:var(--turn-seam-active)]" />
-          <span className="flex min-w-0 flex-1 items-center justify-between gap-3 px-2.5 py-2">
-            <span className="min-w-0">
-              <span className="hal-meta-kicker">Evidence</span>
-              <span className="mt-1 block truncate text-meta text-hal-primary">
-                {summarizeEvidenceKinds(evidenceCounts)}
-              </span>
-            </span>
-            <span className="shrink-0 text-caption text-hal-muted">
-              {totalEvidence} record{totalEvidence === 1 ? '' : 's'}
+          <span
+            className={cn(
+              'relative z-10 h-4 w-[2px] shrink-0 rounded-full transition-colors duration-fast ease-standard',
+              processPreview.tone === 'danger'
+                ? 'bg-danger'
+                : processOpen
+                  ? 'bg-[color:var(--turn-seam-active)]'
+                  : 'bg-[color:var(--turn-seam-color)] group-hover:bg-[color:var(--turn-seam-active)]',
+            )}
+          />
+          <span className="relative z-10 flex min-w-0 flex-1 items-center gap-2">
+            {processPreview.liveText ? (
+              <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
+            ) : null}
+            <span
+              className={cn(
+                'truncate text-meta',
+                processPreview.tone === 'danger'
+                  ? 'text-danger'
+                  : processPreview.liveText
+                    ? 'text-hal-primary'
+                    : 'text-hal-muted',
+              )}
+            >
+              {processPreview.liveText ?? processPreview.summaryText}
             </span>
           </span>
+          {!directOnlyProcess && (
+            <ChevronRight
+              className={cn(
+                'relative z-10 h-3 w-3 shrink-0 text-hal-muted transition-all duration-fast ease-standard',
+                processOpen ? 'rotate-90 opacity-60' : 'opacity-0 group-hover:opacity-50',
+              )}
+            />
+          )}
         </button>
       )}
+
+      {!processPreview && custom?.origin === 'background_resume' ? (
+        <div className="mb-2 flex items-center gap-2">
+          <span className="text-caption font-medium uppercase tracking-[0.1em] text-hal-muted">
+            background
+          </span>
+        </div>
+      ) : null}
+
+      <MessagePrimitive.Content components={ASSISTANT_CONTENT_COMPONENTS} />
     </MessagePrimitive.Root>
   )
 }
@@ -109,19 +138,6 @@ function AssistantTextPart({ text }: TextMessagePartProps) {
   if (!text?.trim()) return null
 
   return <HalMarkdown>{text}</HalMarkdown>
-}
-
-function HalToolCallPart({ toolName, result, isError }: ToolCallMessagePartProps) {
-  const dotState = isError ? 'danger' : 'success'
-  const brief = typeof result === 'string' ? truncate(result, 100) : 'completed'
-
-  return (
-    <div className={cn(halPaperObjectVariants(), 'my-2 flex items-center gap-2')}>
-      <StatusDot state={dotState} />
-      <span className="font-mono text-caption text-hal-primary">{toolName}</span>
-      <span className="min-w-0 flex-1 truncate text-caption text-hal-muted">{brief}</span>
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -160,5 +176,4 @@ function truncate(text: string, max: number): string {
 
 const ASSISTANT_CONTENT_COMPONENTS = {
   Text: AssistantTextPart,
-  tools: { Fallback: HalToolCallPart },
 } as const

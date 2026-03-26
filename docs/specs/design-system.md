@@ -23,11 +23,11 @@ Core data model:
 
 ### Core Qualities
 
-| Quality | Meaning |
-|---------|---------|
-| **Restrained** | Visual budget goes to content, not decoration |
-| **Transparent** | All activity has evidence, is traceable and reviewable |
-| **Structured** | Visual hierarchy mirrors cognitive hierarchy; the antithesis of entropy |
+| Quality            | Meaning                                                                  |
+| ------------------ | ------------------------------------------------------------------------ |
+| **Restrained**     | Visual budget goes to content, not decoration                            |
+| **Transparent**    | All activity has evidence, is traceable and reviewable                   |
+| **Structured**     | Visual hierarchy mirrors cognitive hierarchy; the antithesis of entropy  |
 | **Human-directed** | The human is always the source of intent; HaL is the medium of execution |
 
 ---
@@ -43,15 +43,15 @@ structure and evidence, not decoration.
 
 Color roles in this world:
 
-| Physical source | Design role |
-|----------------|-------------|
-| Warm paper, vellum | Base surfaces |
-| Graphite, dust | Structural edges and borders |
-| Oxidized teal metal | Live system state, interaction accent |
-| Brass annotation tabs | Human authorship markers |
-| Amber oxide | Warning, attention needed |
-| Iron red | Danger, failure, destructive action |
-| Moss, completion ink | Success, brief completed |
+| Physical source       | Design role                           |
+| --------------------- | ------------------------------------- |
+| Warm paper, vellum    | Base surfaces                         |
+| Graphite, dust        | Structural edges and borders          |
+| Oxidized teal metal   | Live system state, interaction accent |
+| Brass annotation tabs | Human authorship markers              |
+| Amber oxide           | Warning, attention needed             |
+| Iron red              | Danger, failure, destructive action   |
+| Moss, completion ink  | Success, brief completed              |
 
 If a new component feels glossy, consumerish, or dashboard-like, it is
 off-system.
@@ -103,10 +103,13 @@ The send button uses an icon only (arrow), no label text. `Enter` sends,
 ## 4. Layout
 
 Two-region layout: a collapsible navigation panel and a main content area.
-Overlay panels (BRIEF, Evidence Inspector) slide in from the right edge on
-demand, using elevated surface and `--shadow-popover`.
+On desktop, turn-level process detail may open as an embedded right rail that
+compresses the working log instead of floating above it. BRIEF and episode
+preview may still use right-edge sheets when they are treated as standalone
+reading objects.
 
 Surface rules:
+
 - Layout regions separate by spacing, width, and a hairline border — not
   contrasting background color
 - The navigation panel uses `--surface-veil` for glass-like depth on the
@@ -133,30 +136,30 @@ added only when a pattern is clearly reused across multiple surfaces.
   color-scheme: light;
 
   /* Surfaces */
-  --surface-base: #F7F4EF;
-  --surface-raised: #EFECE6;
-  --surface-elevated: #FFFFFF;
-  --surface-inset: #E8E4DD;
+  --surface-base: #f7f4ef;
+  --surface-raised: #efece6;
+  --surface-elevated: #ffffff;
+  --surface-inset: #e8e4dd;
   --surface-paper: rgba(255, 255, 255, 0.72);
   --surface-veil: rgba(255, 252, 247, 0.58);
   --surface-hover: rgba(36, 33, 29, 0.06);
 
   /* Text */
-  --text-primary: #24211D;
-  --text-secondary: #7A756D;
-  --text-on-accent: #FFFFFF;
+  --text-primary: #24211d;
+  --text-secondary: #7a756d;
+  --text-on-accent: #ffffff;
 
   /* Accent and semantic hues */
-  --color-accent: #4A7A74;
-  --color-accent-subtle: #E8F0EF;
-  --color-human: #9A7840;
-  --color-human-subtle: #F5EDE0;
-  --color-danger: #A25248;
-  --color-danger-subtle: #FAEAE8;
-  --color-success: #5A8A6A;
-  --color-success-subtle: #ECF3ED;
-  --color-warning: #B8863B;
-  --color-warning-subtle: #F7EFE1;
+  --color-accent: #4a7a74;
+  --color-accent-subtle: #e8f0ef;
+  --color-human: #9a7840;
+  --color-human-subtle: #f5ede0;
+  --color-danger: #a25248;
+  --color-danger-subtle: #faeae8;
+  --color-success: #5a8a6a;
+  --color-success-subtle: #ecf3ed;
+  --color-warning: #b8863b;
+  --color-warning-subtle: #f7efe1;
 
   /* Borders — rgba-based for natural blending across surfaces */
   --border-strong: rgba(36, 33, 29, 0.18);
@@ -168,7 +171,7 @@ added only when a pattern is clearly reused across multiple surfaces.
   --border-human: rgba(154, 120, 64, 0.28);
   --border-danger: rgba(162, 82, 72, 0.28);
   --border-success: rgba(90, 138, 106, 0.28);
-  --border-warning: rgba(184, 134, 59, 0.30);
+  --border-warning: rgba(184, 134, 59, 0.3);
 }
 ```
 
@@ -229,7 +232,8 @@ added only when a pattern is clearly reused across multiple surfaces.
 :root {
   --font-sans: "IBM Plex Sans", "Noto Sans SC UI", "Segoe UI", sans-serif;
   --font-serif: "IBM Plex Sans", "Noto Sans SC UI", "Segoe UI", sans-serif;
-  --font-mono: "Maple Mono Latin", "Noto Sans SC UI", "Maple Mono", "IBM Plex Mono",
+  --font-mono:
+    "Maple Mono Latin", "Noto Sans SC UI", "Maple Mono", "IBM Plex Mono",
     "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 }
 ```
@@ -279,15 +283,15 @@ hero blocks.
 }
 ```
 
-| Role | Size | Weight | Line Height | Use |
-|------|------|--------|-------------|-----|
-| **title** | 23px | 600 | 30px | Primary page heading, thread detail title |
-| **heading** | 17px | 600 | 23px | Session title, section headers |
-| **subheading** | 15px | 600 | 21px | Small section headers, empty-state titles |
-| **body** | 15px | 400 | 24px | Default UI text, thread descriptions |
-| **reading** | 16px | 400 | 27px | Main assistant prose, BRIEF prose, long-form reading |
-| **meta** | 12.5px | 500 | 18px | State labels, session metadata, compact annotations |
-| **caption** | 11.5px | 500 | 16px | Tool rows, evidence labels, technical chrome |
+| Role           | Size   | Weight | Line Height | Use                                                  |
+| -------------- | ------ | ------ | ----------- | ---------------------------------------------------- |
+| **title**      | 23px   | 600    | 30px        | Primary page heading, thread detail title            |
+| **heading**    | 17px   | 600    | 23px        | Session title, section headers                       |
+| **subheading** | 15px   | 600    | 21px        | Small section headers, empty-state titles            |
+| **body**       | 15px   | 400    | 24px        | Default UI text, thread descriptions                 |
+| **reading**    | 16px   | 400    | 27px        | Main assistant prose, BRIEF prose, long-form reading |
+| **meta**       | 12.5px | 500    | 18px        | State labels, session metadata, compact annotations  |
+| **caption**    | 11.5px | 500    | 16px        | Tool rows, evidence labels, technical chrome         |
 
 ### 6.3 Type Rules
 
@@ -305,12 +309,12 @@ Uses Tailwind's 4px base scale (`p-1` = 4px, `p-2` = 8px, etc.).
 
 ### 7.1 Spacing by Hierarchy Level
 
-| Level | Internal spacing | Gap between siblings |
-|-------|-----------------|---------------------|
-| Event | 4–8px | 4px |
-| Turn | 12–16px | 8–12px |
-| Session group | 16–20px | 16–20px |
-| Thread / page | 24–32px | 24–32px |
+| Level         | Internal spacing | Gap between siblings |
+| ------------- | ---------------- | -------------------- |
+| Event         | 4–8px            | 4px                  |
+| Turn          | 12–16px          | 8–12px               |
+| Session group | 16–20px          | 16–20px              |
+| Thread / page | 24–32px          | 24–32px              |
 
 ### 7.2 Density Rules
 
@@ -339,15 +343,15 @@ Depth is expressed through **surface contrast and borders**. Shadow is rare.
 
 ### 8.1 Surface Mapping
 
-| Surface | Color | Use |
-|---------|-------|-----|
-| `base` | `#F7F4EF` | Main canvas, page field |
-| `raised` | `#EFECE6` | Grouped containers, navigation items |
-| `elevated` | `#FFFFFF` | Popovers, floating BRIEF panel, menus |
-| `inset` | `#E8E4DD` | Composer textarea, code blocks, evidence wells |
-| `paper` | `rgba(255, 255, 255, 0.72)` | Translucent overlay on cards and containers |
-| `veil` | `rgba(255, 252, 247, 0.58)` | Subtle frosted glass for sidebar backdrop |
-| `hover` | `rgba(36, 33, 29, 0.06)` | Inline hover micro-step for rows and controls |
+| Surface    | Color                       | Use                                            |
+| ---------- | --------------------------- | ---------------------------------------------- |
+| `base`     | `#F7F4EF`                   | Main canvas, page field                        |
+| `raised`   | `#EFECE6`                   | Grouped containers, navigation items           |
+| `elevated` | `#FFFFFF`                   | Popovers, floating BRIEF panel, menus          |
+| `inset`    | `#E8E4DD`                   | Composer textarea, code blocks, evidence wells |
+| `paper`    | `rgba(255, 255, 255, 0.72)` | Translucent overlay on cards and containers    |
+| `veil`     | `rgba(255, 252, 247, 0.58)` | Subtle frosted glass for sidebar backdrop      |
+| `hover`    | `rgba(36, 33, 29, 0.06)`    | Inline hover micro-step for rows and controls  |
 
 ### 8.2 Border Rules
 
@@ -363,7 +367,7 @@ Borders are the **primary depth and grouping device**.
 ```css
 :root {
   --shadow-sm: 0 1px 2px rgba(36, 33, 29, 0.06);
-  --shadow-popover: 0 6px 18px rgba(36, 33, 29, 0.10);
+  --shadow-popover: 0 6px 18px rgba(36, 33, 29, 0.1);
 }
 ```
 
@@ -385,11 +389,11 @@ Borders are the **primary depth and grouping device**.
 }
 ```
 
-| Token | Use |
-|-------|-----|
-| 4px | Badges, tags, compact buttons, evidence fragments |
-| 8px | Cards, turn containers, list items, inputs |
-| 12px | Popovers, floating BRIEF, dialogs |
+| Token | Use                                               |
+| ----- | ------------------------------------------------- |
+| 4px   | Badges, tags, compact buttons, evidence fragments |
+| 8px   | Cards, turn containers, list items, inputs        |
+| 12px  | Popovers, floating BRIEF, dialogs                 |
 
 Composer may intentionally exceed the shared radius when it is treated as the
 primary writing object of the page. That exception should stay limited to the
@@ -423,13 +427,13 @@ outer composer shell, not spread to ordinary cards or message containers.
 
 ### 11.1 State Semantics
 
-| State | Token | Use |
-|-------|-------|-----|
-| Live / active / connected | `--hal-live` | Session active, WebSocket connected, turn processing |
-| Success / completed | `--hal-success` | Brief completed, tool succeeded |
-| Warning / attention | `--hal-warning` | Slow response, needs review |
-| Danger / failed | `--hal-danger` | Turn failed, destructive action |
-| Human-authored | `--hal-human` | Human contribution marker |
+| State                     | Token           | Use                                                  |
+| ------------------------- | --------------- | ---------------------------------------------------- |
+| Live / active / connected | `--hal-live`    | Session active, WebSocket connected, turn processing |
+| Success / completed       | `--hal-success` | Brief completed, tool succeeded                      |
+| Warning / attention       | `--hal-warning` | Slow response, needs review                          |
+| Danger / failed           | `--hal-danger`  | Turn failed, destructive action                      |
+| Human-authored            | `--hal-human`   | Human contribution marker                            |
 
 ### 11.2 Expression Order
 
@@ -456,12 +460,12 @@ Prefer earlier forms; escalate only when needed:
 ### 12.1 Evidence Indicator
 
 HaL's signature design element is the **evidence indicator** — a compact
-visual marker on messages or turns that signals diagnostic data is
+visual marker on messages or turns that signals underlying process detail is
 available for inspection.
 
 The indicator should be quiet at rest but clearly actionable. On
-interaction, it opens the Evidence Inspector — a dedicated panel for
-diagnostic events.
+interaction, it opens the turn's process view. It should read like a seam in
+the page, not like a generic button.
 
 ```css
 :root {
@@ -470,7 +474,10 @@ diagnostic events.
 ```
 
 Evidence indicators are structural signifiers, not decorative. They answer:
-"Did something happen here that I might want to examine?"
+"Is there process detail here if I want to inspect it?"
+
+When a turn contains only a direct reply with little observable work, the seam
+should recede further than a tool-heavy turn. Significance affects weight.
 
 ### 12.2 BRIEF as Compiled Context
 
@@ -487,7 +494,7 @@ BRIEF is not a generic detail drawer. It is a compiled working artifact:
 - Human turns may use a light bounded paper container, but the human marker should come from seam or border tint first, not a large colored fill.
 - Message-local timestamps are optional and should not be shown by default if they compete with reading flow.
 - Tool results and system notices are secondary rows. They use `caption` or `meta` scale and must not compete with the main prose layer.
-- Evidence affordances remain the one explicit bounded object attached to an assistant turn.
+- Evidence affordances remain the one explicit bounded object attached to an assistant turn, but they should stay lighter than action buttons or cards.
 
 ---
 
@@ -502,7 +509,8 @@ What the user needs for scanning and momentum:
 
 - Human prompts and direction
 - HaL responses and key outputs
-- Tool result summaries (not raw payloads)
+- A light process seam attached to assistant turns
+- Tool result summaries translated into human-readable actions
 - State markers and failure summaries
 
 System internals (`context.compiled`, `loop.iteration`) are **not shown**
@@ -512,17 +520,30 @@ in the activity view.
 
 Diagnostic detail available through explicit user action:
 
-- Full event list with timestamps
+- Step-grouped process timeline
+- Inserted notes, returned subtask results, and carried-in context
+- Full event list in original order
 - Tool inputs and outputs
 - Execution traces and diagnostics
-- Uses inset surfaces and monospace text
+- Uses inset surfaces and monospace text only in the deepest layer
+
+Default process detail should prefer collaboration objects over runtime counters.
+Show mounted or pulled-in threads before internal message-window counts.
 
 ### 13.3 Rules
 
-- Evidence is entered through explicit interaction, never auto-expanded.
-- When available, a compact indicator conveys what kind of evidence exists.
-- Evidence does not interrupt the primary reading flow.
-- BRIEF, episode preview, and turn evidence share the same right-side review panel surface. Only one review object should be open at a time.
+- Process detail is entered through explicit interaction, never auto-expanded.
+- The default seam should convey that work happened without turning into a loud summary chip.
+- Process detail should not interrupt the main reading flow; on desktop it may compress the working column into a three-region workspace.
+- BRIEF, episode preview, and turn process detail remain mutually exclusive. Only one review object should be open at a time.
+- Turn process detail headers should not stack multiple lines that all repeat the same count in different words.
+- Step headings should be action-first. If rationale is shown, it belongs on the quieter secondary line.
+- A step unit should keep a call's tool actions and their concise return results together.
+- Concrete tool-action labels should live in one stable visual slot. A single tool item may collapse spacing, but it should not switch to a different typographic role than the same item would use inside a longer list.
+- Step units and inserted notes should share one timeline skeleton; distinguish them by wording and depth before reaching for alternate borders or colors.
+- Scope rows should prefer mounted and pulled-in threads. Internal insert counts belong deeper in raw evidence, not in the default rail summary.
+- Inserted or external notes should read like tagged interruptions, not full system-narration sentences.
+- Order carries more value than exact clock time in turn process detail; timestamps stay out of the default rail.
 
 ### 13.4 Session and Thread Overview Hierarchy
 
@@ -547,6 +568,7 @@ ledger headers, inset record wells — not generic SaaS widgets.
 ### 14.1 Control Families
 
 #### Contextual Controls
+
 Controls subordinate to content: navigation toggles, inline actions, sheet
 close buttons, icon buttons.
 
@@ -558,16 +580,19 @@ close buttons, icon buttons.
 - In overflow menus, semantic escalation should usually happen through text color only. For example, a supportive action may use accent text and a destructive action may use danger text, without adding filled backgrounds.
 
 #### Primary Action
+
 `--color-accent` fill, `--text-on-accent` text. **No shadow.** Maximum one per
 visible context. Reserved for the single most important action in scope.
 
 #### Secondary Action
+
 Bordered, `--surface-paper` fill. Clearly bounded as a button without being
 loud. Appropriate for Cancel, Scope, and similar supporting actions. When a
 view toggle sits beside a primary action in a button group, secondary is
 acceptable for visual cohesion.
 
 #### Destructive Ghost
+
 Transparent at rest (same as contextual). Hover reveals `--color-danger` accent
 — color escalation is the warning signal.
 
@@ -576,13 +601,14 @@ Transparent at rest (same as contextual). Hover reveals `--color-danger` accent
 Thread rows, session rows, and dialog choice rows share a common interaction
 grammar:
 
-| State    | Background                      | Text         | Marker                |
-|----------|---------------------------------|--------------|-----------------------|
-| Rest     | transparent                     | muted        | —                     |
-| Hover    | `--surface-hover` (micro-step)  | primary      | —                     |
-| Selected | `--hal-selection` (accent tint) | primary      | left accent seam 2 px |
+| State    | Background                      | Text    | Marker                |
+| -------- | ------------------------------- | ------- | --------------------- |
+| Rest     | transparent                     | muted   | —                     |
+| Hover    | `--surface-hover` (micro-step)  | primary | —                     |
+| Selected | `--hal-selection` (accent tint) | primary | left accent seam 2 px |
 
 Rules:
+
 - Hover and selected **must** be visually distinguishable.
 - Hover is lighter than selected — transient suggestion, not commitment.
 - `--surface-elevated` / `--hal-float` is **not** appropriate for hover or
@@ -601,12 +627,12 @@ It must not appear as a hover or selected surface for inline elements.
 
 ### 14.4 Shadow Rules
 
-| Object               | Shadow             | Rationale                            |
-|----------------------|--------------------|--------------------------------------|
-| Buttons (any variant)| none               | Fill and border are sufficient       |
-| Inline rows and cards| none               | Border is the primary depth device   |
-| Scroll-anchored elements (composer) | `--shadow-sm` | Sits above scrolling content |
-| Floating UI (popovers, dialogs, sheets) | `--shadow-popover` | True floating layer |
+| Object                                  | Shadow             | Rationale                          |
+| --------------------------------------- | ------------------ | ---------------------------------- |
+| Buttons (any variant)                   | none               | Fill and border are sufficient     |
+| Inline rows and cards                   | none               | Border is the primary depth device |
+| Scroll-anchored elements (composer)     | `--shadow-sm`      | Sits above scrolling content       |
+| Floating UI (popovers, dialogs, sheets) | `--shadow-popover` | True floating layer                |
 
 Shadow on `--surface-base` or `--surface-raised` without a floating context
 is a design error.
@@ -614,6 +640,7 @@ is a design error.
 ### 14.5 Do / Don't
 
 **Do:**
+
 - Use transparent backgrounds for controls subordinate to content
 - Express hover through text/border promotion before reaching for background
 - Keep exactly one primary (accent fill) button per visible scope
@@ -621,6 +648,7 @@ is a design error.
 - Reserve shadow for truly floating elements
 
 **Don't:**
+
 - Use `--surface-elevated` / `--hal-float` as a hover or selected surface
 - Add shadow to buttons — fill color is the signal
 - Make hover visually heavier than selected
