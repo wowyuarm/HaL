@@ -166,6 +166,51 @@ async def test_http_session_title_update_persists_manifest(bridge, thread_repo) 
 
 
 @pytest.mark.asyncio
+async def test_http_archive_and_restore_roundtrip_manifest_updates(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    manifest.status = "ended"
+    bridge._engine._session_store.write_manifest(manifest.session_id, manifest)
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    archive_response = await server._archive_session(  # type: ignore[attr-defined]
+        _FakeRequest(match_info={"session_id": manifest.session_id})
+    )
+    assert archive_response.status == 200
+    archive_payload = _decode_response(archive_response)
+    assert archive_payload["session"]["archived_at"] is not None
+
+    thread_response = await server._get_thread(  # type: ignore[attr-defined]
+        _FakeRequest(match_info={"slug": "auth"})
+    )
+    thread_payload = _decode_response(thread_response)
+    assert thread_payload["thread"]["sessions"] == []
+
+    restore_response = await server._restore_session(  # type: ignore[attr-defined]
+        _FakeRequest(match_info={"session_id": manifest.session_id})
+    )
+    assert restore_response.status == 200
+    restore_payload = _decode_response(restore_response)
+    assert restore_payload["session"]["archived_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_http_get_thread_includes_archived_when_requested(bridge, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    manifest.status = "ended"
+    manifest.archived_at = "2026-03-26T15:00:00"
+    bridge._engine._session_store.write_manifest(manifest.session_id, manifest)
+    server = WebServer(WebConfig(enabled=True, host="127.0.0.1", port=0), bridge)
+
+    response = await server._get_thread(  # type: ignore[attr-defined]
+        _FakeRequest(match_info={"slug": "auth"}, query={"include_archived": "true"})
+    )
+    payload = _decode_response(response)
+    assert payload["thread"]["sessions"][0]["session_id"] == manifest.session_id
+
+
+@pytest.mark.asyncio
 async def test_http_turn_and_end_handlers_roundtrip_manifest_updates(bridge, thread_repo) -> None:
     _create_thread(thread_repo, "auth", "Auth")
     manifest = await bridge.create_session(primary_thread="auth")
@@ -210,7 +255,7 @@ async def test_http_turn_accepts_attachment_only_submission(bridge, thread_repo)
                         "content": [
                             {
                                 "type": "image",
-                                "image": "data:image/png;base64,abc",
+                                "image": "data:image/png;base64,ZmFrZQ==",
                                 "filename": "diagram.png",
                             }
                         ],

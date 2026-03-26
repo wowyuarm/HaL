@@ -9,6 +9,7 @@
     "prebuild": "node ./scripts/clean-generated-configs.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test:store": "node ./scripts/test-store-regressions.mjs",
     "typecheck": "node ./scripts/clean-generated-configs.mjs && tsc -b",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/"

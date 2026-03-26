@@ -139,6 +139,37 @@ async def test_brief_start_streams_transient_status_change(bridge, thread_repo) 
 
 
 @pytest.mark.asyncio
+async def test_archive_session_marks_terminal_manifest(bridge, engine, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    manifest.status = "ended"
+    engine._session_store.write_manifest(manifest.session_id, manifest)
+
+    archived = await bridge.archive_session(manifest.session_id)
+
+    assert archived.archived_at is not None
+    thread = bridge.get_thread("auth")
+    assert thread["sessions"] == []
+    with_archived = bridge.get_thread("auth", include_archived=True)
+    assert with_archived["sessions"][0]["session_id"] == manifest.session_id
+
+
+@pytest.mark.asyncio
+async def test_restore_session_reappears_in_default_thread_listing(bridge, engine, thread_repo) -> None:
+    _create_thread(thread_repo, "auth", "Auth")
+    manifest = await bridge.create_session(primary_thread="auth")
+    manifest.status = "ended"
+    manifest.archived_at = "2026-03-26T15:00:00"
+    engine._session_store.write_manifest(manifest.session_id, manifest)
+
+    restored = await bridge.restore_session(manifest.session_id)
+
+    assert restored.archived_at is None
+    thread = bridge.get_thread("auth")
+    assert thread["sessions"][0]["session_id"] == manifest.session_id
+
+
+@pytest.mark.asyncio
 async def test_removed_scope_thread_no_longer_lists_session_even_if_touched(
     bridge,
     engine,

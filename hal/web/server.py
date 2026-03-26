@@ -60,6 +60,8 @@ class WebServer:
         self._app.router.add_post("/sessions/{session_id}/end", self._end_session)
         self._app.router.add_post("/sessions/{session_id}/scope", self._update_scope)
         self._app.router.add_post("/sessions/{session_id}/title", self._update_session_title)
+        self._app.router.add_post("/sessions/{session_id}/archive", self._archive_session)
+        self._app.router.add_post("/sessions/{session_id}/restore", self._restore_session)
         self._app.router.add_get(_WS_ROUTE, self._session_ws)
         self._app.router.add_get("/threads", self._list_threads)
         self._app.router.add_get("/threads/{slug}", self._get_thread)
@@ -154,7 +156,12 @@ class WebServer:
     async def _list_sessions(self, request: web.Request) -> web.Response:
         thread_slug = self._optional_string(request.query.get("thread_slug"))
         status = self._optional_string(request.query.get("status"))
-        sessions = self._bridge.list_sessions(thread_slug=thread_slug, status=status)
+        include_archived = self._parse_bool(request.query.get("include_archived"))
+        sessions = self._bridge.list_sessions(
+            thread_slug=thread_slug,
+            status=status,
+            include_archived=include_archived,
+        )
         return web.json_response(
             {"sessions": [serialize_manifest(session) for session in sessions]}
         )
@@ -220,6 +227,28 @@ class WebServer:
             raise web.HTTPBadRequest(text=str(exc)) from exc
         return web.json_response({"session": serialize_manifest(manifest)})
 
+    async def _archive_session(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        self._require_manifest(session_id)
+        try:
+            manifest = await self._bridge.archive_session(session_id)
+        except SessionBusyError as exc:
+            raise web.HTTPConflict(text=str(exc)) from exc
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        return web.json_response({"session": serialize_manifest(manifest)})
+
+    async def _restore_session(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["session_id"]
+        self._require_manifest(session_id)
+        try:
+            manifest = await self._bridge.restore_session(session_id)
+        except SessionBusyError as exc:
+            raise web.HTTPConflict(text=str(exc)) from exc
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=str(exc)) from exc
+        return web.json_response({"session": serialize_manifest(manifest)})
+
     async def _end_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["session_id"]
         self._require_manifest(session_id)
@@ -242,8 +271,9 @@ class WebServer:
 
     async def _get_thread(self, request: web.Request) -> web.Response:
         slug = request.match_info["slug"]
+        include_archived = self._parse_bool(request.query.get("include_archived"))
         try:
-            thread = self._bridge.get_thread(slug)
+            thread = self._bridge.get_thread(slug, include_archived=include_archived)
         except ValueError as exc:
             raise web.HTTPNotFound(text=str(exc)) from exc
         return web.json_response({"thread": thread})
@@ -356,6 +386,13 @@ class WebServer:
         except ValueError as exc:
             raise web.HTTPBadRequest(text="after_seq must be an integer") from exc
         return max(parsed, 0)
+
+    @staticmethod
+    def _parse_bool(value: str | None) -> bool:
+        if value is None:
+            return False
+        normalized = str(value).strip().lower()
+        return normalized in {"1", "true", "yes", "on"}
 
     def _require_manifest(self, session_id: str) -> SessionManifest:
         manifest = self._bridge.get_session(session_id)

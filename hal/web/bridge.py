@@ -99,9 +99,14 @@ class SessionBridge:
         *,
         thread_slug: str | None = None,
         status: str | None = None,
+        include_archived: bool = False,
     ) -> list[SessionManifest]:
         """Return persisted sessions, newest first."""
-        sessions = self._session_store.list_sessions(thread_slug=thread_slug, status=status)
+        sessions = self._session_store.list_sessions(
+            thread_slug=thread_slug,
+            status=status,
+            include_archived=include_archived,
+        )
         return list(reversed(sessions))
 
     def get_session(self, session_id: str) -> SessionManifest | None:
@@ -202,6 +207,34 @@ class SessionBridge:
             self._session_store.write_manifest(session_id, target)
             return target
 
+    async def archive_session(self, session_id: str) -> SessionManifest:
+        """Archive one terminal session so it disappears from default thread lists."""
+        async with self._session_lock(session_id):
+            manifest = self._require_session(session_id)
+            if manifest.status not in {"ended", "dropped"}:
+                raise ValueError(f"Session {session_id} is not archivable (status={manifest.status})")
+            if self._engine.is_session_active(session_id):
+                raise SessionBusyError(
+                    "Session is currently processing; archive it after the current turn."
+                )
+            archived = self._session_store.archive(session_id)
+            if archived is None:
+                raise ValueError(f"Unknown session_id: {session_id}")
+            return archived
+
+    async def restore_session(self, session_id: str) -> SessionManifest:
+        """Restore one archived session back into default thread lists."""
+        async with self._session_lock(session_id):
+            manifest = self._require_session(session_id)
+            if self._engine.is_session_active(session_id):
+                raise SessionBusyError(
+                    "Session is currently processing; restore it after the current turn."
+                )
+            restored = self._session_store.restore(session_id)
+            if restored is None:
+                raise ValueError(f"Unknown session_id: {session_id}")
+            return restored
+
     async def subscribe(self, session_id: str) -> SessionSubscription:
         """Attach a live event subscriber to an active in-memory session."""
         self._require_session(session_id)
@@ -241,11 +274,11 @@ class SessionBridge:
         )
         return summaries
 
-    def get_thread(self, slug: str) -> dict[str, Any]:
+    def get_thread(self, slug: str, *, include_archived: bool = False) -> dict[str, Any]:
         """Return thread detail, BRIEF.md, and currently mounted sessions."""
         entry = self._require_thread_entry(slug)
         brief = self._threads.read_state(slug) or ""
-        sessions = self.list_sessions(thread_slug=slug)
+        sessions = self.list_sessions(thread_slug=slug, include_archived=include_archived)
         counts = Counter(session.status for session in sessions)
         session_episode_refs = self._threads.collect_session_episode_refs(
             {session.session_id for session in sessions}
@@ -278,7 +311,7 @@ class SessionBridge:
 
     def _build_thread_session_counts(self) -> dict[str, Counter[str]]:
         counts: dict[str, Counter[str]] = defaultdict(Counter)
-        for manifest in self._session_store.list_sessions():
+        for manifest in self._session_store.list_sessions(include_archived=False):
             slugs = set(manifest.mounted_threads)
             if manifest.primary_thread:
                 slugs.add(manifest.primary_thread)

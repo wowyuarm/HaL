@@ -41,6 +41,8 @@ export default function App() {
   const socketState = useHalStore((s) => s.socketState)
   const creatingSession = useHalStore((s) => s.creatingSession)
   const updatingScopeSessionId = useHalStore((s) => s.updatingScopeSessionId)
+  const mutatingArchiveSessionId = useHalStore((s) => s.mutatingArchiveSessionId)
+  const showArchived = useHalStore((s) => s.showArchived)
   const lastError = useHalStore((s) => s.lastError)
   const reviewPanel = useHalStore((s) => s.reviewPanel)
 
@@ -54,9 +56,12 @@ export default function App() {
   const createSessionForThread = useHalStore((s) => s.createSessionForThread)
   const updateSessionScope = useHalStore((s) => s.updateSessionScope)
   const updateSessionTitle = useHalStore((s) => s.updateSessionTitle)
+  const archiveSession = useHalStore((s) => s.archiveSession)
+  const restoreSession = useHalStore((s) => s.restoreSession)
   const openEpisode = useHalStore((s) => s.openEpisode)
   const toggleBriefPanel = useHalStore((s) => s.toggleBriefPanel)
   const setError = useHalStore((s) => s.setError)
+  const setShowArchived = useHalStore((s) => s.setShowArchived)
 
   // Derived values
   const activeThread = activeThreadSlug ? (threadDetails[activeThreadSlug] ?? null) : null
@@ -84,7 +89,7 @@ export default function App() {
   useEffect(() => {
     if (!activeThreadSlug) return
     void loadThread(activeThreadSlug)
-  }, [activeThreadSlug, loadThread])
+  }, [activeThreadSlug, loadThread, showArchived])
 
   useEffect(() => {
     if (!selectedSession) return
@@ -201,6 +206,29 @@ export default function App() {
     return Boolean(manifest)
   }
 
+  const handleArchiveSession = async (sessionId: string): Promise<boolean> => {
+    setError(null)
+    const manifest = await archiveSession(sessionId)
+    if (!manifest) return false
+    if (activeThreadSlug) {
+      await loadThread(activeThreadSlug, { adoptSelection: false })
+    }
+    if (selectedSessionId === sessionId && !showArchived) {
+      selectSession(null)
+    }
+    return true
+  }
+
+  const handleRestoreSession = async (sessionId: string): Promise<boolean> => {
+    setError(null)
+    const manifest = await restoreSession(sessionId)
+    if (!manifest) return false
+    if (activeThreadSlug) {
+      await loadThread(activeThreadSlug, { adoptSelection: false })
+    }
+    return true
+  }
+
   const handleEndSessionFromThreadDetail = async (
     sessionId: string,
     reason: 'brief' | 'drop',
@@ -272,13 +300,18 @@ export default function App() {
                 <ThreadDetailPanel
                   thread={activeThread}
                   selectedSessionId={selectedSessionId}
+                  showArchived={showArchived}
                   onSelectSession={handleSelectSession}
                   onCreateSession={handleCreateSession}
                   onUpdateSessionTitle={handleUpdateSessionTitle}
                   onEndSession={handleEndSessionFromThreadDetail}
+                  onArchiveSession={handleArchiveSession}
+                  onRestoreSession={handleRestoreSession}
                   onPreviewEpisode={handlePreviewEpisode}
                   creatingSession={creatingSession}
+                  mutatingArchiveSessionId={mutatingArchiveSessionId}
                   onToggleBriefPanel={toggleBriefPanel}
+                  onToggleShowArchived={() => setShowArchived(!showArchived)}
                 />
               </div>
             )}

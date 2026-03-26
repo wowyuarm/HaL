@@ -12,6 +12,7 @@ from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.session_store import SessionStore
 from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
 
+
 # ---------------------------------------------------------------------------
 # SessionStore
 # ---------------------------------------------------------------------------
@@ -111,6 +112,37 @@ class TestSessionStore:
         results = store.list_sessions(thread_slug="auth")
         assert len(results) == 1
         assert results[0].session_id == "s_auth"
+
+    def test_list_sessions_excludes_archived_by_default(self, store: SessionStore) -> None:
+        store.create("s_ended")
+        store.write_manifest(
+            "s_ended",
+            SessionManifest(session_id="s_ended", status="ended", archived_at="2026-03-26T15:00:00"),
+        )
+
+        assert store.list_sessions() == []
+        included = store.list_sessions(include_archived=True)
+        assert len(included) == 1
+        assert included[0].session_id == "s_ended"
+
+    def test_archive_and_restore_terminal_session(self, store: SessionStore) -> None:
+        store.create("s_done")
+        store.write_manifest("s_done", SessionManifest(session_id="s_done", status="ended"))
+
+        archived = store.archive("s_done")
+        assert archived is not None
+        assert archived.archived_at is not None
+
+        restored = store.restore("s_done")
+        assert restored is not None
+        assert restored.archived_at is None
+
+    def test_archive_rejects_non_terminal_session(self, store: SessionStore) -> None:
+        store.create("s_live")
+        store.write_manifest("s_live", SessionManifest(session_id="s_live", status="active"))
+
+        with pytest.raises(ValueError, match="not archivable"):
+            store.archive("s_live")
 
     def test_list_sessions_ignores_touched_threads_for_thread_membership(
         self, store: SessionStore

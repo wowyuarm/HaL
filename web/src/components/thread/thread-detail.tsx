@@ -11,32 +11,42 @@ import { cn } from '@/lib/utils'
 interface ThreadDetailProps {
   thread: ThreadDetail | null
   selectedSessionId: string | null
+  showArchived: boolean
   onSelectSession: (sessionId: string) => void
   onCreateSession: () => void
   onToggleBriefPanel: () => void
+  onToggleShowArchived: () => void
   onUpdateSessionTitle: (
     sessionId: string,
     input: { title: string | null },
   ) => Promise<boolean> | boolean
   onEndSession: (sessionId: string, reason: 'brief' | 'drop') => Promise<boolean> | boolean
+  onArchiveSession: (sessionId: string) => Promise<boolean> | boolean
+  onRestoreSession: (sessionId: string) => Promise<boolean> | boolean
   onPreviewEpisode: (input: {
     threadSlug: string
     episodeRelPath: string
     episodeTitle: string
   }) => void
   creatingSession?: boolean
+  mutatingArchiveSessionId?: string | null
 }
 
 export function ThreadDetailPanel({
   thread,
   selectedSessionId,
+  showArchived,
   onSelectSession,
   onCreateSession,
   onToggleBriefPanel,
+  onToggleShowArchived,
   onUpdateSessionTitle,
   onEndSession,
+  onArchiveSession,
+  onRestoreSession,
   onPreviewEpisode,
   creatingSession = false,
+  mutatingArchiveSessionId = null,
 }: ThreadDetailProps) {
   if (!thread) {
     return (
@@ -82,14 +92,16 @@ export function ThreadDetailPanel({
               {thread.description || 'No description.'}
             </p>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onToggleBriefPanel}
-            className="shrink-0 self-start whitespace-nowrap"
-          >
-            Thread brief
-          </Button>
+          <div className="flex shrink-0 items-center gap-2 self-start whitespace-nowrap">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onToggleBriefPanel}
+              className="shrink-0 self-start whitespace-nowrap"
+            >
+              Thread brief
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -102,10 +114,15 @@ export function ThreadDetailPanel({
             selectedSessionId={selectedSessionId}
             onSelect={onSelectSession}
             onCreate={onCreateSession}
+            showArchived={showArchived}
+            onToggleShowArchived={onToggleShowArchived}
             onUpdateSessionTitle={onUpdateSessionTitle}
             onEndSession={onEndSession}
+            onArchiveSession={onArchiveSession}
+            onRestoreSession={onRestoreSession}
             onPreviewEpisode={onPreviewEpisode}
             creating={creatingSession}
+            mutatingArchiveSessionId={mutatingArchiveSessionId}
           />
         </div>
       </div>

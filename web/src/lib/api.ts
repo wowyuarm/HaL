@@ -29,9 +29,15 @@ export async function listThreads(): Promise<ThreadSummary[]> {
   return payload.threads
 }
 
-export async function getThread(slug: string): Promise<ThreadDetail> {
+export async function getThread(
+  slug: string,
+  input?: { includeArchived?: boolean },
+): Promise<ThreadDetail> {
+  const params = new URLSearchParams()
+  if (input?.includeArchived) params.set('include_archived', 'true')
+  const query = params.toString()
   const payload = await requestJson<{ thread: ThreadDetail }>(
-    `/threads/${encodeURIComponent(slug)}`,
+    `/threads/${encodeURIComponent(slug)}${query ? `?${query}` : ''}`,
   )
   return payload.thread
 }
@@ -56,6 +62,28 @@ export async function updateSessionTitle(
     {
       method: 'POST',
       body: JSON.stringify(input),
+    },
+  )
+  return payload.session
+}
+
+export async function archiveSession(sessionId: string): Promise<SessionManifest> {
+  const payload = await requestJson<{ session: SessionManifest }>(
+    `/sessions/${encodeURIComponent(sessionId)}/archive`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+  )
+  return payload.session
+}
+
+export async function restoreSession(sessionId: string): Promise<SessionManifest> {
+  const payload = await requestJson<{ session: SessionManifest }>(
+    `/sessions/${encodeURIComponent(sessionId)}/restore`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
     },
   )
   return payload.session

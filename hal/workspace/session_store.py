@@ -10,6 +10,7 @@ truth for UI reconstruction, brief input, and audit.
 from __future__ import annotations
 
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -68,6 +69,32 @@ class SessionStore:
         """Append one event row to the per-session working log."""
         append_jsonl_line(self.log_path(session_id), event.model_dump_json())
 
+    def archive(self, session_id: str) -> SessionManifest | None:
+        """Mark one terminal session archived and persist the manifest."""
+        manifest = self.read_manifest(session_id)
+        if manifest is None:
+            return None
+        if manifest.status not in {"ended", "dropped"}:
+            raise ValueError(
+                f"Session {session_id} is not archivable (status={manifest.status})"
+            )
+        if manifest.archived_at:
+            return manifest
+        manifest.archived_at = datetime.now().isoformat()
+        self.write_manifest(session_id, manifest)
+        return manifest
+
+    def restore(self, session_id: str) -> SessionManifest | None:
+        """Clear archive marker for one session and persist the manifest."""
+        manifest = self.read_manifest(session_id)
+        if manifest is None:
+            return None
+        if not manifest.archived_at:
+            return manifest
+        manifest.archived_at = None
+        self.write_manifest(session_id, manifest)
+        return manifest
+
     def delete(self, session_id: str) -> None:
         """Delete an entire session directory tree."""
         path = self.session_dir(session_id)
@@ -105,6 +132,7 @@ class SessionStore:
         *,
         thread_slug: str | None = None,
         status: str | None = None,
+        include_archived: bool = False,
     ) -> list[SessionManifest]:
         """List session manifests, optionally filtered by current thread scope or status.
 
@@ -120,6 +148,8 @@ class SessionStore:
                 continue
             manifest = self.read_manifest(entry.name)
             if manifest is None:
+                continue
+            if not include_archived and manifest.archived_at is not None:
                 continue
             if status is not None and manifest.status != status:
                 continue

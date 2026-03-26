@@ -32,6 +32,7 @@ export interface SessionManifest {
   touched_threads: string[]
   turn_count: number
   last_event_seq: number
+  archived_at?: string | null
 }
 
 /** Episode reference returned in a thread view for one session. */

@@ -1,10 +1,12 @@
 import { create } from 'zustand'
 
 import {
+  archiveSession,
   createSession,
   getSessionEvents,
   getThread,
   listThreads,
+  restoreSession,
   updateSessionTitle,
   updateSessionScope,
 } from '@/lib/api'
@@ -42,6 +44,8 @@ interface HalStore {
   loadingSessionId: string | null
   creatingSession: boolean
   updatingScopeSessionId: string | null
+  mutatingArchiveSessionId: string | null
+  showArchived: boolean
   activeThreadRequestId: number
   lastError: string | null
 
@@ -57,6 +61,7 @@ interface HalStore {
   }) => void
   setSocketState: (state: SocketState) => void
   setError: (message: string | null) => void
+  setShowArchived: (value: boolean) => void
 
   loadThreads: () => Promise<void>
   loadThread: (
@@ -73,6 +78,8 @@ interface HalStore {
     sessionId: string,
     input: { addThreads?: string[]; removeThreads?: string[] },
   ) => Promise<SessionManifest | null>
+  archiveSession: (sessionId: string) => Promise<SessionManifest | null>
+  restoreSession: (sessionId: string) => Promise<SessionManifest | null>
   loadSessionEvents: (sessionId: string) => Promise<void>
   applySessionManifest: (manifest: SessionManifest) => void
   applySessionSnapshot: (manifest: SessionManifest, events: SessionEvent[]) => void
@@ -181,11 +188,13 @@ function sessionBelongsToThread(manifest: SessionManifest, slug: string): boolea
 function reconcileManifestInThreadDetails(
   details: Record<string, ThreadDetail>,
   manifest: SessionManifest,
+  options: { showArchived: boolean },
 ): Record<string, ThreadDetail> {
   const nextDetails: Record<string, ThreadDetail> = {}
   for (const [slug, detail] of Object.entries(details)) {
     const hasSession = detail.sessions.some((session) => session.session_id === manifest.session_id)
-    const shouldInclude = sessionBelongsToThread(manifest, slug)
+    const belongsToThread = sessionBelongsToThread(manifest, slug)
+    const shouldInclude = belongsToThread && (options.showArchived || !manifest.archived_at)
 
     if (!hasSession && !shouldInclude) {
       nextDetails[slug] = detail
@@ -230,12 +239,16 @@ function reconcileManifestInThreadSummaries(
   threads: ThreadSummary[],
   previousManifest: SessionManifest | undefined,
   nextManifest: SessionManifest,
+  options: { showArchived: boolean },
 ): ThreadSummary[] {
   return threads.map((thread) => {
     const belongedBefore = previousManifest
-      ? sessionBelongsToThread(previousManifest, thread.slug)
+      ? sessionBelongsToThread(previousManifest, thread.slug) &&
+        (options.showArchived || !previousManifest.archived_at)
       : false
-    const belongsNow = sessionBelongsToThread(nextManifest, thread.slug)
+    const belongsNow =
+      sessionBelongsToThread(nextManifest, thread.slug) &&
+      (options.showArchived || !nextManifest.archived_at)
 
     if (!belongedBefore && !belongsNow) return thread
 
@@ -265,9 +278,11 @@ function countSessions(sessions: SessionManifest[]): Partial<Record<SessionStatu
 function syncThreadSummaries(
   threads: ThreadSummary[],
   details: Record<string, ThreadDetail>,
+  options: { includeDetailSummary: boolean },
 ): ThreadSummary[] {
   return sortThreadSummaries(
     threads.map((thread) => {
+      if (!options.includeDetailSummary) return thread
       const detail = details[thread.slug]
       return detail
         ? {
@@ -288,17 +303,23 @@ function normalizeThreadDetail(detail: ThreadDetail): ThreadDetail {
 }
 
 function mergeManifestIntoState(
-  state: Pick<HalStore, 'threads' | 'threadDetails' | 'sessionManifests'>,
+  state: Pick<HalStore, 'threads' | 'threadDetails' | 'sessionManifests' | 'showArchived'>,
   manifest: SessionManifest,
 ): Pick<HalStore, 'threads' | 'threadDetails' | 'sessionManifests'> {
   const previousManifest = state.sessionManifests[manifest.session_id]
   const sessionManifests = upsertManifest(state.sessionManifests, manifest)
-  const baseThreads = reconcileManifestInThreadSummaries(state.threads, previousManifest, manifest)
-  const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest)
+  const baseThreads = reconcileManifestInThreadSummaries(state.threads, previousManifest, manifest, {
+    showArchived: state.showArchived,
+  })
+  const threadDetails = reconcileManifestInThreadDetails(state.threadDetails, manifest, {
+    showArchived: state.showArchived,
+  })
   return {
     sessionManifests,
     threadDetails,
-    threads: syncThreadSummaries(baseThreads, threadDetails),
+    threads: syncThreadSummaries(baseThreads, threadDetails, {
+      includeDetailSummary: !state.showArchived,
+    }),
   }
 }
 
@@ -318,6 +339,8 @@ export const useHalStore = create<HalStore>((set, get) => ({
   loadingSessionId: null,
   creatingSession: false,
   updatingScopeSessionId: null,
+  mutatingArchiveSessionId: null,
+  showArchived: false,
   activeThreadRequestId: 0,
   lastError: null,
 
@@ -351,6 +374,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
     }),
   setSocketState: (state) => set({ socketState: state }),
   setError: (message) => set({ lastError: message }),
+  setShowArchived: (value) => set({ showArchived: value }),
 
   loadThreads: async () => {
     set({ loadingThreads: true, lastError: null })
@@ -375,18 +399,29 @@ export const useHalStore = create<HalStore>((set, get) => ({
   loadThread: async (slug, options) => {
     const adoptSelection = options?.adoptSelection ?? true
     const focusSessionId = options?.focusSessionId ?? null
+    const includeArchived = get().showArchived
     const requestId = adoptSelection ? ++nextThreadLoadRequestId : 0
     if (adoptSelection) {
       set({ loadingThreadSlug: slug, activeThreadRequestId: requestId, lastError: null })
     }
     try {
-      const detail = normalizeThreadDetail(await getThread(slug))
+      const detail = normalizeThreadDetail(await getThread(slug, { includeArchived }))
       set((state) => {
+        const staleArchivedView = state.showArchived !== includeArchived
+        const staleSelection =
+          adoptSelection &&
+          (state.activeThreadSlug !== slug || state.activeThreadRequestId !== requestId)
+        if (staleArchivedView || staleSelection) {
+          return {}
+        }
+
         const manifests = { ...state.sessionManifests }
         for (const session of detail.sessions) manifests[session.session_id] = session
 
         const nextDetails = { ...state.threadDetails, [slug]: detail }
-        const nextThreads = syncThreadSummaries(state.threads, nextDetails)
+        const nextThreads = syncThreadSummaries(state.threads, nextDetails, {
+          includeDetailSummary: !includeArchived,
+        })
         const nextState: Partial<HalStore> = {
           threadDetails: nextDetails,
           sessionManifests: manifests,
@@ -494,6 +529,44 @@ export const useHalStore = create<HalStore>((set, get) => ({
       set({
         updatingScopeSessionId: null,
         lastError: error instanceof Error ? error.message : 'Failed to update session scope.',
+      })
+      return null
+    }
+  },
+
+  archiveSession: async (sessionId) => {
+    set({ mutatingArchiveSessionId: sessionId, lastError: null })
+    try {
+      const manifest = await archiveSession(sessionId)
+      set((state) => ({
+        ...mergeManifestIntoState(state, manifest),
+        mutatingArchiveSessionId: null,
+      }))
+      await get().loadThreads()
+      return manifest
+    } catch (error) {
+      set({
+        mutatingArchiveSessionId: null,
+        lastError: error instanceof Error ? error.message : 'Failed to archive session.',
+      })
+      return null
+    }
+  },
+
+  restoreSession: async (sessionId) => {
+    set({ mutatingArchiveSessionId: sessionId, lastError: null })
+    try {
+      const manifest = await restoreSession(sessionId)
+      set((state) => ({
+        ...mergeManifestIntoState(state, manifest),
+        mutatingArchiveSessionId: null,
+      }))
+      await get().loadThreads()
+      return manifest
+    } catch (error) {
+      set({
+        mutatingArchiveSessionId: null,
+        lastError: error instanceof Error ? error.message : 'Failed to restore session.',
       })
       return null
     }

@@ -65,6 +65,7 @@ class SessionManifest(BaseModel):
     turn_count: int = 0
     last_event_seq: int = 0
     brief_prompt: str | None = None
+    archived_at: str | None = None
 
 
 # ---------------------------------------------------------------------------

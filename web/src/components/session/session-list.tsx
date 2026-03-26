@@ -25,19 +25,24 @@ interface SessionListProps {
   sessions: SessionManifest[]
   episodeRefs?: Record<string, ThreadEpisodeRef>
   selectedSessionId: string | null
+  showArchived: boolean
   onSelect: (sessionId: string) => void
   onCreate: () => void
+  onToggleShowArchived: () => void
   onUpdateSessionTitle: (
     sessionId: string,
     input: { title: string | null },
   ) => Promise<boolean> | boolean
   onEndSession: (sessionId: string, reason: 'brief' | 'drop') => Promise<boolean> | boolean
+  onArchiveSession: (sessionId: string) => Promise<boolean> | boolean
+  onRestoreSession: (sessionId: string) => Promise<boolean> | boolean
   onPreviewEpisode: (input: {
     threadSlug: string
     episodeRelPath: string
     episodeTitle: string
   }) => void
   creating?: boolean
+  mutatingArchiveSessionId?: string | null
 }
 
 type SessionGroupId = 'active' | 'briefed' | 'dropped'
@@ -81,12 +86,17 @@ export function SessionList({
   sessions,
   episodeRefs = {},
   selectedSessionId,
+  showArchived,
   onSelect,
   onCreate,
+  onToggleShowArchived,
   onUpdateSessionTitle,
   onEndSession,
+  onArchiveSession,
+  onRestoreSession,
   onPreviewEpisode,
   creating = false,
+  mutatingArchiveSessionId = null,
 }: SessionListProps) {
   const [openGroups, setOpenGroups] =
     useState<Record<SessionGroupId, boolean>>(DEFAULT_GROUP_OPEN_STATE)
@@ -161,9 +171,14 @@ export function SessionList({
     <section className="flex min-h-0 flex-1 flex-col">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="hal-rule-label">Sessions</p>
-        <Button variant="primary" size="sm" onClick={onCreate} disabled={creating}>
-          {creating ? 'Creating...' : 'New Session'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant={showArchived ? 'primary' : 'secondary'} size="sm" onClick={onToggleShowArchived}>
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </Button>
+          <Button variant="primary" size="sm" onClick={onCreate} disabled={creating}>
+            {creating ? 'Creating...' : 'New Session'}
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -236,7 +251,10 @@ export function SessionList({
                           const title = displaySessionTitle(session)
                           const episodeRef = episodeRefs[session.session_id] ?? null
                           const canEndSession = session.status === 'active'
+                          const canArchive = !session.archived_at && (session.status === 'ended' || session.status === 'dropped')
+                          const canRestore = Boolean(session.archived_at)
                           const sessionEnding = endingSessionId === session.session_id
+                          const archiveMutating = mutatingArchiveSessionId === session.session_id
                           const scopeThreads = new Set(session.mounted_threads)
                           if (session.primary_thread) {
                             scopeThreads.add(session.primary_thread)
@@ -273,6 +291,7 @@ export function SessionList({
                                   isEditing || isSelected
                                     ? 'border-accent bg-hal-selection'
                                     : 'border-transparent hover:bg-hal-hover',
+                                  session.archived_at ? 'opacity-75' : null,
                                 )}
                               >
                                 <div className="min-w-0">
@@ -317,6 +336,11 @@ export function SessionList({
                                       {session.turn_count} turn
                                       {session.turn_count === 1 ? '' : 's'}
                                     </span>
+                                    {session.archived_at ? (
+                                      <span className="font-mono text-caption text-hal-muted">
+                                        archived {formatTimestamp(session.archived_at)}
+                                      </span>
+                                    ) : null}
                                     {otherThreads.map((slug) => (
                                       <span
                                         key={slug}
@@ -388,7 +412,7 @@ export function SessionList({
                                           size="icon"
                                           className="pointer-events-auto h-7 w-7 rounded-md"
                                           aria-label="Session actions"
-                                          disabled={sessionEnding}
+                                          disabled={sessionEnding || archiveMutating}
                                         >
                                           <MoreHorizontal className="h-4 w-4" />
                                         </Button>
@@ -397,6 +421,32 @@ export function SessionList({
                                         <DropdownMenuItem onSelect={() => beginEditing(session)}>
                                           Edit name
                                         </DropdownMenuItem>
+                                        {canRestore ? (
+                                          <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                              onSelect={() => {
+                                                void onRestoreSession(session.session_id)
+                                              }}
+                                              disabled={archiveMutating}
+                                            >
+                                              Restore
+                                            </DropdownMenuItem>
+                                          </>
+                                        ) : null}
+                                        {canArchive ? (
+                                          <>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                              onSelect={() => {
+                                                void onArchiveSession(session.session_id)
+                                              }}
+                                              disabled={archiveMutating}
+                                            >
+                                              Archive
+                                            </DropdownMenuItem>
+                                          </>
+                                        ) : null}
                                         {canEndSession ? (
                                           <>
                                             <DropdownMenuSeparator />
