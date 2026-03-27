@@ -3,9 +3,31 @@ import type { SessionEvent } from '@/lib/types'
 
 export type ProcessTone = 'live' | 'success' | 'warning' | 'danger' | 'muted'
 export type ProcessEntryStatus = 'running' | 'completed' | 'failed'
+export type ProcessCountKey =
+  | 'search'
+  | 'fetch'
+  | 'recall'
+  | 'read'
+  | 'edit'
+  | 'command'
+  | 'subtask'
+
+type ProcessCounts = Record<ProcessCountKey, number>
+
+const PROCESS_COUNT_ORDER: ProcessCountKey[] = [
+  'search',
+  'fetch',
+  'recall',
+  'read',
+  'edit',
+  'command',
+  'subtask',
+]
 
 export interface ProcessPreview {
   summaryText: string
+  hintText: string | null
+  countSummaryText: string | null
   liveText: string | null
   countText: string
   tone: ProcessTone
@@ -191,7 +213,7 @@ export function buildTurnProcessView(
   return {
     entries,
     rawEvents,
-    preview: buildPreview(entries, rawEvents.length, turnState),
+    preview: buildPreview(entries, rawEvents, turnState),
   }
 }
 
@@ -465,7 +487,7 @@ function buildGroupedSubtaskNote(items: PendingSubtaskResult[]): ProcessNote | n
 
 function buildPreview(
   entries: ProcessEntry[],
-  totalRecords: number,
+  rawEvents: SessionEvent[],
   turnState: TurnState,
 ): ProcessPreview {
   const steps = entries.filter(
@@ -476,44 +498,57 @@ function buildPreview(
   )
   const entryCount = steps.length + notes.length
   const textOnlyTurn = steps.length === 1 && steps[0]?.step.items.length === 0 && notes.length === 0
-  const counts = summarizeProcessCounts(steps, notes.length)
-  const fragments = []
-  if (counts.read > 0)
-    fragments.push(`${formatCount(counts.read)} read${counts.read === 1 ? '' : 's'}`)
-  if (counts.edit > 0)
-    fragments.push(`${formatCount(counts.edit)} edit${counts.edit === 1 ? '' : 's'}`)
-  if (counts.exec > 0)
-    fragments.push(`${formatCount(counts.exec)} command${counts.exec === 1 ? '' : 's'}`)
-  if (counts.spawn > 0)
-    fragments.push(`${formatCount(counts.spawn)} subtask${counts.spawn === 1 ? '' : 's'}`)
-  if (notes.length > 0)
-    fragments.push(`${formatCount(notes.length)} note${notes.length === 1 ? '' : 's'}`)
+  const counts = summarizeProcessCounts(steps)
+  const countSummaryText = buildCountSummaryText(counts)
+  const directReplyTurn = isDirectReplyTurn(rawEvents, countSummaryText, turnState)
 
-  const summaryText =
-    fragments.length > 0
-      ? joinSummary(fragments)
-      : textOnlyTurn
-        ? turnState === 'failed'
-          ? 'stopped before settling'
-          : 'direct reply'
-        : steps.length > 0
-          ? `${formatCount(steps.length)} grouped step${steps.length === 1 ? '' : 's'}`
+  const summaryText = countSummaryText
+    ? countSummaryText
+    : directReplyTurn || textOnlyTurn
+      ? turnState === 'failed'
+        ? 'stopped before settling'
+        : 'replied directly'
+      : steps.length > 0
+        ? `${formatCount(steps.length)} grouped step${steps.length === 1 ? '' : 's'}`
+        : notes.length > 0
+          ? `${formatCount(notes.length)} note${notes.length === 1 ? '' : 's'}`
           : turnState === 'failed'
             ? 'stopped on an error'
-            : 'direct reply'
+            : 'replied directly'
 
   return {
     summaryText,
-    liveText: buildLiveText(steps, notes.length, turnState),
+    hintText: buildHintText(steps, notes.length, turnState),
+    countSummaryText,
+    liveText: buildHintText(steps, notes.length, turnState),
     countText: `${formatCount(entryCount)}`,
     tone: turnState === 'failed' ? 'danger' : turnState === 'running' ? 'live' : 'muted',
     stepCount: steps.length,
     noteCount: notes.length,
-    totalRecords,
+    totalRecords: rawEvents.length,
   }
 }
 
-function buildLiveText(
+function isDirectReplyTurn(
+  rawEvents: SessionEvent[],
+  countSummaryText: string | null,
+  turnState: TurnState,
+): boolean {
+  if (turnState === 'failed') return false
+  if (countSummaryText) return false
+
+  const hasAssistantOutput = rawEvents.some((event) => event.type === 'assistant.message_completed')
+  const hasToolCall = rawEvents.some(
+    (event) =>
+      event.type === 'tool.call_started' ||
+      event.type === 'tool.call_completed' ||
+      event.type === 'tool.call_failed',
+  )
+
+  return hasAssistantOutput && !hasToolCall
+}
+
+function buildHintText(
   steps: Array<{ kind: 'step'; step: ProcessStep }>,
   noteCount: number,
   turnState: TurnState,
@@ -536,28 +571,12 @@ function isCountLikeProcessTitle(text: string): boolean {
   return /^\d+\s/.test(text.trim())
 }
 
-function summarizeProcessCounts(
-  steps: Array<{ kind: 'step'; step: ProcessStep }>,
-  noteCount: number,
-): { read: number; edit: number; exec: number; spawn: number; other: number; notes: number } {
-  const counts = { read: 0, edit: 0, exec: 0, spawn: 0, other: 0, notes: noteCount }
+function summarizeProcessCounts(steps: Array<{ kind: 'step'; step: ProcessStep }>): ProcessCounts {
+  const counts = createEmptyProcessCounts()
   for (const entry of steps) {
-    for (const item of uniqueDisplayItems(entry.step.items)) {
-      if (item.toolName === 'fs') {
-        if (item.label.startsWith('Read') || item.label.startsWith('Inspect')) {
-          counts.read += 1
-        } else {
-          counts.edit += 1
-        }
-      } else if (item.toolName === 'exec') {
-        counts.exec += 1
-      } else if (item.toolName === 'spawn') {
-        counts.spawn += 1
-      } else {
-        counts.other += 1
-      }
-    }
+    mergeProcessCounts(counts, summarizeProcessItemCounts(entry.step.items))
   }
+
   return counts
 }
 
@@ -569,22 +588,10 @@ function summarizeStepTitle(items: ProcessToolItem[]): string {
   const failed = displayItems.find((item) => item.status === 'failed')
   if (failed) return failed.label
 
-  const pieces: string[] = []
-  const readCount = displayItems.filter(
-    (item) => item.label.startsWith('Read') || item.label.startsWith('Inspect'),
-  ).length
-  const editCount = displayItems.filter(
-    (item) => item.label.startsWith('Edit') || item.label.startsWith('Write'),
-  ).length
-  const execCount = displayItems.filter((item) => item.toolName === 'exec').length
-  const spawnCount = displayItems.filter((item) => item.toolName === 'spawn').length
-
-  if (readCount > 0) pieces.push(`${formatCount(readCount)} read${readCount === 1 ? '' : 's'}`)
-  if (editCount > 0) pieces.push(`${formatCount(editCount)} edit${editCount === 1 ? '' : 's'}`)
-  if (execCount > 0) pieces.push(`${formatCount(execCount)} command${execCount === 1 ? '' : 's'}`)
-  if (spawnCount > 0)
-    pieces.push(`${formatCount(spawnCount)} subtask${spawnCount === 1 ? '' : 's'}`)
-  return pieces.length > 0 ? joinSummary(pieces) : `${displayItems.length} actions`
+  return (
+    buildCountSummaryText(summarizeProcessItemCounts(displayItems)) ??
+    `${displayItems.length} actions`
+  )
 }
 
 function resolveStepStatus(items: ProcessToolItem[], turnState: TurnState): ProcessEntryStatus {
@@ -618,6 +625,11 @@ function summarizeToolLabel(toolName: string, args: Record<string, unknown> | nu
   if (toolName === 'spawn') {
     const label = compactText(getString(args ?? {}, 'label') ?? getString(args ?? {}, 'task'))
     return label ? `Delegate subtask · ${label}` : 'Delegate subtask'
+  }
+
+  if (toolName === 'recall') {
+    const query = compactText(getString(args ?? {}, 'query'), 52)
+    return query ? `Recall ${query}` : 'Recall memory'
   }
 
   if (toolName === 'web_search') {
@@ -670,6 +682,10 @@ function summarizeToolDetail(
     return null
   }
 
+  if (toolName === 'recall') {
+    return null
+  }
+
   if (toolName === 'web_search') {
     return null
   }
@@ -697,9 +713,80 @@ function allowInlineResultPreview(toolName: string, args: Record<string, unknown
   if (toolName === 'fs') return false
   if (toolName === 'exec') return false
   if (toolName === 'spawn') return false
+  if (toolName === 'recall') return false
   if (toolName === 'web_search') return false
   if (toolName === 'web_fetch') return false
   return true
+}
+
+function createEmptyProcessCounts(): ProcessCounts {
+  return {
+    search: 0,
+    fetch: 0,
+    recall: 0,
+    read: 0,
+    edit: 0,
+    command: 0,
+    subtask: 0,
+  }
+}
+
+function summarizeProcessItemCounts(items: ProcessToolItem[]): ProcessCounts {
+  const counts = createEmptyProcessCounts()
+
+  for (const item of uniqueDisplayItems(items)) {
+    const bucket = classifyProcessItem(item)
+    if (!bucket) continue
+    counts[bucket] += 1
+  }
+
+  return counts
+}
+
+function mergeProcessCounts(target: ProcessCounts, incoming: ProcessCounts): void {
+  for (const key of PROCESS_COUNT_ORDER) {
+    target[key] += incoming[key]
+  }
+}
+
+function buildCountSummaryText(counts: ProcessCounts): string | null {
+  const fragments = PROCESS_COUNT_ORDER.flatMap((key) =>
+    counts[key] > 0 ? [formatCountFragment(key, counts[key])] : [],
+  )
+  return fragments.length > 0 ? joinSummary(fragments) : null
+}
+
+function classifyProcessItem(item: ProcessToolItem): ProcessCountKey | null {
+  if (item.toolName === 'fs') {
+    return item.label.startsWith('Read') || item.label.startsWith('Inspect') ? 'read' : 'edit'
+  }
+  if (item.toolName === 'exec') return 'command'
+  if (item.toolName === 'spawn') return 'subtask'
+  if (item.toolName === 'recall') return 'recall'
+  if (item.toolName === 'web_search') return 'search'
+  if (item.toolName === 'web_fetch') return 'fetch'
+  return null
+}
+
+function formatCountFragment(key: ProcessCountKey, count: number): string {
+  const amount = formatCount(count)
+
+  switch (key) {
+    case 'search':
+      return `${amount} ${count === 1 ? 'search' : 'searches'}`
+    case 'fetch':
+      return `${amount} ${count === 1 ? 'fetch' : 'fetches'}`
+    case 'recall':
+      return `${amount} ${count === 1 ? 'recall' : 'recalls'}`
+    case 'read':
+      return `${amount} ${count === 1 ? 'read' : 'reads'}`
+    case 'edit':
+      return `${amount} ${count === 1 ? 'edit' : 'edits'}`
+    case 'command':
+      return `${amount} ${count === 1 ? 'command' : 'commands'}`
+    case 'subtask':
+      return `${amount} ${count === 1 ? 'subtask' : 'subtasks'}`
+  }
 }
 
 function mergeSubtaskResultIntoStep(step: MutableStep, event: SessionEvent): boolean {

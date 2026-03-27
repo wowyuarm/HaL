@@ -36,9 +36,16 @@ export function HalAssistantMessage() {
   const processPreview = custom?.processPreview
   const processOpen = processPanel?.kind === 'process' && processPanel.turnId === custom?.turnId
   const directOnlyProcess =
-    processPreview?.summaryText === 'direct reply' &&
+    processPreview?.summaryText === 'replied directly' &&
     processPreview.stepCount === 1 &&
     processPreview.noteCount === 0
+  const processAriaLabel = processPreview
+    ? buildProcessAriaLabel(
+        processPreview.hintText,
+        processPreview.countSummaryText,
+        processPreview.summaryText,
+      )
+    : null
 
   // Command responses: compact inline row, no bubble.
   if (isCommand) {
@@ -73,9 +80,9 @@ export function HalAssistantMessage() {
         <button
           type="button"
           onClick={() => openProcessPanel(custom.turnId!)}
-          aria-label={`Turn process: ${processPreview.summaryText}`}
+          aria-label={`Turn process: ${processAriaLabel ?? processPreview.summaryText}`}
           className={cn(
-            "group relative isolate mb-1 flex w-full items-center gap-2 py-1 pr-1.5 text-left transition-all duration-fast ease-standard before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:content-[''] before:transition-all before:duration-fast before:ease-standard",
+            "group relative isolate mb-1 flex w-full items-start gap-2 py-1.5 pr-1.5 text-left transition-all duration-fast ease-standard before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:transition-all before:duration-fast before:ease-standard before:content-['']",
             processOpen
               ? 'before:-inset-x-0.5 before:-inset-y-0.5 before:rounded-xl before:bg-hal-hover'
               : directOnlyProcess
@@ -85,7 +92,7 @@ export function HalAssistantMessage() {
         >
           <span
             className={cn(
-              'relative z-10 h-4 w-[2px] shrink-0 rounded-full transition-colors duration-fast ease-standard',
+              'relative z-10 h-4 w-[2px] shrink-0 self-center rounded-full transition-colors duration-fast ease-standard',
               processPreview.tone === 'danger'
                 ? 'bg-danger'
                 : processOpen
@@ -94,26 +101,43 @@ export function HalAssistantMessage() {
             )}
           />
           <span className="relative z-10 flex min-w-0 flex-1 items-center gap-2">
-            {processPreview.liveText ? (
-              <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
+            {processPreview.hintText ? (
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
+                <span className="truncate text-meta leading-5 text-hal-primary">
+                  {processPreview.hintText}
+                </span>
+              </span>
+            ) : !processPreview.countSummaryText ? (
+              <span
+                className={cn(
+                  'block min-w-0 whitespace-normal break-words text-meta leading-5',
+                  processPreview.tone === 'danger' ? 'text-danger' : 'text-hal-muted',
+                )}
+              >
+                {processPreview.summaryText}
+              </span>
             ) : null}
-            <span
-              className={cn(
-                'truncate text-meta',
-                processPreview.tone === 'danger'
-                  ? 'text-danger'
-                  : processPreview.liveText
-                    ? 'text-hal-primary'
-                    : 'text-hal-muted',
-              )}
-            >
-              {processPreview.liveText ?? processPreview.summaryText}
-            </span>
+            {processPreview.countSummaryText ? (
+              <>
+                {processPreview.hintText ? (
+                  <span className="shrink-0 text-hal-muted">·</span>
+                ) : null}
+                <span
+                  className={cn(
+                    'shrink-0 text-meta leading-5',
+                    processPreview.tone === 'danger' ? 'text-danger' : 'text-hal-muted',
+                  )}
+                >
+                  {processPreview.countSummaryText}
+                </span>
+              </>
+            ) : null}
           </span>
           {!directOnlyProcess && (
             <ChevronRight
               className={cn(
-                'relative z-10 h-3 w-3 shrink-0 text-hal-muted transition-all duration-fast ease-standard',
+                'relative z-10 h-3 w-3 shrink-0 self-center text-hal-muted transition-all duration-fast ease-standard',
                 processOpen ? 'rotate-90 opacity-60' : 'opacity-0 group-hover:opacity-50',
               )}
             />
@@ -172,6 +196,16 @@ function extractJsonMessage(text: string): string | null {
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 3)}...`
+}
+
+function buildProcessAriaLabel(
+  hintText: string | null,
+  countSummaryText: string | null,
+  summaryText: string,
+): string {
+  if (hintText && countSummaryText) return `${hintText}. ${countSummaryText}.`
+  if (hintText) return hintText
+  return countSummaryText ?? summaryText
 }
 
 const ASSISTANT_CONTENT_COMPONENTS = {

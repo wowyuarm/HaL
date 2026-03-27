@@ -36,24 +36,40 @@ export function ProcessRail() {
       <div className="flex shrink-0 flex-col border-b border-subtle px-4 py-[8.5px] md:px-5">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {processView.preview.liveText ? (
-              <>
-                <p className="flex items-center gap-2 text-meta font-medium text-hal-primary">
-                  <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
-                  <span className="truncate">{processView.preview.liveText}</span>
-                </p>
-                <p className="mt-0.5 truncate text-caption text-hal-muted">
-                  {processView.preview.summaryText}
-                </p>
-              </>
+            {processView.preview.countSummaryText || processView.preview.hintText ? (
+              <div className="flex min-w-0 items-center gap-2">
+                {processView.preview.hintText ? (
+                  <>
+                    <p className="flex min-w-0 items-center gap-2 text-caption text-hal-muted">
+                      <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
+                      <span className="truncate leading-5">{processView.preview.hintText}</span>
+                    </p>
+                  </>
+                ) : null}
+                {processView.preview.countSummaryText ? (
+                  <>
+                    {processView.preview.hintText ? (
+                      <span className="shrink-0 text-hal-muted">·</span>
+                    ) : null}
+                    <p
+                      className={cn(
+                        'shrink-0 text-meta font-medium leading-5',
+                        processView.preview.tone === 'danger' ? 'text-danger' : 'text-hal-primary',
+                      )}
+                    >
+                      {processView.preview.countSummaryText}
+                    </p>
+                  </>
+                ) : null}
+              </div>
             ) : (
               <p
                 className={cn(
-                  'truncate text-meta font-medium',
+                  'whitespace-normal break-words text-meta font-medium leading-5',
                   processView.preview.tone === 'danger' ? 'text-danger' : 'text-hal-primary',
                 )}
               >
-                {processView.preview.summaryText}
+                {processView.preview.countSummaryText ?? processView.preview.summaryText}
               </p>
             )}
           </div>
@@ -67,7 +83,7 @@ export function ProcessRail() {
           </button>
         </div>
         {scopeThreads.length > 0 && (
-          <p className="mt-1.5 truncate text-caption text-hal-muted">
+          <p className="mt-1.5 whitespace-normal break-words text-caption leading-5 text-hal-muted">
             {scopeThreads.join(' · ')}
           </p>
         )}
