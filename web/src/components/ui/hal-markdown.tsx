@@ -17,8 +17,23 @@ import { cn } from '@/lib/utils'
 type HalMarkdownTone = 'conversation' | 'brief'
 
 const PROTECTED_MARKDOWN_SEGMENT_RE = /(```[\s\S]*?```|`[^`\n]*`)/g
-const CJK_OPEN_PUNCTUATION = '“‘「『《〈【（〔［｛'
-const CJK_CLOSE_PUNCTUATION = '：；，。！？、…）】」』》〉”’〕］｝'
+const INLINE_LINK_RE = /\[([^\]]+)\]\(([^)]+)\)/g
+const INLINE_CODE_RE = /(`+)(.*?)\1/g
+const INLINE_STRONG_RE = /(\*\*|__)([\s\S]+?)\1/g
+const INLINE_EM_STAR_RE = /(^|[^*])\*(\S(?:[\s\S]*?\S)?)\*(?!\*)/g
+const INLINE_EM_UNDERSCORE_RE = /(^|[^_])_(\S(?:[\s\S]*?\S)?)_(?!_)/g
+const CJK_EDGE_PUNCTUATION = '：；，。！？、…'
+const ASCII_EDGE_PUNCTUATION = ':;,.!?'
+const EDGE_PUNCTUATION_CLASS = escapeForCharClass(
+  `${CJK_EDGE_PUNCTUATION}${ASCII_EDGE_PUNCTUATION}`,
+)
+const CONTEXT_BOUNDARY_CLASS = '\\s\\p{P}'
+const CONTEXT_BOUNDARY_CHAR_RE = new RegExp(`^[${CONTEXT_BOUNDARY_CLASS}]$`, 'u')
+const SAFE_STRONG_SEGMENT_RE = /(\*\*|__)(?=\S)([\s\S]*?\S)\1/g
+const PROTECTED_STRONG_TOKEN_PREFIX = '\u0000HAL_MD_STRONG_'
+const PROTECTED_STRONG_TOKEN_SUFFIX = '\u0000'
+const EDGE_PUNCTUATION_AT_START_RE = new RegExp(`^[${EDGE_PUNCTUATION_CLASS}]`, 'u')
+const EDGE_PUNCTUATION_AT_END_RE = new RegExp(`[${EDGE_PUNCTUATION_CLASS}]$`, 'u')
 
 interface HalMarkdownProps {
   children: string
@@ -54,34 +69,55 @@ export function HalMarkdown({
   )
 }
 
-function normalizeMarkdownEmphasis(source: string): string {
+export function normalizeMarkdownEmphasis(source: string): string {
   return source
     .split(PROTECTED_MARKDOWN_SEGMENT_RE)
     .map((segment, index) => (index % 2 === 1 ? segment : normalizeEmphasisInTextSegment(segment)))
     .join('')
 }
 
-function normalizeEmphasisInTextSegment(segment: string): string {
-  let current = segment
+export function compactMarkdownPreviewText(source: string): string {
+  const normalized = normalizeMarkdownEmphasis(source)
 
-  for (const delimiter of ['**', '__', '*', '_']) {
+  return normalized
+    .replace(INLINE_LINK_RE, '$1')
+    .replace(INLINE_CODE_RE, '$2')
+    .replace(INLINE_STRONG_RE, '$2')
+    .replace(INLINE_EM_STAR_RE, '$1$2')
+    .replace(INLINE_EM_UNDERSCORE_RE, '$1$2')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeEmphasisInTextSegment(segment: string): string {
+  const { text: mutableText, protectedSegments } = protectSafeStrongSegments(segment)
+  let current = mutableText
+
+  for (const delimiter of ['**', '__']) {
     current = normalizeDelimiterEdges(current, delimiter)
   }
 
-  return current
+  return restoreProtectedStrongSegments(current, protectedSegments)
 }
 
 function normalizeDelimiterEdges(text: string, delimiter: string): string {
   const escaped = escapeForRegExp(delimiter)
-  const leadingPunctuationRe = new RegExp(`(${escaped})([${CJK_OPEN_PUNCTUATION}]+)(.+?)\\1`, 'g')
-  const trailingPunctuationRe = new RegExp(`(${escaped})(.+?)([${CJK_CLOSE_PUNCTUATION}]+)\\1`, 'g')
+  const contentWithoutDelimiter = `((?:(?!${escaped})[\\s\\S])+?)`
+  const leadingPunctuationRe = new RegExp(
+    `(?<![${CONTEXT_BOUNDARY_CLASS}])(${escaped})([${EDGE_PUNCTUATION_CLASS}]+)(\\s*)${contentWithoutDelimiter}(?<!\\s)\\1`,
+    'gu',
+  )
+  const trailingPunctuationRe = new RegExp(
+    `(${escaped})(?=\\S)${contentWithoutDelimiter}(\\s*)([${EDGE_PUNCTUATION_CLASS}]+)(?<!\\s)\\1(?![${CONTEXT_BOUNDARY_CLASS}]|$)`,
+    'gu',
+  )
 
   let current = text
 
   for (let i = 0; i < 3; i += 1) {
     const next = current
-      .replace(leadingPunctuationRe, '$2$1$3$1')
-      .replace(trailingPunctuationRe, '$1$2$1$3')
+      .replace(leadingPunctuationRe, '$2$3$1$4$1')
+      .replace(trailingPunctuationRe, '$1$2$1$3$4')
 
     if (next === current) {
       break
@@ -95,6 +131,53 @@ function normalizeDelimiterEdges(text: string, delimiter: string): string {
 
 function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function escapeForCharClass(value: string): string {
+  return value.replace(/[\\\]\[-^]/g, '\\$&')
+}
+
+function protectSafeStrongSegments(segment: string): {
+  text: string
+  protectedSegments: string[]
+} {
+  const protectedSegments: string[] = []
+
+  const text = segment.replace(
+    SAFE_STRONG_SEGMENT_RE,
+    (fullMatch, _delimiter, content: string, offset: number, source: string) => {
+      const previousChar = offset > 0 ? source[offset - 1] : ''
+      const nextCharIndex = offset + fullMatch.length
+      const nextChar = nextCharIndex < source.length ? source[nextCharIndex] : ''
+      const previousIsBoundary = previousChar === '' || CONTEXT_BOUNDARY_CHAR_RE.test(previousChar)
+      const nextIsBoundary = nextChar === '' || CONTEXT_BOUNDARY_CHAR_RE.test(nextChar)
+      const needsLeadingNormalization =
+        EDGE_PUNCTUATION_AT_START_RE.test(content) && !previousIsBoundary
+      const needsTrailingNormalization =
+        EDGE_PUNCTUATION_AT_END_RE.test(content) && !nextIsBoundary
+
+      if (needsLeadingNormalization || needsTrailingNormalization) {
+        return fullMatch
+      }
+
+      const token = `${PROTECTED_STRONG_TOKEN_PREFIX}${protectedSegments.length}${PROTECTED_STRONG_TOKEN_SUFFIX}`
+      protectedSegments.push(fullMatch)
+      return token
+    },
+  )
+
+  return { text, protectedSegments }
+}
+
+function restoreProtectedStrongSegments(text: string, protectedSegments: string[]): string {
+  let current = text
+
+  for (let index = 0; index < protectedSegments.length; index += 1) {
+    const token = `${PROTECTED_STRONG_TOKEN_PREFIX}${index}${PROTECTED_STRONG_TOKEN_SUFFIX}`
+    current = current.replaceAll(token, protectedSegments[index]!)
+  }
+
+  return current
 }
 
 function MarkdownPre({ className, children, ...props }: ComponentPropsWithoutRef<'pre'>) {

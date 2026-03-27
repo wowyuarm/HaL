@@ -13,6 +13,7 @@ from hal.domain.events import (
     ASSISTANT_MESSAGE_COMPLETED,
     LOOP_STARTED,
     MESSAGE_INJECTED,
+    TURN_FAILED,
     TURN_COMPLETED,
     TURN_STARTED,
 )
@@ -21,8 +22,10 @@ from hal.runtime.session import build_persisted_session_history
 from hal.workspace import SessionRepository
 
 from .processing import (
+    _is_error_assistant_content,
     _normalize_final_content,
     _should_record_assistant_history,
+    build_error_recovery_inject,
 )
 from .subagent_injection import _SUBAGENT_RUNTIME_MAX_TOKENS, _build_subagent_injection
 from .transport import SessionTransportContext
@@ -368,30 +371,48 @@ class _EngineBackgroundResume:
             final_content=None,
         )
 
-        await state.event_publisher.emit(
-            ASSISTANT_MESSAGE_COMPLETED,
-            turn_id=turn_id,
-            actor="engine",
-            payload={
-                "content": final_content,
-                "iterations": meta.iterations,
-                "tools_used": list(meta.tools_used),
-                "usage": dict(meta.total_usage),
-                "origin": "background_resume",
-            },
-        )
-        await state.event_publisher.emit(
-            TURN_COMPLETED,
-            turn_id=turn_id,
-            actor="engine",
-            payload={
-                "iterations": meta.iterations,
-                "tools_used": list(meta.tools_used),
-                "usage": dict(meta.total_usage),
-                "output_chars": len(final_content),
-                "origin": "background_resume",
-            },
-        )
+        if _is_error_assistant_content(final_content):
+            await self._engine._append_session_message_injects(
+                session_id,
+                [build_error_recovery_inject(final_content)],
+            )
+            await state.event_publisher.emit(
+                TURN_FAILED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={
+                    "error": final_content,
+                    "iterations": meta.iterations,
+                    "tools_used": list(meta.tools_used),
+                    "usage": dict(meta.total_usage),
+                    "origin": "background_resume",
+                },
+            )
+        else:
+            await state.event_publisher.emit(
+                ASSISTANT_MESSAGE_COMPLETED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={
+                    "content": final_content,
+                    "iterations": meta.iterations,
+                    "tools_used": list(meta.tools_used),
+                    "usage": dict(meta.total_usage),
+                    "origin": "background_resume",
+                },
+            )
+            await state.event_publisher.emit(
+                TURN_COMPLETED,
+                turn_id=turn_id,
+                actor="engine",
+                payload={
+                    "iterations": meta.iterations,
+                    "tools_used": list(meta.tools_used),
+                    "usage": dict(meta.total_usage),
+                    "output_chars": len(final_content),
+                    "origin": "background_resume",
+                },
+            )
 
         if bool(getattr(self._engine.tools.get("message"), "sent_in_turn", False)):
             return

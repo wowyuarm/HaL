@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 
 import { StatusDot } from '@/components/ui/status-dot'
+import { compactMarkdownPreviewText } from '@/components/ui/hal-markdown'
 import {
   buildTurnProcessView,
   type ProcessEntryStatus,
@@ -29,6 +30,9 @@ export function ProcessRail() {
   const turnEvents = allEvents.filter((event) => event.turn_id === reviewPanel.turnId)
   const turnState = deriveTurnState(turnEvents)
   const processView = buildTurnProcessView(turnEvents, turnState)
+  const previewHintText = processView.preview.hintText
+    ? compactMarkdownPreviewText(processView.preview.hintText)
+    : null
   const scopeThreads = extractScopeThreads(turnEvents)
 
   const body = (
@@ -36,21 +40,19 @@ export function ProcessRail() {
       <div className="flex shrink-0 flex-col border-b border-subtle px-4 py-[8.5px] md:px-5">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {processView.preview.countSummaryText || processView.preview.hintText ? (
+            {processView.preview.countSummaryText || previewHintText ? (
               <div className="flex min-w-0 items-center gap-2">
-                {processView.preview.hintText ? (
+                {previewHintText ? (
                   <>
                     <p className="flex min-w-0 items-center gap-2 text-caption text-hal-muted">
                       <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
-                      <span className="truncate leading-5">{processView.preview.hintText}</span>
+                      <span className="truncate leading-5">{previewHintText}</span>
                     </p>
                   </>
                 ) : null}
                 {processView.preview.countSummaryText ? (
                   <>
-                    {processView.preview.hintText ? (
-                      <span className="shrink-0 text-hal-muted">·</span>
-                    ) : null}
+                    {previewHintText ? <span className="shrink-0 text-hal-muted">·</span> : null}
                     <p
                       className={cn(
                         'shrink-0 text-meta font-medium leading-5',

@@ -10,7 +10,7 @@ import { MessagePrimitive, useMessage } from '@assistant-ui/react'
 import type { TextMessagePartProps } from '@assistant-ui/react'
 import { ChevronRight } from 'lucide-react'
 
-import { HalMarkdown } from '@/components/ui/hal-markdown'
+import { compactMarkdownPreviewText, HalMarkdown } from '@/components/ui/hal-markdown'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { HalMessageMeta } from '@/lib/session-adapter'
 import { useHalStore } from '@/lib/store'
@@ -34,6 +34,9 @@ export function HalAssistantMessage() {
   const showBriefLiveDot =
     isBriefLifecycle && custom?.lifecycleState === 'start' && currentSessionStatus === 'briefing'
   const processPreview = custom?.processPreview
+  const previewHintText = processPreview?.hintText
+    ? compactMarkdownPreviewText(processPreview.hintText)
+    : null
   const processOpen = processPanel?.kind === 'process' && processPanel.turnId === custom?.turnId
   const directOnlyProcess =
     processPreview?.summaryText === 'replied directly' &&
@@ -41,7 +44,7 @@ export function HalAssistantMessage() {
     processPreview.noteCount === 0
   const processAriaLabel = processPreview
     ? buildProcessAriaLabel(
-        processPreview.hintText,
+        previewHintText,
         processPreview.countSummaryText,
         processPreview.summaryText,
       )
@@ -71,11 +74,7 @@ export function HalAssistantMessage() {
   }
 
   return (
-    <MessagePrimitive.Root
-      className={
-        isFailed ? 'rounded-md border border-danger bg-hal-danger-subtle px-4 py-3.5' : 'px-1 py-2'
-      }
-    >
+    <MessagePrimitive.Root className="px-1 py-2">
       {custom?.turnId && processPreview && (
         <button
           type="button"
@@ -101,11 +100,18 @@ export function HalAssistantMessage() {
             )}
           />
           <span className="relative z-10 flex min-w-0 flex-1 items-center gap-2">
-            {processPreview.hintText ? (
+            {previewHintText ? (
               <span className="flex min-w-0 flex-1 items-center gap-2">
-                <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
-                <span className="truncate text-meta leading-5 text-hal-primary">
-                  {processPreview.hintText}
+                {processPreview.tone === 'live' ? (
+                  <StatusDot state="live" className="h-1.5 w-1.5 shrink-0" />
+                ) : null}
+                <span
+                  className={cn(
+                    'truncate text-meta leading-5',
+                    processPreview.tone === 'danger' ? 'text-danger' : 'text-hal-primary',
+                  )}
+                >
+                  {previewHintText}
                 </span>
               </span>
             ) : !processPreview.countSummaryText ? (
@@ -120,9 +126,7 @@ export function HalAssistantMessage() {
             ) : null}
             {processPreview.countSummaryText ? (
               <>
-                {processPreview.hintText ? (
-                  <span className="shrink-0 text-hal-muted">·</span>
-                ) : null}
+                {previewHintText ? <span className="shrink-0 text-hal-muted">·</span> : null}
                 <span
                   className={cn(
                     'shrink-0 text-meta leading-5',

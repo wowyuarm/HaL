@@ -9,6 +9,7 @@ from loguru import logger
 
 from hal.bus.events import OutboundMessage
 from hal.context.compiler import SessionTurnRequest
+from hal.context.message_injects import KIND_SYSTEM_REMINDER, MessageInject, build_runtime_inject
 from hal.context.metrics import (
     USAGE_SOURCE_NONE,
     USAGE_SOURCE_PROVIDER,
@@ -38,6 +39,11 @@ from hal.runtime.session import (
 
 _NO_RESPONSE_GENERATED_MESSAGE = "(No response generated.)"
 _ERROR_CALLING_LLM_PREFIX = "Error calling LLM:"
+_ERROR_RECOVERY_SUMMARY_PREFIX = "Previous turn failed due to a system error."
+_ERROR_RECOVERY_NEXT_STEP = (
+    "Treat unfinished work as incomplete and retry from the last confirmed state."
+)
+_ERROR_REMINDER_MAX_CHARS = 240
 
 
 def _message_sent_in_turn(tool: Any) -> bool:
@@ -152,6 +158,39 @@ def _should_record_assistant_history(content: str) -> bool:
     if normalized.startswith(_ERROR_CALLING_LLM_PREFIX):
         return False
     return True
+
+
+def _is_error_assistant_content(content: str) -> bool:
+    """Return True when assistant content represents an internal provider failure."""
+    return content.strip().startswith(_ERROR_CALLING_LLM_PREFIX)
+
+
+def _extract_error_summary(content: str) -> str:
+    """Strip error prefix and trim overly long provider summaries."""
+    summary = content.strip()
+    if summary.startswith(_ERROR_CALLING_LLM_PREFIX):
+        summary = summary[len(_ERROR_CALLING_LLM_PREFIX) :].strip()
+    if len(summary) <= _ERROR_REMINDER_MAX_CHARS:
+        return summary
+    return summary[: _ERROR_REMINDER_MAX_CHARS - 3].rstrip() + "..."
+
+
+def build_error_recovery_inject(content: str) -> MessageInject:
+    """Build one durable reminder so the next turn knows the prior turn failed."""
+    summary = _extract_error_summary(content) or "Unknown provider error."
+    body = "\n".join(
+        [
+            _ERROR_RECOVERY_SUMMARY_PREFIX,
+            f"Last error: {summary}",
+            _ERROR_RECOVERY_NEXT_STEP,
+        ]
+    )
+    return build_runtime_inject(
+        kind=KIND_SYSTEM_REMINDER,
+        source="engine",
+        body=body,
+        metadata={"reason": "llm_error"},
+    )
 
 
 def build_engine_error_response(*, msg: Any, error: Exception) -> OutboundMessage:
@@ -625,28 +664,45 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                 meta=meta,
                 resolved_model=resolved_model,
             )
-            await session_state.event_publisher.emit(
-                ASSISTANT_MESSAGE_COMPLETED,
-                turn_id=turn_id,
-                actor="engine",
-                payload={
-                    "content": final_content,
-                    "iterations": meta.iterations,
-                    "tools_used": list(meta.tools_used),
-                    "usage": dict(meta.total_usage),
-                },
-            )
-            await session_state.event_publisher.emit(
-                TURN_COMPLETED,
-                turn_id=turn_id,
-                actor="engine",
-                payload={
-                    "iterations": meta.iterations,
-                    "tools_used": list(meta.tools_used),
-                    "usage": dict(meta.total_usage),
-                    "output_chars": len(final_content),
-                },
-            )
+            if _is_error_assistant_content(final_content):
+                await engine._append_session_message_injects(
+                    session_id,
+                    [build_error_recovery_inject(final_content)],
+                )
+                await session_state.event_publisher.emit(
+                    TURN_FAILED,
+                    turn_id=turn_id,
+                    actor="engine",
+                    payload={
+                        "error": final_content,
+                        "iterations": meta.iterations,
+                        "tools_used": list(meta.tools_used),
+                        "usage": dict(meta.total_usage),
+                    },
+                )
+            else:
+                await session_state.event_publisher.emit(
+                    ASSISTANT_MESSAGE_COMPLETED,
+                    turn_id=turn_id,
+                    actor="engine",
+                    payload={
+                        "content": final_content,
+                        "iterations": meta.iterations,
+                        "tools_used": list(meta.tools_used),
+                        "usage": dict(meta.total_usage),
+                    },
+                )
+                await session_state.event_publisher.emit(
+                    TURN_COMPLETED,
+                    turn_id=turn_id,
+                    actor="engine",
+                    payload={
+                        "iterations": meta.iterations,
+                        "tools_used": list(meta.tools_used),
+                        "usage": dict(meta.total_usage),
+                        "output_chars": len(final_content),
+                    },
+                )
 
             preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
             logger.info(f"[engine] response: {preview}")

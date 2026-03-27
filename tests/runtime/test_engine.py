@@ -263,6 +263,70 @@ class TestDispatch:
         assert out is not None
         assert out.content.startswith("Error calling LLM:")
 
+    async def test_error_response_marks_turn_failed_and_persists_recovery_reminder(self, engine):
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            return_value=("Error calling LLM: APIConnectionError: timeout", LoopMetadata(), [])
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        out = await engine.process(msg)
+
+        assert out is not None
+        assert out.content == "Error calling LLM: APIConnectionError: timeout"
+
+        session_id = engine._resolve_transport_session(msg.session_key)
+        assert session_id is not None
+
+        history = engine._get_session_history(session_id)
+        assert not any(
+            item.get("role") == "assistant"
+            and str(item.get("content", "")).startswith("Error calling LLM:")
+            for item in history
+        )
+        assert any(
+            item.get("role") == "user"
+            and "kind: system_reminder" in str(item.get("content", ""))
+            and "Previous turn failed due to a system error." in str(item.get("content", ""))
+            for item in history
+        )
+
+        events = engine._session_store.read_events(session_id)
+        event_types = [event.type for event in events]
+        assert "assistant.message_completed" not in event_types
+        assert "turn.completed" not in event_types
+        assert event_types[-2:] == ["message.injected", "turn.failed"]
+        reminder_event = events[-2]
+        assert reminder_event.payload["kind"] == "system_reminder"
+        assert "Previous turn failed due to a system error." in reminder_event.payload["content"]
+
+    async def test_error_response_replays_recovery_reminder_on_next_turn(self, engine):
+        engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
+            lambda *, history, current_message, **kwargs: [
+                {"role": "system", "content": "sys"},
+                *history,
+                {"role": "user", "content": current_message},
+            ]
+        )
+        engine._execute_loop = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                ("Error calling LLM: APIConnectionError: timeout", LoopMetadata(), []),
+                ("reply-2", LoopMetadata(), []),
+            ]
+        )
+
+        first = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
+        second = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="retry")
+        await engine.process(first)
+        await engine.process(second)
+
+        second_turn_messages = engine._execute_loop.await_args_list[1].args[0]
+        assert any(
+            message.get("role") == "user"
+            and "kind: system_reminder" in str(message.get("content", ""))
+            and "Previous turn failed due to a system error." in str(message.get("content", ""))
+            for message in second_turn_messages
+        )
+
     def test_session_reuses_existing_state_for_same_inbound_route(self, engine):
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hello")
         first = engine._ensure_session_for_inbound(msg)
