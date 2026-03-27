@@ -12,10 +12,10 @@ Keep source and tests in matching paths.
 - Session-first: `session_id` is the engine's sole identity key. Context is compiled fresh every turn — no frozen baselines.
 - `Thread` and `Skill` may share loading infrastructure, but they are not the same semantic type.
 - Prefer explicit workspace/repository abstractions over ad hoc `Path` reads and writes inside engine logic when refactoring persistent state flows.
-- For frontend work, read `docs/specs/design-system.md` and use the `hal-design` skill.
+- For frontend work, read `docs/specs/design-system.md` first, then follow the linked layer docs in `docs/specs/design/` for detailed rules. Use the `hal-design` skill.
 
 ## Frontend Engineering Notes
-- Treat `docs/specs/design-system.md` as the source of truth for frontend invariants. If a new UI rule stabilizes through iteration, write it back there instead of leaving it only in component code.
+- Treat `docs/specs/design-system.md` as the frontend design entrypoint. Principle-level invariants live there; detailed rules live in their owning docs under `docs/specs/design/`. If a new UI rule stabilizes through iteration, write it back to the owning design doc instead of leaving it only in component code.
 - Keep working-log and thread-detail body width aligned through shared code constants. Do not scatter raw width literals like `max-w-[49rem]` across new components.
 - Reuse shared frontend patterns before adding more one-off class strings:
   `web/src/components/ui/hal-patterns.ts` holds layout width and bounded paper-object variants;

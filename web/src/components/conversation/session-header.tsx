@@ -2,8 +2,8 @@
  * SessionHeader — compact action bar above the conversation.
  *
  * Back and overflow use contextual icon controls (muted, no fill).
- * Brief stays visible as primary action. Scope and Drop are in the
- * overflow menu to keep the header calm.
+ * BRIEF stays visible as the thread-level review toggle.
+ * Session actions like Brief, Scope, and Drop live in the overflow menu.
  */
 
 import { ArrowLeft, MoreHorizontal } from 'lucide-react'
@@ -63,29 +63,22 @@ export function SessionHeader({
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-hal-muted">
               <span className={cn('font-mono font-medium', status.textClass)}>{status.label}</span>
-              {showSocketState ? (
-                <span className="font-mono">{socketLabel(socketState)}</span>
-              ) : null}
+              {showSocketState ? <span className="font-mono">{socketLabel(socketState)}</span> : null}
             </div>
           </div>
         </div>
 
-        {/* Right: view toggle + primary action + overflow */}
+        {/* Right: BRIEF toggle + overflow */}
         <div className="flex shrink-0 items-center gap-2">
           <Button
             variant="secondary"
             size="sm"
             onClick={onToggleBriefPanel}
             aria-pressed={briefPanelOpen}
-            className={cn('h-7.5 w-[4.25rem]', briefPanelOpen && 'border-accent')}
+            className={cn('h-7.5 w-[4.75rem]', briefPanelOpen && 'border-accent')}
           >
-            Thread
+            BRIEF
           </Button>
-          {canEndSession && (
-            <Button variant="primary" size="sm" onClick={onBrief} className="h-7.5 w-[4.25rem]">
-              Brief
-            </Button>
-          )}
           {showOverflow && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -94,17 +87,18 @@ export function SessionHeader({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {canEditScope && (
-                  <DropdownMenuItem onSelect={onEditScope}>Edit scope</DropdownMenuItem>
-                )}
-                {canEndSession && (
+                {canEditScope ? <DropdownMenuItem onSelect={onEditScope}>Edit scope</DropdownMenuItem> : null}
+                {canEndSession ? (
                   <>
-                    <DropdownMenuSeparator />
+                    {canEditScope ? <DropdownMenuSeparator /> : null}
+                    <DropdownMenuItem onSelect={onBrief} className="text-accent focus:text-accent">
+                      Brief
+                    </DropdownMenuItem>
                     <DropdownMenuItem onSelect={onDrop} className="text-danger focus:text-danger">
                       Drop session
                     </DropdownMenuItem>
                   </>
-                )}
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           )}

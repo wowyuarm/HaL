@@ -121,8 +121,9 @@ derived data.
 
 ### Frontend design
 
-See `docs/specs/design-system.md` for the interface design system:
-tokens, layout modes, component guidance, and the design checklist.
+See `docs/specs/design-system.md` for the interface design-system entrypoint,
+then follow its linked docs under `docs/specs/design/` for tokens, surfaces,
+components, state rules, and the design checklist.
 
 ### Prompt-side message injects
 

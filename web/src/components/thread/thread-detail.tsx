@@ -99,7 +99,7 @@ export function ThreadDetailPanel({
               onClick={onToggleBriefPanel}
               className="shrink-0 self-start whitespace-nowrap"
             >
-              Thread brief
+              BRIEF
             </Button>
           </div>
         </div>

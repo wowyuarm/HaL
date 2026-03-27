@@ -32,7 +32,8 @@ cd web && npx prettier --write .   # Format frontend code
 
 HaL is a stateful collaboration system — see `DESIGN.md` for invariants and
 collaboration architecture, `docs/specs/message-injects.md` for prompt/replay
-inject semantics, and `docs/specs/design-system.md` for frontend design.
+inject semantics, and `docs/specs/design-system.md` plus its linked layer docs
+for frontend design.
 
 Session-first, async, event-driven: the engine uses `session_id` as its sole
 identity key. IM channels are adapters; the native web server bridges directly.
@@ -80,7 +81,7 @@ Native web (SessionBridge) ──────────────┘        
 
 ## Frontend Engineering
 
-- For frontend work, read `docs/specs/design-system.md` and use the `hal-design` skill (`/hal-design`).
+- For frontend work, read `docs/specs/design-system.md` first, then follow the linked layer docs in `docs/specs/design/` for detailed rules. Use the `hal-design` skill (`/hal-design`).
 - Reuse shared patterns before adding one-off classes: `web/src/components/ui/hal-patterns.ts` (layout widths, bounded paper-object variants), `web/src/components/ui/hal-markdown.tsx` (markdown rendering).
 - Do not split markdown behavior across multiple styling systems — `HalMarkdown` + `web/src/styles/globals.css` is the primary path.
 - Keep working-log and thread-detail body width aligned through shared constants; do not scatter raw width literals like `max-w-[49rem]`.
