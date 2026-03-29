@@ -24,6 +24,9 @@ ruff format hal/
 cd web && npm install              # Install frontend deps
 cd web && npm run dev              # Vite dev server (port 3000, proxies to backend :8765)
 cd web && npm run build            # TypeScript check + Vite production build
+cd web && npm test                 # Run all frontend tests
+cd web && npm run test:unit        # Run frontend Vitest unit/component tests
+cd web && npm run test:regressions # Run bundled frontend regression tests
 cd web && npx tsc -b               # TypeScript type-check only
 cd web && npx prettier --write .   # Format frontend code
 ```
@@ -46,29 +49,29 @@ Native web (SessionBridge) ──────────────┘        
 
 ### Key Domain Concepts
 
-| Concept | Role |
-|---------|------|
-| **Thread** | Long-lived collaboration container for an ongoing concern |
-| **Session** | Focused work run, producing durable evidence via events |
-| **Episode** | Immutable compaction of a session's contribution to a thread |
-| **Brief** | Compiled synthesis of a thread's current state (`BRIEF.md`) |
-| **ContextUnit** | Shared loading protocol for skills and threads |
+| Concept         | Role                                                         |
+| --------------- | ------------------------------------------------------------ |
+| **Thread**      | Long-lived collaboration container for an ongoing concern    |
+| **Session**     | Focused work run, producing durable evidence via events      |
+| **Episode**     | Immutable compaction of a session's contribution to a thread |
+| **Brief**       | Compiled synthesis of a thread's current state (`BRIEF.md`)  |
+| **ContextUnit** | Shared loading protocol for skills and threads               |
 
 ### System Layers
 
-| Layer | Package | Responsibility |
-|-------|---------|----------------|
-| Domain | `hal/domain/` | Semantic types: ContextUnit, SessionManifest, SessionEvent, EventPublisher |
-| Context | `hal/context/` | Context compilation: builder, compiler, registry, message injects |
-| Runtime | `hal/runtime/` | Orchestration: engine, loop, subagent, session lifecycle |
-| Memory | `hal/memory/` | MemoryManager, search, vector store |
-| Workspace | `hal/workspace/` | Persistence: layout, repos (threads, episodes, sessions, thread refs) |
-| Capabilities | `hal/capabilities/` | Tools and skills |
-| Bus | `hal/bus/` | MessageBus, typed events |
-| Web | `hal/web/` | Native web server: SessionBridge, REST + WebSocket |
-| Channels | `hal/channels/` | Telegram adapter |
-| CLI | `hal/cli/` | CLI commands, factory |
-| Infra | `hal/infra/` | Config, LLM providers |
+| Layer        | Package             | Responsibility                                                             |
+| ------------ | ------------------- | -------------------------------------------------------------------------- |
+| Domain       | `hal/domain/`       | Semantic types: ContextUnit, SessionManifest, SessionEvent, EventPublisher |
+| Context      | `hal/context/`      | Context compilation: builder, compiler, registry, message injects          |
+| Runtime      | `hal/runtime/`      | Orchestration: engine, loop, subagent, session lifecycle                   |
+| Memory       | `hal/memory/`       | MemoryManager, search, vector store                                        |
+| Workspace    | `hal/workspace/`    | Persistence: layout, repos (threads, episodes, sessions, thread refs)      |
+| Capabilities | `hal/capabilities/` | Tools and skills                                                           |
+| Bus          | `hal/bus/`          | MessageBus, typed events                                                   |
+| Web          | `hal/web/`          | Native web server: SessionBridge, REST + WebSocket                         |
+| Channels     | `hal/channels/`     | Telegram adapter                                                           |
+| CLI          | `hal/cli/`          | CLI commands, factory                                                      |
+| Infra        | `hal/infra/`        | Config, LLM providers                                                      |
 
 ## Code Conventions
 
@@ -87,6 +90,11 @@ Native web (SessionBridge) ──────────────┘        
 - Keep working-log and thread-detail body width aligned through shared constants; do not scatter raw width literals like `max-w-[49rem]`.
 - Change shared variants or tokens first, not scattered per-component padding values, when adjusting density.
 - Vite proxies `/threads` and `/sessions` to backend at `HAL_WEB_BACKEND_ORIGIN` (default `http://localhost:8765`).
+- Frontend tests live in `web/tests/`, not `web/scripts/`.
+- `web/tests/unit/` is for Vitest + Testing Library coverage of components and helpers.
+- `web/tests/regressions/` is for bundled node-side regression tests covering stateful flows like store sync, process summaries, and session-event adaptation.
+- Prefer the lightest useful frontend test:
+  unit/component first, regression bundle second, browser-level checks only for critical end-to-end paths.
 
 ## Configuration & Security
 

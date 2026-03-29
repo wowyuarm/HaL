@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 
-import { useHalStore } from '../src/lib/store'
-import type { SessionManifest, ThreadDetail, ThreadSummary } from '../src/lib/types'
+import { useHalStore } from '../../src/lib/store'
+import type { SessionManifest, ThreadDetail, ThreadSummary } from '../../src/lib/types'
 
 const INITIAL_STATE = useHalStore.getState()
 const ORIGINAL_FETCH = globalThis.fetch
@@ -78,9 +78,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function resetStore(
-  overrides: Partial<ReturnType<typeof useHalStore.getState>> = {},
-): void {
+function resetStore(overrides: Partial<ReturnType<typeof useHalStore.getState>> = {}): void {
   useHalStore.setState({
     ...INITIAL_STATE,
     threads: [],
@@ -236,43 +234,43 @@ await runTest('showArchived keeps sidebar counts and order on summary basis', as
     threads.map((thread) => thread.slug),
     ['beta', 'alpha'],
   )
-  assert.deepEqual(
-    threads.find((thread) => thread.slug === 'alpha')?.session_counts,
-    { active: 1 },
-  )
+  assert.deepEqual(threads.find((thread) => thread.slug === 'alpha')?.session_counts, { active: 1 })
 })
 
-await runTest('live detail still refreshes sidebar counts when archived sessions are hidden', async () => {
-  const firstLiveSession = makeSession({
-    sessionId: 'live-2',
-    createdAt: '2026-03-26T10:00:00Z',
-  })
-  const secondLiveSession = makeSession({
-    sessionId: 'live-1',
-    createdAt: '2026-03-26T09:00:00Z',
-  })
-  const liveDetail = makeThreadDetail({
-    slug: 'alpha',
-    updatedAt: '2026-03-26T10:00:00Z',
-    sessionCounts: { active: 2 },
-    sessions: [firstLiveSession, secondLiveSession],
-  })
+await runTest(
+  'live detail still refreshes sidebar counts when archived sessions are hidden',
+  async () => {
+    const firstLiveSession = makeSession({
+      sessionId: 'live-2',
+      createdAt: '2026-03-26T10:00:00Z',
+    })
+    const secondLiveSession = makeSession({
+      sessionId: 'live-1',
+      createdAt: '2026-03-26T09:00:00Z',
+    })
+    const liveDetail = makeThreadDetail({
+      slug: 'alpha',
+      updatedAt: '2026-03-26T10:00:00Z',
+      sessionCounts: { active: 2 },
+      sessions: [firstLiveSession, secondLiveSession],
+    })
 
-  globalThis.fetch = (async (input) => {
-    const url = String(input)
-    if (url === '/threads/alpha') {
-      return jsonResponse({ thread: liveDetail })
-    }
-    throw new Error(`Unexpected fetch: ${url}`)
-  }) as typeof fetch
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url === '/threads/alpha') {
+        return jsonResponse({ thread: liveDetail })
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    }) as typeof fetch
 
-  resetStore({
-    activeThreadSlug: 'alpha',
-    showArchived: false,
-    threads: [makeThreadSummary('alpha', { active: 1 }, '2026-03-26T09:00:00Z')],
-  })
+    resetStore({
+      activeThreadSlug: 'alpha',
+      threads: [makeThreadSummary('alpha', { active: 1 }, '2026-03-26T09:00:00Z')],
+    })
 
-  await useHalStore.getState().loadThread('alpha')
+    await useHalStore.getState().loadThread('alpha')
 
-  assert.deepEqual(useHalStore.getState().threads[0]?.session_counts, { active: 2 })
-})
+    assert.deepEqual(useHalStore.getState().threadDetails.alpha?.sessions.length, 2)
+    assert.deepEqual(useHalStore.getState().threads[0]?.session_counts, { active: 2 })
+  },
+)

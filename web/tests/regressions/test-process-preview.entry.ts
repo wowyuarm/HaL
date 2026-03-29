@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 
-import { buildTurnProcessView } from '../src/lib/process'
-import type { SessionEvent } from '../src/lib/types'
+import { buildTurnProcessView } from '../../src/lib/process'
+import type { SessionEvent } from '../../src/lib/types'
 
 const SESSION_ID = 'session-process-preview'
 const TURN_ID = 'turn-1'

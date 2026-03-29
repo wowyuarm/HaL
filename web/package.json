@@ -9,7 +9,12 @@
     "prebuild": "node ./scripts/clean-generated-configs.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:store": "node ./scripts/test-store-regressions.mjs",
+    "test": "npm run test:unit && npm run test:regressions",
+    "test:adapter": "node ./tests/regressions/test-session-adapter.mjs",
+    "test:process": "node ./tests/regressions/test-process-preview.mjs",
+    "test:regressions": "node ./tests/regressions/run-regressions.mjs",
+    "test:store": "node ./tests/regressions/test-store-regressions.mjs",
+    "test:unit": "vitest run",
     "typecheck": "node ./scripts/clean-generated-configs.mjs && tsc -b",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/"
@@ -29,17 +34,22 @@
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.3.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^29.0.1",
     "postcss": "^8.4.49",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^6.0.1"
+    "vite": "^6.0.1",
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=20.0.0"
