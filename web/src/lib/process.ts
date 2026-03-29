@@ -1,7 +1,13 @@
 import { bySeq, getFiniteNumber, getString, getStringArray } from '@/lib/event-helpers'
 import type { SessionEvent } from '@/lib/types'
 
-export type ProcessTone = 'live' | 'success' | 'warning' | 'danger' | 'muted'
+export type ProcessTone =
+  | 'live'
+  | 'success'
+  | 'warning'
+  | 'danger'
+  | 'muted'
+  | 'human-authored'
 export type ProcessEntryStatus = 'running' | 'completed' | 'failed'
 export type ProcessCountKey =
   | 'search'
@@ -31,6 +37,7 @@ export interface ProcessPreview {
   liveText: string | null
   countText: string
   tone: ProcessTone
+  hasHumanIntervention: boolean
   stepCount: number
   noteCount: number
   totalRecords: number
@@ -420,14 +427,20 @@ function buildProcessNote(event: SessionEvent): ProcessNote | null {
         rawEventSeqs: [event.seq],
       }
     case 'user_follow_up':
-      return {
-        id: `note_${event.seq}`,
-        label: 'input',
-        detail: compactText(
-          getString(event.payload, 'raw_content') ?? getString(event.payload, 'content'),
-        ),
-        tone: 'warning',
-        rawEventSeqs: [event.seq],
+      {
+        const attachments = summarizeFollowUpAttachments(event)
+        const detail =
+          compactText(getString(event.payload, 'raw_content')) ??
+          summarizeAttachmentCount(attachments.length) ??
+          compactText(getString(event.payload, 'content'))
+        return {
+          id: `note_${event.seq}`,
+          label: 'input',
+          detail,
+          items: attachments.length > 0 ? attachments : undefined,
+          tone: 'human-authored',
+          rawEventSeqs: [event.seq],
+        }
       }
     case 'subagent_runtime':
       return null
@@ -501,6 +514,8 @@ function buildPreview(
   const counts = summarizeProcessCounts(steps)
   const countSummaryText = buildCountSummaryText(counts)
   const directReplyTurn = isDirectReplyTurn(rawEvents, countSummaryText, turnState)
+  const hasHumanIntervention =
+    turnState === 'running' && notes.some((entry) => entry.note.tone === 'human-authored')
 
   const summaryText = countSummaryText
     ? countSummaryText
@@ -518,11 +533,12 @@ function buildPreview(
 
   return {
     summaryText,
-    hintText: buildHintText(steps, notes.length, turnState),
+    hintText: buildHintText(steps, notes, turnState),
     countSummaryText,
-    liveText: buildHintText(steps, notes.length, turnState),
+    liveText: buildHintText(steps, notes, turnState),
     countText: `${formatCount(entryCount)}`,
     tone: turnState === 'failed' ? 'danger' : turnState === 'running' ? 'live' : 'muted',
+    hasHumanIntervention,
     stepCount: steps.length,
     noteCount: notes.length,
     totalRecords: rawEvents.length,
@@ -550,21 +566,62 @@ function isDirectReplyTurn(
 
 function buildHintText(
   steps: Array<{ kind: 'step'; step: ProcessStep }>,
-  noteCount: number,
+  notes: Array<{ kind: 'note'; note: ProcessNote }>,
   turnState: TurnState,
 ): string | null {
   if (turnState === 'failed') return 'Stopped mid-turn.'
   if (turnState !== 'running') return null
 
+  const latestHumanNote = [...notes]
+    .reverse()
+    .find((entry) => entry.note.tone === 'human-authored')
   const liveStep = [...steps].reverse().find((entry) => entry.step.status === 'running')
+  if (
+    latestHumanNote &&
+    latestEntrySeq(latestHumanNote.note.rawEventSeqs) >= latestStepSeq(liveStep?.step)
+  ) {
+    return summarizeHumanInterventionHint(latestHumanNote.note.detail)
+  }
   if (liveStep) {
     const summarizedIntent = compactText(liveStep.step.summary, 88)
     if (summarizedIntent) return summarizedIntent
     if (!isCountLikeProcessTitle(liveStep.step.title)) return liveStep.step.title
     return null
   }
-  if (noteCount > 0) return 'Folding in new information.'
+  if (notes.length > 0) return 'Folding in new information.'
   return 'Still working.'
+}
+
+function latestEntrySeq(rawEventSeqs: number[]): number {
+  return rawEventSeqs.at(-1) ?? -1
+}
+
+function latestStepSeq(step: ProcessStep | undefined): number {
+  return step ? latestEntrySeq(step.rawEventSeqs) : -1
+}
+
+function summarizeFollowUpAttachments(event: SessionEvent): string[] {
+  const attachments = Array.isArray(event.payload.attachments) ? event.payload.attachments : []
+  return attachments
+    .map((attachment) => {
+      if (!attachment || typeof attachment !== 'object') return null
+      const record = attachment as Record<string, unknown>
+      const name = typeof record.name === 'string' ? record.name.trim() : ''
+      const path = typeof record.path === 'string' ? record.path.trim() : ''
+      if (!name) return null
+      return path ? `${name} · ${path}` : name
+    })
+    .filter((item): item is string => Boolean(item))
+}
+
+function summarizeAttachmentCount(count: number): string | null {
+  if (count <= 0) return null
+  return `Attached ${count} file${count === 1 ? '' : 's'}`
+}
+
+function summarizeHumanInterventionHint(detail: string | null): string {
+  const summarizedDetail = compactText(detail ?? undefined, 72)
+  return summarizedDetail ? `New input: ${summarizedDetail}` : 'New input added.'
 }
 
 function isCountLikeProcessTitle(text: string): boolean {

@@ -195,6 +195,7 @@ class _MessageInjectSubscriber:
                         "raw_content": event.message.content,
                         "prefixed_content": event.prefixed_content,
                         "origin": event.message.origin,
+                        "attachments": list(event.message.metadata.get("event_attachments", []) or []),
                     },
                 )
         logger.info(f"[inject] mid-loop message from {event.message.sender_id}")

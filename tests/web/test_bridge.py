@@ -95,10 +95,11 @@ async def test_submit_turn_queues_intervention_for_active_session(
     finally:
         engine._set_session_active(manifest.session_id, False)
 
-    queued = await asyncio.wait_for(engine.bus.consume_inbound(), timeout=1)
+    queued = engine._drain_pending_for_session(session_id=manifest.session_id)
     assert submission.delivery == "intervention_queued"
-    assert queued.session_id == manifest.session_id
-    assert queued.content == "also cover edge cases"
+    assert len(queued) == 1
+    assert queued[0].session_id == manifest.session_id
+    assert queued[0].content == "also cover edge cases"
 
 
 @pytest.mark.asyncio

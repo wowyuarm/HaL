@@ -89,7 +89,7 @@ export function HalThread({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-4 pt-8 md:px-5 md:pb-5">
             <div className="pointer-events-none mx-auto w-full max-w-[56rem] bg-gradient-to-t from-hal-canvas via-hal-canvas/92 to-transparent pt-8">
               <div className="pointer-events-auto">
-                <HalComposer />
+                <HalComposer sessionId={session.session_id} socketState={socketState} />
               </div>
             </div>
           </div>

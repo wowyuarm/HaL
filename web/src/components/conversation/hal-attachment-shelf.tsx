@@ -1,29 +1,10 @@
 import {
   AttachmentPrimitive,
-  ComposerPrimitive,
   MessagePrimitive,
   useAuiState,
   useMessage,
 } from '@assistant-ui/react'
 import { X } from 'lucide-react'
-
-export function HalComposerAttachmentShelf() {
-  const count = useAuiState((s) => s.composer.attachments.length)
-  if (count === 0) return null
-
-  return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
-      <ComposerPrimitive.Attachments
-        components={{
-          Image: HalComposerAttachmentItem,
-          Document: HalComposerAttachmentItem,
-          File: HalComposerAttachmentItem,
-          Attachment: HalComposerAttachmentItem,
-        }}
-      />
-    </div>
-  )
-}
 
 export function HalMessageAttachmentShelf() {
   const count = useMessage((s) => (s.role === 'user' ? s.attachments.length : 0))
@@ -41,11 +22,6 @@ export function HalMessageAttachmentShelf() {
       />
     </div>
   )
-}
-
-function HalComposerAttachmentItem() {
-  const attachment = useAuiState((s) => s.attachment)
-  return <HalAttachmentItem attachment={attachment} removable />
 }
 
 function HalMessageAttachmentItem() {

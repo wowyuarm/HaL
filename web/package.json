@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "npm run test:unit && npm run test:regressions",
     "test:adapter": "node ./tests/regressions/test-session-adapter.mjs",
+    "test:process-follow-up": "node ./tests/regressions/test-process-follow-up.mjs",
     "test:process": "node ./tests/regressions/test-process-preview.mjs",
     "test:regressions": "node ./tests/regressions/run-regressions.mjs",
     "test:store": "node ./tests/regressions/test-store-regressions.mjs",

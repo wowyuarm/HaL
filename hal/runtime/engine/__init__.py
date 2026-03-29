@@ -151,6 +151,7 @@ class AgentEngine:
         self._background_resume = _EngineBackgroundResume(engine=self)
         self._session_store = SessionStore(self._layout)
         self._sessions: dict[str, SessionRuntimeState] = {}
+        self._pending_session_messages: dict[str, list[object]] = {}
         # Adapter-facing index: transport session key -> active session id.
         self._transport_registry = SessionTransportRegistry()
 
@@ -222,6 +223,10 @@ class AgentEngine:
                     self.bus.consume_inbound(),
                     timeout=self._engine_config.inbound_poll_timeout_s,
                 )
+                active_session_id = self._resolve_active_session_id_for_inbound(msg)
+                if active_session_id is not None:
+                    self.queue_pending_inbound(active_session_id, msg)
+                    continue
                 try:
                     # Error policy:
                     # - per-message failures are logged and converted into a user-facing fallback
@@ -257,10 +262,13 @@ class AgentEngine:
         *,
         session_id: str | None = None,
     ) -> list[object]:
-        """Drain inbound queue messages for the target session without blocking."""
-        if not session_id and not session_key:
+        """Drain pending intervention messages for the target session without blocking."""
+        target_session_id = session_id
+        if target_session_id is None and session_key:
+            target_session_id = self._resolve_transport_session(session_key)
+        if not target_session_id:
             return []
-        matching: list[object] = []
+        matching = list(self._pending_session_messages.pop(target_session_id, []))
         others: list[object] = []
 
         while not self.bus.inbound.empty():
@@ -268,9 +276,9 @@ class AgentEngine:
                 msg = self.bus.inbound.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if session_id and getattr(msg, "session_id", None) == session_id:
+            if getattr(msg, "session_id", None) == target_session_id:
                 matching.append(msg)
-            elif session_key and msg.session_key == session_key:
+            elif session_key and getattr(msg, "session_key", None) == session_key:
                 matching.append(msg)
             else:
                 others.append(msg)
@@ -279,6 +287,24 @@ class AgentEngine:
             self.bus.inbound.put_nowait(msg)
 
         return matching
+
+    def queue_pending_inbound(self, session_id: str, msg: object) -> None:
+        """Store one inbound message for the active session loop to inject later."""
+        self._pending_session_messages.setdefault(session_id, []).append(msg)
+
+    def _resolve_active_session_id_for_inbound(self, msg: object) -> str | None:
+        """Return the target session_id when an inbound message should be treated as an intervention."""
+        explicit_session_id = getattr(msg, "session_id", None)
+        if explicit_session_id and self.is_session_active(explicit_session_id):
+            return explicit_session_id
+
+        session_key = getattr(msg, "session_key", None)
+        if not session_key:
+            return None
+        resolved_session_id = self._resolve_transport_session(session_key)
+        if resolved_session_id and self.is_session_active(resolved_session_id):
+            return resolved_session_id
+        return None
 
     # -- session lifecycle (session_id-first) --------------------------------
 

@@ -14,12 +14,19 @@ from hal.bus.events import (
     OutboundMessage,
     ToolCallEvent,
 )
-from hal.context.message_building import add_assistant_message as append_assistant_message
+from hal.context.message_building import (
+    add_assistant_message as append_assistant_message,
+)
+from hal.context.message_building import (
+    build_user_message_content,
+)
 from hal.context.message_injects import (
     KIND_CONTEXT_HINT,
     KIND_SYSTEM_REMINDER,
     KIND_USER_FOLLOW_UP,
+    SECTION_RUNTIME,
     build_runtime_inject,
+    render_inject_block,
 )
 from hal.domain.events import (
     LLM_REQUEST_STARTED,
@@ -190,14 +197,8 @@ class _EngineLoopHooks:
         self, messages: list[dict[str, Any]], pending_msgs: list[InboundMessage]
     ) -> None:
         for pending in pending_msgs:
-            prefixed = build_runtime_inject(
-                kind=KIND_USER_FOLLOW_UP,
-                source="user",
-                body=pending.content,
-                metadata={"origin": getattr(pending, "origin", "user")},
-                actor="user",
-            ).content
-            messages.append({"role": "user", "content": prefixed})
+            content, prefixed = _build_pending_follow_up_content(pending)
+            messages.append({"role": "user", "content": content})
             await self._engine.bus.emit(
                 MessageInjectEvent(
                     message=pending,
@@ -443,7 +444,6 @@ class _EngineLoopHooks:
                 assistant_content=assistant_content,
             )
         )
-
     async def _run_context_advisor(
         self,
         *,
@@ -651,3 +651,51 @@ class _EngineLoopHooks:
         if emit_tool_hints:
             await self._publish_tool_hints(tool_hints, append_reset=emit_progress_text)
         return None
+
+
+def _build_pending_follow_up_content(
+    message: InboundMessage,
+) -> tuple[str | list[dict[str, Any]], str]:
+    """Build the injected follow-up payload for the loop and its text replay form."""
+    content = build_user_message_content(
+        message.content,
+        message.media if message.media else None,
+        None,
+        attachments=message.attachments if message.attachments else None,
+    )
+    body_text = _flatten_pending_follow_up_text(content)
+    prefixed = build_runtime_inject(
+        kind=KIND_USER_FOLLOW_UP,
+        source="user",
+        body=body_text,
+        metadata={"origin": getattr(message, "origin", "user")},
+        actor="user",
+    ).content
+    if isinstance(content, str):
+        return prefixed, prefixed
+
+    header = render_inject_block(
+        SECTION_RUNTIME,
+        kind=KIND_USER_FOLLOW_UP,
+        source="user",
+        metadata={"origin": getattr(message, "origin", "user")},
+        body="",
+    )
+    return ([{"type": "text", "text": header}, *content], prefixed)
+
+
+def _flatten_pending_follow_up_text(content: str | list[dict[str, Any]]) -> str:
+    """Extract the text replay form from one structured user payload."""
+    if isinstance(content, str):
+        return content
+
+    text_parts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") != "text":
+            continue
+        text = str(part.get("text", "")).strip()
+        if text:
+            text_parts.append(text)
+    return "\n\n".join(text_parts)

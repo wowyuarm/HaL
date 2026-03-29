@@ -1212,6 +1212,210 @@ class TestMidLoopInjection:
         ]
         assert len(injected_user_msgs) == 1
 
+    async def test_pending_attachment_messages_include_attachment_paths_in_loop_and_event(
+        self, engine, bus, mock_provider
+    ):
+        """Mid-loop attachment follow-ups keep attachment path hints in the injected prompt and event."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        async def chat_side_effect(messages, tools, model):
+            if mock_provider.chat.await_count == 1:
+                pending = InboundMessage(
+                    channel="telegram",
+                    sender_id="alice",
+                    chat_id="c1",
+                    content="",
+                    attachments=[
+                        {
+                            "type": "document",
+                            "name": "notes.md",
+                            "contentType": "text/markdown",
+                            "path": "data/media/received/session-1/notes.md",
+                            "content": [
+                                {
+                                    "type": "file",
+                                    "filename": "notes.md",
+                                    "mimeType": "text/markdown",
+                                    "data": "",
+                                }
+                            ],
+                        }
+                    ],
+                    metadata={
+                        "event_attachments": [
+                            {
+                                "type": "document",
+                                "name": "notes.md",
+                                "contentType": "text/markdown",
+                                "path": "data/media/received/session-1/notes.md",
+                                "content": [
+                                    {
+                                        "type": "file",
+                                        "filename": "notes.md",
+                                        "mimeType": "text/markdown",
+                                        "data": "",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                )
+                await bus.publish_inbound(pending)
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            return LLMResponse(content="final", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        session_id = _create_session(engine)
+        final, _meta, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_id=session_id,
+        )
+
+        assert final == "final"
+        assert len(injected) == 1
+        second_call_msgs = mock_provider.chat.await_args_list[1].kwargs["messages"]
+        injected_user_msgs = [
+            m
+            for m in second_call_msgs
+            if m.get("role") == "user" and "data/media/received/session-1/notes.md" in m.get("content", "")
+        ]
+        assert len(injected_user_msgs) == 1
+
+        events = engine._session_store.read_events(session_id)
+        attachment_inject = next(
+            event
+            for event in events
+            if event.type == "message.injected"
+            and event.payload.get("kind") == "user_follow_up"
+        )
+        assert attachment_inject.payload["attachments"][0]["path"] == "data/media/received/session-1/notes.md"
+
+    async def test_pending_image_messages_preserve_image_payload_in_loop(
+        self, engine, bus, mock_provider
+    ):
+        """Mid-loop image follow-ups keep the image payload instead of flattening to header text only."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        async def chat_side_effect(messages, tools, model):
+            if mock_provider.chat.await_count == 1:
+                pending = InboundMessage(
+                    channel="telegram",
+                    sender_id="alice",
+                    chat_id="c1",
+                    content="",
+                    attachments=[
+                        {
+                            "type": "image",
+                            "name": "diagram.png",
+                            "contentType": "image/png",
+                            "path": "data/media/received/session-1/diagram.png",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "image": "data:image/png;base64,AAAA",
+                                    "filename": "diagram.png",
+                                }
+                            ],
+                        }
+                    ],
+                )
+                await bus.publish_inbound(pending)
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            return LLMResponse(content="final", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        session_id = _create_session(engine)
+        final, _meta, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_id=session_id,
+        )
+
+        assert final == "final"
+        assert len(injected) == 1
+
+        second_call_msgs = mock_provider.chat.await_args_list[1].kwargs["messages"]
+        injected_user_msgs = [
+            m
+            for m in second_call_msgs
+            if m.get("role") == "user" and isinstance(m.get("content"), list)
+        ]
+        assert len(injected_user_msgs) == 1
+        inject_content = injected_user_msgs[0]["content"]
+        assert inject_content[0]["type"] == "text"
+        assert "kind: user_follow_up" in inject_content[0]["text"]
+        assert any(part.get("type") == "image_url" for part in inject_content)
+        assert any(
+            part.get("type") == "text" and "diagram.png" in str(part.get("text", ""))
+            for part in inject_content
+        )
+
+    async def test_pending_binary_file_messages_keep_file_label_in_loop(
+        self, engine, bus, mock_provider
+    ):
+        """Mid-loop binary file follow-ups still inject a concrete file label into the prompt."""
+        tool_calls = [
+            ToolCallRequest(id="t1", name="fs", arguments={"action": "list", "path": "."})
+        ]
+        engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+
+        async def chat_side_effect(messages, tools, model):
+            if mock_provider.chat.await_count == 1:
+                pending = InboundMessage(
+                    channel="telegram",
+                    sender_id="alice",
+                    chat_id="c1",
+                    content="",
+                    attachments=[
+                        {
+                            "type": "file",
+                            "name": "archive.zip",
+                            "contentType": "application/zip",
+                            "path": "data/media/received/session-1/archive.zip",
+                            "content": [
+                                {
+                                    "type": "file",
+                                    "filename": "archive.zip",
+                                    "mimeType": "application/zip",
+                                    "data": "data:application/zip;base64,AAAA",
+                                }
+                            ],
+                        }
+                    ],
+                )
+                await bus.publish_inbound(pending)
+                return LLMResponse(content="calling tools", tool_calls=tool_calls)
+            return LLMResponse(content="final", tool_calls=[])
+
+        mock_provider.chat = AsyncMock(side_effect=chat_side_effect)
+
+        session_id = _create_session(engine)
+        final, _meta, injected = await engine._execute_loop(
+            messages=[{"role": "system", "content": "x"}],
+            max_iterations=5,
+            session_id=session_id,
+        )
+
+        assert final == "final"
+        assert len(injected) == 1
+
+        second_call_msgs = mock_provider.chat.await_args_list[1].kwargs["messages"]
+        injected_user_msgs = [
+            m
+            for m in second_call_msgs
+            if m.get("role") == "user" and "archive.zip" in str(m.get("content", ""))
+        ]
+        assert len(injected_user_msgs) == 1
+
     async def test_non_matching_session_messages_are_requeued(self, engine, bus, mock_provider):
         """Messages for other sessions stay in the queue."""
         other_msg = InboundMessage(
@@ -1671,6 +1875,36 @@ class TestRunLoop:
             await engine.run()
         finally:
             monkeypatch.setattr(asyncio, "wait_for", real_wait_for)
+
+    async def test_run_buffers_active_session_messages_instead_of_dispatching(self, engine):
+        session = engine.create_session(channel="web", chat_id="active-chat")
+        engine._set_session_active(session.session_id, True)
+        msg = InboundMessage(
+            channel="web",
+            sender_id="u",
+            chat_id="active-chat",
+            content="follow up",
+            session_id=session.session_id,
+        )
+
+        async def consume_inbound():
+            if not hasattr(consume_inbound, "seen"):
+                consume_inbound.seen = True  # type: ignore[attr-defined]
+                return msg
+            engine.stop()
+            raise asyncio.TimeoutError
+
+        engine.bus.consume_inbound = AsyncMock(side_effect=consume_inbound)  # type: ignore[method-assign]
+        engine._dispatch = AsyncMock()  # type: ignore[method-assign]
+
+        try:
+            await engine.run()
+        finally:
+            engine._set_session_active(session.session_id, False)
+
+        engine._dispatch.assert_not_awaited()
+        queued = engine._drain_pending_for_session(session_id=session.session_id)
+        assert queued == [msg]
 
 
 # ------------------------------------------------------------------

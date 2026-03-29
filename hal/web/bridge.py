@@ -379,7 +379,7 @@ class SessionBridge:
         )
         msg.sender_id = _WEB_SENDER_ID
         msg.metadata["event_attachments"] = event_attachments
-        await self._engine.bus.publish_inbound(msg)
+        self._engine.queue_pending_inbound(session_id, msg)
         return SessionTurnSubmission(
             manifest=self._require_session(session_id),
             delivery="intervention_queued",

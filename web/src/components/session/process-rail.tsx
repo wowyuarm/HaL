@@ -299,13 +299,16 @@ function mergeItemStatus(
 
 function NoteEntry({ note }: { note: ProcessNote }) {
   const noteLabel = formatNoteLabel(note.label)
+  const markerTone: 'hal' | 'human' | 'muted' | 'danger' =
+    note.tone === 'danger'
+      ? 'danger'
+      : note.tone === 'human-authored'
+        ? 'human'
+        : 'muted'
 
   return (
     <article className={PROCESS_TIMELINE_GRID}>
-      <EntryMarker
-        tone={entryMarkerTone(note.tone === 'danger' ? 'failed' : 'completed', false)}
-        offsetClass={noteLabel ? 'pt-3.5' : 'pt-4'}
-      />
+      <EntryMarker tone={markerTone} offsetClass={noteLabel ? 'pt-3.5' : 'pt-4'} />
       <div className="min-w-0 py-2.5">
         {noteLabel ? (
           <p className="text-[10.5px] font-medium uppercase leading-4 tracking-[0.14em] text-hal-muted">
@@ -340,7 +343,7 @@ function EntryMarker({
   tone,
   offsetClass = 'pt-4',
 }: {
-  tone: 'hal' | 'muted' | 'danger'
+  tone: 'hal' | 'human' | 'muted' | 'danger'
   offsetClass?: string
 }) {
   return (
@@ -350,6 +353,8 @@ function EntryMarker({
           'h-2 w-2 shrink-0 rounded-full',
           tone === 'danger'
             ? 'bg-danger'
+            : tone === 'human'
+              ? 'bg-human'
             : tone === 'hal'
               ? 'bg-accent'
               : 'bg-hal-muted opacity-60',

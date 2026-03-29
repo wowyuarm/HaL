@@ -49,6 +49,7 @@ export function HalAssistantMessage() {
         processPreview.summaryText,
       )
     : null
+  const processHighlight = processPreview?.hasHumanIntervention === true && !processOpen
 
   // Command responses: compact inline row, no bubble.
   if (isCommand) {
@@ -84,6 +85,8 @@ export function HalAssistantMessage() {
             "group relative isolate mb-1 flex w-full items-start gap-2 py-1.5 pr-1.5 text-left transition-all duration-fast ease-standard before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:transition-all before:duration-fast before:ease-standard before:content-['']",
             processOpen
               ? 'before:-inset-x-0.5 before:-inset-y-0.5 before:rounded-xl before:bg-hal-hover'
+              : processHighlight
+                ? 'before:-inset-x-0.5 before:-inset-y-0.5 before:rounded-xl before:bg-hal-hover'
               : directOnlyProcess
                 ? 'opacity-45 hover:opacity-75 hover:before:-inset-x-0.5 hover:before:-inset-y-0.5 hover:before:rounded-xl hover:before:bg-hal-hover'
                 : 'hover:before:-inset-x-0.5 hover:before:-inset-y-0.5 hover:before:rounded-xl hover:before:bg-hal-hover',
@@ -130,7 +133,11 @@ export function HalAssistantMessage() {
                 <span
                   className={cn(
                     'shrink-0 text-meta leading-5',
-                    processPreview.tone === 'danger' ? 'text-danger' : 'text-hal-muted',
+                    processPreview.tone === 'danger'
+                      ? 'text-danger'
+                      : processHighlight
+                        ? 'text-hal-primary'
+                        : 'text-hal-muted',
                   )}
                 >
                   {processPreview.countSummaryText}

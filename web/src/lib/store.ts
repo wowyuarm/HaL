@@ -19,6 +19,13 @@ import type {
   ThreadSummary,
 } from '@/lib/types'
 
+type InterventionAttachmentSummary = {
+  name: string
+  type: string
+  path?: string
+  contentType?: string
+}
+
 export type ReviewPanelState =
   | { kind: 'brief' }
   | { kind: 'process'; turnId: string }
@@ -84,6 +91,10 @@ interface HalStore {
   applySessionManifest: (manifest: SessionManifest) => void
   applySessionSnapshot: (manifest: SessionManifest, events: SessionEvent[]) => void
   appendSessionEvent: (event: SessionEvent) => void
+  addOptimisticIntervention: (
+    sessionId: string,
+    input: { content: string; attachments?: InterventionAttachmentSummary[] },
+  ) => void
 }
 
 function sessionTotalCount(counts: ThreadSummary['session_counts']): number {
@@ -119,6 +130,116 @@ function mergeSessionEvents(
   for (const event of current ?? []) merged.set(event.seq, event)
   for (const event of incoming) merged.set(event.seq, event)
   return [...merged.values()].sort((a, b) => a.seq - b.seq)
+}
+
+function isOptimisticFollowUpEvent(event: SessionEvent): boolean {
+  return (
+    event.type === 'message.injected' &&
+    event.payload.kind === 'user_follow_up' &&
+    event.payload.optimistic === true
+  )
+}
+
+function eventTextContent(event: SessionEvent): string {
+  const raw = event.payload.raw_content
+  if (typeof raw === 'string' && raw.trim()) return raw.trim()
+  const content = event.payload.content
+  if (typeof content === 'string' && content.trim()) return content.trim()
+  return ''
+}
+
+function eventAttachmentSignatures(event: SessionEvent): string[] {
+  const attachments = Array.isArray(event.payload.attachments) ? event.payload.attachments : []
+  return attachments
+    .map((attachment) => {
+      if (!attachment || typeof attachment !== 'object') return null
+      const record = attachment as Record<string, unknown>
+      const name = typeof record.name === 'string' ? record.name.trim() : ''
+      const type = typeof record.type === 'string' ? record.type.trim() : ''
+      if (!name) return null
+      return `${type}:${name}`
+    })
+    .filter((signature): signature is string => Boolean(signature))
+}
+
+function removeResolvedOptimisticEvents(
+  current: SessionEvent[],
+  incoming: SessionEvent,
+): SessionEvent[] {
+  if (incoming.type === 'turn.completed' || incoming.type === 'turn.failed') {
+    return current.filter(
+      (event) => !(isOptimisticFollowUpEvent(event) && event.turn_id === incoming.turn_id),
+    )
+  }
+
+  if (
+    incoming.type === 'message.injected' &&
+    incoming.payload.kind === 'user_follow_up' &&
+    incoming.turn_id
+  ) {
+    const incomingText = eventTextContent(incoming)
+    const incomingAttachments = eventAttachmentSignatures(incoming)
+    let removed = false
+    return current.filter((event) => {
+      if (removed) return true
+      if (!isOptimisticFollowUpEvent(event)) return true
+      if (event.turn_id !== incoming.turn_id) return true
+      const sameText = eventTextContent(event) === incomingText
+      const sameAttachments =
+        JSON.stringify(eventAttachmentSignatures(event)) === JSON.stringify(incomingAttachments)
+      if (!sameText && !sameAttachments) return true
+      removed = true
+      return false
+    })
+  }
+
+  return current
+}
+
+function findActiveTurnId(events: SessionEvent[] | undefined): string | null {
+  const ordered = [...(events ?? [])].sort((a, b) => b.seq - a.seq)
+  const completedTurns = new Set<string>()
+
+  for (const event of ordered) {
+    if (!event.turn_id) continue
+    if (event.type === 'turn.completed' || event.type === 'turn.failed') {
+      completedTurns.add(event.turn_id)
+      continue
+    }
+    if (!completedTurns.has(event.turn_id)) return event.turn_id
+  }
+
+  return null
+}
+
+function buildOptimisticInterventionEvent(
+  sessionId: string,
+  turnId: string,
+  currentEvents: SessionEvent[],
+  content: string,
+  attachments: InterventionAttachmentSummary[],
+): SessionEvent {
+  const maxSeq = currentEvents.reduce((max, event) => Math.max(max, event.seq), 0)
+  const nextSeq = Number((maxSeq + 0.001).toFixed(3))
+
+  return {
+    v: 1,
+    seq: nextSeq,
+    ts: new Date().toISOString(),
+    session_id: sessionId,
+    turn_id: turnId,
+    type: 'message.injected',
+    actor: 'user',
+    refs: {},
+    payload: {
+      kind: 'user_follow_up',
+      source: 'user',
+      raw_content: content,
+      content,
+      attachments,
+      optimistic: true,
+    },
+  }
 }
 
 function upsertManifest(
@@ -621,16 +742,40 @@ export const useHalStore = create<HalStore>((set, get) => ({
   appendSessionEvent: (event) =>
     set((state) => {
       const currentEvents = state.sessionEvents[event.session_id] ?? []
-      const alreadySeen = currentEvents.some((existing) => existing.seq === event.seq)
+      const prunedEvents = removeResolvedOptimisticEvents(currentEvents, event)
+      const alreadySeen = prunedEvents.some((existing) => existing.seq === event.seq)
       const currentManifest = state.sessionManifests[event.session_id]
       const patchedManifest = patchManifestFromEvent(currentManifest, event, { alreadySeen })
       const sessionEvents = {
         ...state.sessionEvents,
-        [event.session_id]: mergeSessionEvents(currentEvents, [event]),
+        [event.session_id]: mergeSessionEvents(prunedEvents, [event]),
       }
       return {
         sessionEvents,
         ...(patchedManifest ? mergeManifestIntoState(state, patchedManifest) : {}),
+      }
+    }),
+
+  addOptimisticIntervention: (sessionId, input) =>
+    set((state) => {
+      const currentEvents = state.sessionEvents[sessionId] ?? []
+      const turnId = findActiveTurnId(currentEvents)
+      const content = input.content.trim()
+      const attachments = (input.attachments ?? []).filter((attachment) => attachment.name.trim())
+      if (!turnId || (!content && attachments.length === 0)) return {}
+
+      const event = buildOptimisticInterventionEvent(
+        sessionId,
+        turnId,
+        currentEvents,
+        content,
+        attachments,
+      )
+      return {
+        sessionEvents: {
+          ...state.sessionEvents,
+          [sessionId]: mergeSessionEvents(currentEvents, [event]),
+        },
       }
     }),
 }))

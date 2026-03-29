@@ -12,10 +12,8 @@
 import { useMemo } from 'react'
 import { useExternalStoreRuntime } from '@assistant-ui/react'
 
-import { createHalAttachmentAdapter, serializeComposerAttachments } from '@/lib/attachments'
 import type { SessionEvent, SessionManifest } from '@/lib/types'
 import { convertSessionEvents, type SessionMessage } from '@/lib/session-adapter'
-import { submitSessionTurn } from '@/lib/api'
 import { useHalStore } from '@/lib/store'
 import type { ThreadMessageLike } from '@assistant-ui/react'
 
@@ -41,25 +39,6 @@ function toThreadMessageLike(msg: SessionMessage): ThreadMessageLike {
   return msg.role === 'assistant' && msg.status ? { ...base, status: msg.status } : base
 }
 
-// ---------------------------------------------------------------------------
-// Turn-running detection
-// ---------------------------------------------------------------------------
-
-/** Check if the last turn in the event stream is still running. */
-function detectRunningTurn(events: SessionEvent[]): boolean {
-  // Walk backwards to find the most recent turn lifecycle event.
-  for (let i = events.length - 1; i >= 0; i--) {
-    const type = events[i]!.type
-    if (type === 'turn.completed' || type === 'turn.failed') return false
-    if (type === 'turn.started') return true
-  }
-  return false
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 /**
  * Create an assistant-ui runtime backed by HaL session state.
  *
@@ -77,54 +56,24 @@ export function useHalRuntime(sessionId: string | null) {
   const manifest: SessionManifest | undefined = useHalStore((s) =>
     sessionId ? s.sessionManifests[sessionId] : undefined,
   )
-  const setError = useHalStore((s) => s.setError)
 
   // Convert events → messages (memoized on events reference).
   const messages = useMemo(() => convertSessionEvents(events), [events])
 
   // Derived state.
-  const isRunning = Boolean(sessionId && manifest?.status === 'active' && detectRunningTurn(events))
   const canSend = Boolean(sessionId && manifest?.status === 'active')
-  const attachmentsAdapter = useMemo(() => createHalAttachmentAdapter(), [])
 
   // Build the adapter.
   const runtime = useExternalStoreRuntime<SessionMessage>({
     messages,
     convertMessage: toThreadMessageLike,
-    isRunning,
+    // HaL accepts mid-loop user follow-ups and routes them into the current
+    // turn's process trail. assistant-ui treats thread-level "running" as a
+    // hard send lock, so keep the external runtime idle and rely on
+    // message-level assistant status for live rendering.
+    isRunning: false,
     isDisabled: !canSend,
-    adapters: {
-      attachments: attachmentsAdapter,
-    },
-
-    onNew: async (appendMessage) => {
-      if (!sessionId) return
-      const textPart = appendMessage.content.find(
-        (p): p is { type: 'text'; text: string } => p.type === 'text',
-      )
-      const content = textPart?.text ?? ''
-      const attachments = serializeComposerAttachments(appendMessage.attachments)
-      if (!content.trim() && attachments.length === 0) return
-
-      try {
-        const submission = await submitSessionTurn(sessionId, {
-          content,
-          attachments,
-        })
-        // Read latest store state to avoid stale closure on socketState.
-        const {
-          socketState: latestSocketState,
-          applySessionManifest,
-          loadSessionEvents,
-        } = useHalStore.getState()
-        if (latestSocketState !== 'live') {
-          applySessionManifest(submission.session)
-          await loadSessionEvents(sessionId)
-        }
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to submit turn.')
-      }
-    },
+    onNew: async () => {},
 
     // HaL does not support turn cancellation yet.
     // onCancel: async () => {},

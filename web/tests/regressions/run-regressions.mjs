@@ -9,6 +9,7 @@ const webDir = path.resolve(scriptDir, '../..')
 const TEST_COMMANDS = [
   { label: 'store regressions', script: 'test:store' },
   { label: 'process preview', script: 'test:process' },
+  { label: 'process follow-up', script: 'test:process-follow-up' },
   { label: 'session adapter', script: 'test:adapter' },
 ]
 
