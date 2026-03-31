@@ -138,6 +138,8 @@ export function eventSummary(event: SessionEvent): string {
       return `Session ended: ${stringValue(event.payload.reason) ?? 'completed'}`
     case 'session.compacted':
       return 'Session history compacted'
+    case 'session.compaction_failed':
+      return 'Session history compaction failed'
     case 'context.compiled': {
       const recalled = numberValue(event.payload.search_results) ?? 0
       const tokens = numberValue(event.payload.estimated_input_tokens)

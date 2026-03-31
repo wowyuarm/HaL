@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from hal.context.token_budget import trim_text_to_token_budget
 from hal.domain.session import SessionRuntimeState, build_session_id  # noqa: F401
 
 _MAX_COMPACTION_PASSES = 3
+_MANUAL_COMPACTION_PASSES = 1
 _TOOL_RESULT_SUMMARY_SUFFIX = "\n...[tool result truncated for replay]"
 _HISTORY_IMAGE_SUMMARY = "[prior image omitted from session replay]"
 _HISTORY_IMAGE_DROPPED = "[prior image dropped from session replay]"
@@ -45,19 +45,6 @@ def _estimate_history_tokens(history: list[dict[str, object]], *, model: str | N
     return estimate_history_tokens(history, model=model)
 
 
-def _split_history_for_compaction(
-    history: list[dict[str, object]],
-    *,
-    keep_recent_user_turns: int,
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    from hal.runtime.engine.session_compaction import split_history_for_compaction
-
-    return split_history_for_compaction(
-        history,
-        keep_recent_user_turns=keep_recent_user_turns,
-    )
-
-
 def _normalize_checkpoint(text: str) -> str:
     from hal.runtime.engine.session_compaction import normalize_checkpoint
 
@@ -70,16 +57,27 @@ class SessionCompactionSettings:
 
     token_budget: int
     request_bytes_threshold: int
-    keep_recent_turns: int
     checkpoint_tokens: int
     history_image_replay: str
     tool_result_replay_max_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class ManualSessionCompactionResult:
+    """Outcome payload for explicit full-history compaction commands."""
+
+    history: list[dict[str, object]]
+    before_tokens: int
+    after_tokens: int
+    before_request_bytes: int
+    after_request_bytes: int
+    passes: int
+
+
 def resolve_session_compaction_settings(engine_config: object) -> SessionCompactionSettings | None:
     """Resolve compaction settings, or None when compaction should be skipped."""
     session = getattr(engine_config, "session", engine_config)
-    if not bool(getattr(session, "compaction_enabled", False)):
+    if not bool(getattr(session, "auto_compaction_enabled", False)):
         return None
 
     token_budget = int(getattr(session, "compaction_token_budget", 0))
@@ -87,10 +85,6 @@ def resolve_session_compaction_settings(engine_config: object) -> SessionCompact
     if token_budget <= 0 and request_bytes_threshold <= 0:
         return None
 
-    keep_recent_turns = max(
-        int(getattr(session, "compaction_recent_user_turns", 2)),
-        1,
-    )
     checkpoint_tokens = max(
         int(getattr(session, "compaction_checkpoint_tokens", 1200)),
         100,
@@ -98,7 +92,6 @@ def resolve_session_compaction_settings(engine_config: object) -> SessionCompact
     return SessionCompactionSettings(
         token_budget=token_budget,
         request_bytes_threshold=max(request_bytes_threshold, 0),
-        keep_recent_turns=keep_recent_turns,
         checkpoint_tokens=checkpoint_tokens,
         history_image_replay=str(getattr(session, "history_image_replay", "summary") or "summary"),
         tool_result_replay_max_bytes=max(
@@ -170,7 +163,7 @@ async def maybe_compact_session_history(
         passes,
     )
 
-    _record_session_compaction(
+    await _record_session_compaction(
         engine,
         session_id=session_id,
         before_tokens=before_tokens,
@@ -180,6 +173,69 @@ async def maybe_compact_session_history(
         passes=passes,
     )
     return compacted
+
+
+async def compact_full_session_history(
+    engine: Any,
+    *,
+    session_id: str,
+    history: list[dict[str, object]],
+    token_model: str | None,
+) -> ManualSessionCompactionResult:
+    """Compact full in-memory history into one checkpoint for explicit /compact commands."""
+    session_cfg = getattr(engine._engine_config, "session", None)
+    history_image_replay = str(getattr(session_cfg, "history_image_replay", "summary") or "summary")
+    tool_result_replay_max_bytes = max(
+        int(getattr(session_cfg, "tool_result_replay_max_bytes", 0)),
+        0,
+    )
+    checkpoint_tokens = max(int(getattr(session_cfg, "compaction_checkpoint_tokens", 1200)), 100)
+
+    before_tokens = _estimate_history_tokens(history, model=token_model)
+    replay_history, _ = slim_messages_for_replay(
+        history,
+        image_replay_mode=history_image_replay,
+        tool_result_max_bytes=tool_result_replay_max_bytes,
+    )
+    before_request_bytes = estimate_messages_request_bytes(replay_history)
+
+    checkpoint = await engine._generate_session_checkpoint(
+        list(history),
+        token_model=token_model,
+        fallback_on_error=False,
+    )
+    checkpoint = trim_text_to_token_budget(
+        _normalize_checkpoint(checkpoint),
+        checkpoint_tokens,
+        model=token_model,
+        suffix="\n\n[...checkpoint truncated]",
+    )
+    compacted = [{"role": "assistant", "content": checkpoint}]
+    compacted_replay, _ = slim_messages_for_replay(
+        compacted,
+        image_replay_mode=history_image_replay,
+        tool_result_max_bytes=tool_result_replay_max_bytes,
+    )
+    after_tokens = _estimate_history_tokens(compacted, model=token_model)
+    after_request_bytes = estimate_messages_request_bytes(compacted_replay)
+
+    await _record_session_compaction(
+        engine,
+        session_id=session_id,
+        before_tokens=before_tokens,
+        after_tokens=after_tokens,
+        before_request_bytes=before_request_bytes,
+        after_request_bytes=after_request_bytes,
+        passes=_MANUAL_COMPACTION_PASSES,
+    )
+    return ManualSessionCompactionResult(
+        history=compacted,
+        before_tokens=before_tokens,
+        after_tokens=after_tokens,
+        before_request_bytes=before_request_bytes,
+        after_request_bytes=after_request_bytes,
+        passes=_MANUAL_COMPACTION_PASSES,
+    )
 
 
 async def _compact_history_to_budget(
@@ -242,21 +298,21 @@ async def _compact_history_pass(
     token_model: str | None,
     settings: SessionCompactionSettings,
 ) -> list[dict[str, object]] | None:
-    older, tail = _split_history_for_compaction(
-        compacted,
-        keep_recent_user_turns=settings.keep_recent_turns,
-    )
-    if not older:
+    if not compacted:
         return None
 
-    checkpoint = await engine._generate_session_checkpoint(older, token_model=token_model)
+    checkpoint = await engine._generate_session_checkpoint(
+        compacted,
+        token_model=token_model,
+        fallback_on_error=True,
+    )
     checkpoint = trim_text_to_token_budget(
         _normalize_checkpoint(checkpoint),
         settings.checkpoint_tokens,
         model=token_model,
         suffix="\n\n[...checkpoint truncated]",
     )
-    return [{"role": "assistant", "content": checkpoint}, *tail]
+    return [{"role": "assistant", "content": checkpoint}]
 
 
 def _history_within_budget(
@@ -286,7 +342,7 @@ def _history_within_budget(
     return within_tokens and within_bytes
 
 
-def _record_session_compaction(
+async def _record_session_compaction(
     engine: Any,
     *,
     session_id: str,
@@ -300,18 +356,16 @@ def _record_session_compaction(
     state = engine._sessions.get(session_id)
     if state is None:
         return
-    asyncio.get_event_loop().create_task(
-        state.event_publisher.emit(
-            "session.compacted",
-            actor="engine",
-            payload={
-                "before_tokens": before_tokens,
-                "after_tokens": after_tokens,
-                "before_request_bytes": before_request_bytes,
-                "after_request_bytes": after_request_bytes,
-                "passes": passes,
-            },
-        )
+    await state.event_publisher.emit(
+        "session.compacted",
+        actor="engine",
+        payload={
+            "before_tokens": before_tokens,
+            "after_tokens": after_tokens,
+            "before_request_bytes": before_request_bytes,
+            "after_request_bytes": after_request_bytes,
+            "passes": passes,
+        },
     )
 
 
@@ -513,43 +567,46 @@ def build_session_snapshot_messages(
 # ---------------------------------------------------------------------------
 
 _SESSION_COMPACTION_PROMPT = """\
-You compact older messages from a collaboration session into a checkpoint summary.
-The checkpoint replaces all older messages — the conversation continues with only
-your checkpoint and the most recent turns preserved verbatim.
+You are compacting a HaL collaboration session into one checkpoint summary.
 
-Your checkpoint must enable seamless continuation, as if no compaction happened.
+This is full-history compaction: after compaction, no raw prior turns remain.
+Your checkpoint must preserve enough truth for seamless continuation.
 
-Before your checkpoint, wrap your analysis in <analysis> tags. Chronologically
-review the messages, identifying:
-- The user's explicit requests, intent changes, and corrections
-- Decisions made and approaches agreed upon
-- Key technical details (file paths, code changes, function signatures, tool outcomes)
-- Errors encountered and how they were resolved
-- What is currently in progress and the immediate next step
+Before final output, you may reason in <analysis>...</analysis>.
+After </analysis>, output markdown that starts with `[Session Checkpoint]`.
 
-Then output your checkpoint after the closing </analysis> tag.
+Required sections in your checkpoint:
 
-## Preservation priorities (high to low)
+1. Primary Request and Intent
+- Capture the user's explicit goals.
+- Include preference changes, corrections, and boundary constraints.
 
-1. User's explicit requests, corrections, and preference changes
-2. Decisions and agreed approaches
-3. Concrete outcomes: files changed, code patterns, tool results
-4. Errors and their resolutions
-5. Current work state and next step
+2. Decisions and Constraints
+- Record decisions already made and what was explicitly rejected.
+- Keep only high-signal conclusions.
 
-## What to omit
+3. Concrete Work and Evidence
+- Summarize concrete outcomes (files/commands/tool results/errors/fixes).
+- Include only critical snippets or identifiers; avoid long dumps.
 
-- Repetitive discussion — keep only conclusions
-- Full file contents — reference by path, include only critical snippets
-- Social pleasantries, thinking-out-loud that led nowhere
-- Information available elsewhere in the agent's context (identity, thread metadata,
-  long-term memory, tool schemas — the agent already has these)
+4. All User Messages (Non-tool)
+- Capture key user messages, especially latest ones.
+- Include short direct quotes for critical instructions or corrections.
 
-## Output format
+5. Current Work
+- Describe exactly what was in progress right before compaction.
 
-Output markdown. Structure it however best captures this conversation's content —
-there is no fixed template. Lead with the most critical information.
-The checkpoint must start with `[Session Checkpoint]` on the first line.
+6. Pending Tasks
+- List explicit unfinished tasks requested by the user.
+
+7. Next Step
+- Provide one immediate next step that is directly aligned with the latest
+  user request. Do not revive stale directions.
+
+Rules:
+- Prioritize factual continuity over style.
+- If uncertain, say `unknown` instead of guessing.
+- Do not add new plans that were not requested.
 """
 
 
@@ -558,6 +615,7 @@ async def generate_session_checkpoint(
     *,
     compactable_messages: list[dict[str, object]],
     token_model: str | None,
+    fallback_on_error: bool = True,
 ) -> str:
     """Generate one compaction checkpoint for a slice of older messages."""
     from hal.runtime.engine.session_compaction import (
@@ -571,13 +629,15 @@ async def generate_session_checkpoint(
     prompt = (
         f"Compacting {len(compactable_messages)} older messages (~{compacted_tokens} tokens).\n\n"
         "Messages to compact:\n"
-        f"{render_history_for_compaction(compactable_messages)}"
+        f"{render_history_for_compaction(compactable_messages, model=token_model)}"
     )
 
     provider = getattr(engine.subagents, "provider", None) or engine.provider
     model = getattr(engine.subagents, "model", None) or engine.model
     chat = getattr(provider, "chat", None)
     if not callable(chat):
+        if not fallback_on_error:
+            raise RuntimeError("session compaction provider chat() is unavailable")
         return build_fallback_checkpoint(
             compacted_messages=len(compactable_messages),
             compacted_tokens=compacted_tokens,
@@ -595,8 +655,12 @@ async def generate_session_checkpoint(
         content = getattr(response, "content", None)
         if isinstance(content, str) and content.strip():
             return normalize_checkpoint(content)
+        if not fallback_on_error:
+            raise RuntimeError("session compaction returned empty checkpoint content")
     except Exception as e:
         logger.warning(f"Session compaction failed: {e}")
+        if not fallback_on_error:
+            raise
 
     return build_fallback_checkpoint(
         compacted_messages=len(compactable_messages),

@@ -22,6 +22,7 @@ from hal.domain.events import (
     CONTEXT_COMPILED,
     LOOP_STARTED,
     MESSAGE_INJECTED,
+    SESSION_COMPACTION_FAILED,
     STATUS_CHANGED,
     TURN_COMPLETED,
     TURN_FAILED,
@@ -238,6 +239,25 @@ def _is_drop_command(content: str) -> bool:
     return content.strip() == "/drop"
 
 
+def _is_compact_command(content: str) -> bool:
+    """Return True when *content* is a ``/compact`` session command."""
+    return content.strip() == "/compact"
+
+
+def _format_compaction_result_message(
+    *,
+    before_tokens: int,
+    after_tokens: int,
+    before_request_bytes: int,
+    after_request_bytes: int,
+) -> str:
+    return (
+        "Session compacted"
+        f" · tokens {before_tokens:,} -> {after_tokens:,}"
+        f" · bytes {before_request_bytes:,} -> {after_request_bytes:,}"
+    )
+
+
 async def _handle_brief_command(
     *,
     engine: Any,
@@ -296,6 +316,82 @@ async def _handle_drop_command(
         chat_id=chat_id,
         content="Session dropped. Next message starts a fresh session.",
         metadata={"system_meta": True, "kind": "session_drop"},
+    )
+
+
+async def _handle_compact_command(
+    *,
+    engine: Any,
+    session_state: Any,
+    channel: str,
+    chat_id: str,
+) -> OutboundMessage:
+    """Handle /compact: replace full in-memory history with one checkpoint."""
+    session_id = session_state.session_id
+
+    engine._set_session_active(session_id, True)
+    await session_state.event_publisher.emit(
+        STATUS_CHANGED,
+        actor="engine",
+        payload={
+            "status": "compacting",
+            "kind": "session_compact_start",
+            "message": "Compacting session history...",
+        },
+    )
+
+    history = engine._get_session_history(session_id)
+    resolved_model = engine.provider.resolve_model(engine.model)
+
+    try:
+        result = await engine._compact_full_session_history(
+            session_id=session_id,
+            history=history,
+            token_model=resolved_model,
+        )
+    except Exception as e:
+        await session_state.event_publisher.emit(
+            SESSION_COMPACTION_FAILED,
+            actor="engine",
+            payload={"error": str(e).strip() or "unknown_error"},
+        )
+        engine._set_session_active(session_id, False)
+        return OutboundMessage(
+            channel=channel,
+            chat_id=chat_id,
+            content="Session compact failed · history unchanged",
+            metadata={"system_meta": True, "kind": "session_compact_failed"},
+        )
+
+    engine._set_session_history(session_id, result.history)
+    engine._touch_session(session_id)
+    snapshot_messages = engine._build_session_snapshot_messages(
+        session_id=session_id,
+        token_model=resolved_model,
+    )
+    engine._store_session_snapshot(
+        session_id=session_id,
+        messages=snapshot_messages,
+        final_content=None,
+    )
+
+    logger.info(
+        f"Session compacted: tokens {result.before_tokens:,} -> {result.after_tokens:,}, "
+        f"bytes {result.before_request_bytes:,} -> {result.after_request_bytes:,}, "
+        f"{result.passes} pass(es)",
+    )
+    engine._set_session_active(session_id, False)
+
+    return OutboundMessage(
+        channel=channel,
+        chat_id=chat_id,
+        content=_format_compaction_result_message(
+            before_tokens=result.before_tokens,
+            after_tokens=result.after_tokens,
+            before_request_bytes=result.before_request_bytes,
+            after_request_bytes=result.after_request_bytes,
+        ),
+        metadata={"system_meta": True, "kind": "session_compact_complete"},
     )
 
 
@@ -566,6 +662,15 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
                 channel=channel,
                 chat_id=chat_id,
                 turn_id=turn_id,
+            )
+
+        # /compact command — compact full session history and keep session alive
+        if _is_compact_command(msg.content):
+            return await _handle_compact_command(
+                engine=engine,
+                session_state=session_state,
+                channel=channel,
+                chat_id=chat_id,
             )
 
         _record_user_turn(

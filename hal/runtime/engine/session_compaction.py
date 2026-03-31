@@ -7,12 +7,11 @@ from typing import Any
 
 from hal.context.token_counter import count_content_tokens
 from hal.domain.message_payloads import render_message_payload_summary
+from hal.runtime.worker_inputs import build_history_input_lines, render_worker_input_lines
 
 _SESSION_CHECKPOINT_HEADER = "[Session Checkpoint]"
-_MAX_RENDER_CHAR_PER_MESSAGE = 2400
-_MAX_RENDER_TOTAL_CHARS = 60000
-_MAX_REASONING_CHAR_PER_MESSAGE = 1200
-_MAX_TOOL_ARGS_CHAR_PER_MESSAGE = 600
+_MAX_RENDER_TOKENS_PER_MESSAGE = 1200
+_MAX_RENDER_TOTAL_TOKENS = 12_000
 
 _ANALYSIS_TAG_RE = re.compile(r"<analysis>.*?</analysis>\s*", re.DOTALL)
 
@@ -31,46 +30,22 @@ def estimate_history_tokens(history: list[dict[str, Any]], *, model: str | None 
     return total
 
 
-def split_history_for_compaction(
-    history: list[dict[str, Any]],
+def render_history_for_compaction(
+    messages: list[dict[str, Any]],
     *,
-    keep_recent_user_turns: int,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split history into (older_to_compact, recent_tail_to_keep)."""
-    if keep_recent_user_turns <= 0:
-        return list(history), []
-
-    user_indexes = [i for i, msg in enumerate(history) if msg.get("role") == "user"]
-    if len(user_indexes) <= keep_recent_user_turns:
-        return [], list(history)
-
-    cut = user_indexes[-keep_recent_user_turns]
-    return list(history[:cut]), list(history[cut:])
-
-
-def render_history_for_compaction(messages: list[dict[str, Any]]) -> str:
+    model: str | None = None,
+) -> str:
     """Render history slice into compact textual form for worker-model compaction."""
-    parts: list[str] = []
-    total_chars = 0
-
-    for idx, message in enumerate(messages, 1):
-        role = str(message.get("role", ""))
-        rendered = render_message_payload_summary(
-            message,
-            max_content_chars=_MAX_RENDER_CHAR_PER_MESSAGE,
-            max_reasoning_chars=_MAX_REASONING_CHAR_PER_MESSAGE,
-            max_tool_args_chars=_MAX_TOOL_ARGS_CHAR_PER_MESSAGE,
-        )
-        block = f"[{idx}] {role}"
-        if rendered:
-            block += f"\n{rendered}"
-        total_chars += len(block)
-        if total_chars > _MAX_RENDER_TOTAL_CHARS:
-            parts.append("[...earlier compactable messages truncated...]")
-            break
-        parts.append(block)
-
-    return "\n\n".join(parts)
+    rendered = render_worker_input_lines(
+        build_history_input_lines(messages),
+        model=model,
+        max_line_tokens=_MAX_RENDER_TOKENS_PER_MESSAGE,
+        max_total_tokens=_MAX_RENDER_TOTAL_TOKENS,
+        empty_text="[...earlier compactable messages truncated...]",
+        line_suffix="\n...[truncated]",
+        total_suffix="\n\n[...earlier compactable messages truncated...]",
+    )
+    return rendered or "[...earlier compactable messages truncated...]"
 
 
 def normalize_checkpoint(content: str) -> str:
@@ -106,5 +81,4 @@ __all__ = [
     "estimate_history_tokens",
     "normalize_checkpoint",
     "render_history_for_compaction",
-    "split_history_for_compaction",
 ]

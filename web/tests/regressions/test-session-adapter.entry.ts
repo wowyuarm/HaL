@@ -185,3 +185,45 @@ runTest('scope updates summarize added and removed threads', () => {
   assert.equal(messages[0]?.content[0]?.type, 'text')
   assert.equal(messages[0]?.content[0]?.text, 'Scope updated: +memory-bank / \u2212research-notes')
 })
+
+runTest('session compact events become standalone system rows', () => {
+  const messages = convertSessionEvents([
+    makeEvent({
+      seq: 1,
+      turnId: null,
+      type: 'session.compacted',
+      payload: {
+        before_tokens: 12345,
+        after_tokens: 678,
+        before_request_bytes: 900000,
+        after_request_bytes: 72000,
+        passes: 1,
+      },
+    }),
+    makeEvent({
+      seq: 2,
+      turnId: null,
+      type: 'session.compaction_failed',
+      payload: {
+        error: 'api unavailable',
+      },
+    }),
+  ])
+
+  assert.equal(messages.length, 2)
+  assert.equal(messages[0]?.role, 'system')
+  assert.equal(messages[0]?.halMeta.systemTone, 'muted')
+  assert.equal(messages[0]?.content[0]?.type, 'text')
+  assert.equal(
+    messages[0]?.content[0]?.text,
+    'Session compacted · tokens 12,345 -> 678 · bytes 900,000 -> 72,000 · 1 pass',
+  )
+
+  assert.equal(messages[1]?.role, 'system')
+  assert.equal(messages[1]?.halMeta.systemTone, 'danger')
+  assert.equal(messages[1]?.content[0]?.type, 'text')
+  assert.equal(
+    messages[1]?.content[0]?.text,
+    'Session compact failed · history unchanged · api unavailable',
+  )
+})

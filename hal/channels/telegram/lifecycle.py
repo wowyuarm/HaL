@@ -39,6 +39,7 @@ class TelegramLifecycleMixin:
 
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("drop", self._on_drop))
+        self._app.add_handler(CommandHandler("compact", self._on_compact))
         self._app.add_handler(CommandHandler("context", self._on_context))
         self._app.add_handler(CommandHandler("help", self._on_help))
         self._app.add_handler(CommandHandler("brief", self._on_brief))
@@ -144,6 +145,30 @@ class TelegramLifecycleMixin:
             sender_id=sender_id,
             chat_id=str_chat_id,
             content="/drop",
+        )
+
+    async def _on_compact(self, update, context) -> None:
+        """Handle /compact command — forward to engine for manual session compaction."""
+        if not update.message or not update.effective_user:
+            return
+
+        message = update.message
+        user = update.effective_user
+        sender_id = self._sender_id_for_allowlist(user)
+        if not self.is_allowed(sender_id):
+            await message.reply_text("⛔ You are not allowed to use this bot.")
+            return
+
+        str_chat_id = str(message.chat_id)
+        sender_id = str(user.id)
+        if user.username:
+            sender_id = f"{sender_id}|{user.username}"
+
+        content = message.text or "/compact"
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str_chat_id,
+            content=content,
         )
 
     async def _send_startup_notification(self) -> None:

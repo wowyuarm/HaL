@@ -5,22 +5,8 @@ from hal.runtime.engine.session_compaction import (
     estimate_history_tokens,
     normalize_checkpoint,
     render_history_for_compaction,
-    split_history_for_compaction,
 )
-
-
-def test_split_history_for_compaction_keeps_recent_user_turns() -> None:
-    history = [
-        {"role": "user", "content": "u1"},
-        {"role": "assistant", "content": "a1"},
-        {"role": "user", "content": "u2"},
-        {"role": "assistant", "content": "a2"},
-        {"role": "user", "content": "u3"},
-        {"role": "assistant", "content": "a3"},
-    ]
-    older, tail = split_history_for_compaction(history, keep_recent_user_turns=1)
-    assert [m["content"] for m in older] == ["u1", "a1", "u2", "a2"]
-    assert [m["content"] for m in tail] == ["u3", "a3"]
+from hal.runtime.session import _SESSION_COMPACTION_PROMPT
 
 
 def test_normalize_checkpoint_adds_header() -> None:
@@ -99,3 +85,9 @@ def test_normalize_checkpoint_strips_analysis_tags() -> None:
     assert "<analysis>" not in result
     assert "[Session Checkpoint]" in result
     assert "## Work done" in result
+
+
+def test_session_compaction_prompt_emphasizes_full_history_and_user_quotes() -> None:
+    assert "full-history compaction" in _SESSION_COMPACTION_PROMPT
+    assert "All User Messages (Non-tool)" in _SESSION_COMPACTION_PROMPT
+    assert "Include short direct quotes" in _SESSION_COMPACTION_PROMPT

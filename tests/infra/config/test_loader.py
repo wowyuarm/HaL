@@ -248,10 +248,9 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.engine.context_advisor_enabled is True
 
     # Engine → session
-    assert cfg.engine.session.compaction_enabled is True
+    assert cfg.engine.session.compaction_enabled is False
     assert cfg.engine.session.compaction_token_budget == 150000
     assert cfg.engine.session.compaction_request_bytes_threshold == 900_000
-    assert cfg.engine.session.compaction_recent_user_turns == 2
     assert cfg.engine.session.compaction_checkpoint_tokens == 1800
     assert cfg.engine.session.history_image_replay == "summary"
     assert cfg.engine.session.tool_result_replay_max_bytes == 12_000
@@ -260,7 +259,6 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.engine.brief.enabled is True
     assert cfg.engine.brief.max_iterations == 30
     assert cfg.engine.brief.max_event_tokens == 1500
-    assert cfg.engine.brief.max_brief_tokens == 8000
     assert cfg.engine.brief.max_prompt_tokens == 100_000
 
     # Engine → llm_retry

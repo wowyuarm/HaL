@@ -33,6 +33,7 @@ class TelegramCommandsMixin:
             "🔴 <b>HaL commands</b>\n\n"
             "/start — Start the bot\n"
             "/brief — Update thread briefs for this session\n"
+            "/compact — Compact session history into one checkpoint\n"
             "/drop — End session without briefing\n"
             "/context [message] — Inspect current LLM context\n"
             "/help — Show this help message\n\n"

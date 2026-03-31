@@ -184,16 +184,13 @@ class RecallConfig(_StrictModel):
 class SessionConfig(_StrictModel):
     """Session lifecycle and compaction configuration."""
 
-    compaction_enabled: bool = True  # Enable in-session history compaction when budget exceeded
+    auto_compaction_enabled: bool = False  # Enable automatic in-session compaction on token/byte budget (does not affect /compact)
     compaction_token_budget: int = Field(
         default=150000, ge=1000
     )  # Approx token ceiling for in-memory session history
     compaction_request_bytes_threshold: int = Field(
         default=900_000, ge=0
     )  # Proactively compact/rewrite replayed history when serialized request bodies approach this size (0 = disable)
-    compaction_recent_user_turns: int = Field(
-        default=2, ge=1
-    )  # Keep latest N user turns raw when compacting older history
     compaction_checkpoint_tokens: int = Field(
         default=1800, ge=100
     )  # Max token budget per generated checkpoint block
@@ -211,7 +208,6 @@ class BriefConfig(_StrictModel):
     enabled: bool = True  # Enable /brief command processing
     max_iterations: int = Field(default=30, ge=1)  # Max tool-loop iterations for brief worker
     max_event_tokens: int = Field(default=1500, ge=100)  # Per-event token cap in event stream
-    max_brief_tokens: int = Field(default=8000, ge=100)  # Per-thread BRIEF.md token cap for input
     max_prompt_tokens: int = Field(
         default=100_000, ge=1000
     )  # Overall prompt token budget for brief worker

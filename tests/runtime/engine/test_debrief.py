@@ -4,16 +4,16 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from hal.domain.events import SessionEvent
 from hal.runtime.brief import (
     _build_brief_system_prompt,
     _build_brief_tools,
     _build_brief_user_prompt,
-    _cap_text,
-    _event_preview,
     extract_touched_threads,
     format_session_events_for_prompt,
     resolve_brief_thread_order,
 )
+from hal.runtime.worker_inputs import build_event_input_lines, cap_text_to_tokens
 from hal.workspace import (
     build_episode_file_name,
     ensure_recent_episodes_section,
@@ -82,20 +82,18 @@ def test_resolve_brief_thread_order_expands_related_and_prefers_priority() -> No
 
 def test_cap_text_passes_short_text_through() -> None:
     short = "hello world"
-    assert _cap_text(short) == short
+    assert cap_text_to_tokens(short, max_tokens=1500, suffix="...[truncated]") == short
 
 
 def test_cap_text_truncates_large_text() -> None:
     # ~1500 tokens ≈ ~6000 chars; create something well over that
     large = "word " * 3000  # ~15000 chars ≈ ~3750 tokens
-    result = _cap_text(large)
+    result = cap_text_to_tokens(large, max_tokens=1500, suffix="...[truncated]")
     assert len(result) < len(large)
     assert result.endswith("...[truncated]")
 
 
 def test_format_session_events_respects_per_event_cap() -> None:
-    from hal.domain.events import SessionEvent
-
     huge_content = "x" * 20000  # ~5000 tokens, well over default max_event_tokens (1500)
     events = [
         SessionEvent(
@@ -122,8 +120,6 @@ def test_format_session_events_respects_per_event_cap() -> None:
 
 
 def test_format_session_events_overall_budget() -> None:
-    from hal.domain.events import SessionEvent
-
     # Create many events that individually fit but collectively exceed a small budget
     events = [
         SessionEvent(
@@ -143,26 +139,45 @@ def test_format_session_events_overall_budget() -> None:
 
 def test_event_preview_tool_call_with_result_preview() -> None:
     """tool_call events with result_preview render as 'tool -> preview'."""
-    payload = {
-        "tool": "fs",
-        "args": {"action": "read", "path": "/some/file"},
-        "result_size": 500,
-        "result_preview": "file contents here",
-    }
-    preview = _event_preview(payload)
-    assert "fs" in preview
-    assert "\u2192" in preview
-    assert "file contents here" in preview
+    lines = build_event_input_lines(
+        [
+            SessionEvent(
+                seq=1,
+                session_id="s1",
+                type="tool_call",
+                actor="engine",
+                payload={
+                    "tool": "fs",
+                    "args": {"action": "read", "path": "/some/file"},
+                    "result_size": 500,
+                    "result_preview": "file contents here",
+                },
+            )
+        ]
+    )
+    assert "fs" in lines[0]
+    assert "\u2192" in lines[0]
+    assert "file contents here" in lines[0]
 
 
 def test_event_preview_tool_call_without_result_preview() -> None:
     """tool_call events without result_preview fall back to tool name only."""
-    payload = {
-        "tool": "exec",
-        "args": {"command": "ls"},
-        "result_size": 100,
-    }
-    assert _event_preview(payload) == "exec"
+    lines = build_event_input_lines(
+        [
+            SessionEvent(
+                seq=1,
+                session_id="s1",
+                type="tool_call",
+                actor="engine",
+                payload={
+                    "tool": "exec",
+                    "args": {"command": "ls"},
+                    "result_size": 100,
+                },
+            )
+        ]
+    )
+    assert lines[0].endswith(": exec")
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +204,16 @@ def test_is_drop_command() -> None:
     assert _is_drop_command("/drop extra") is False
     assert _is_drop_command("/dropping") is False
     assert _is_drop_command("hello /drop") is False
+
+
+def test_is_compact_command() -> None:
+    from hal.runtime.engine.processing import _is_compact_command
+
+    assert _is_compact_command("/compact") is True
+    assert _is_compact_command("  /compact  ") is True
+    assert _is_compact_command("/compact extra") is False
+    assert _is_compact_command("/compaction") is False
+    assert _is_compact_command("hello /compact") is False
 
 
 def test_build_brief_tools_restricted(tmp_path: Path) -> None:

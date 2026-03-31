@@ -479,11 +479,64 @@ class TestDispatch:
 
 
 class TestSessionCompaction:
+    async def test_compact_command_replaces_history_with_checkpoint(self, engine):
+        session_id = _create_session(engine)
+        history = [
+            {"role": "user", "content": "request one " * 30},
+            {"role": "assistant", "content": "answer one " * 30},
+            {"role": "user", "content": "request two " * 30},
+            {"role": "assistant", "content": "answer two " * 30},
+        ]
+        engine._set_session_history(session_id, history)
+        engine._generate_session_checkpoint = AsyncMock(  # type: ignore[method-assign]
+            return_value="[Session Checkpoint]\n\n- summary"
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/compact")
+        out = await engine.process(msg)
+        # Allow async event publisher tasks to flush.
+        await asyncio.sleep(0)
+
+        assert out is not None
+        assert out.content.startswith("Session compacted")
+        assert out.metadata.get("kind") == "session_compact_complete"
+        compacted = engine._get_session_history(session_id)
+        assert len(compacted) == 1
+        assert compacted[0]["role"] == "assistant"
+        assert "[Session Checkpoint]" in str(compacted[0]["content"])
+        event_types = [event.type for event in engine._session_store.read_events(session_id)]
+        assert "session.compacted" in event_types
+        assert "session.compaction_failed" not in event_types
+
+    async def test_compact_command_failure_keeps_history_unchanged(self, engine):
+        session_id = _create_session(engine)
+        history = [
+            {"role": "user", "content": "keep me"},
+            {"role": "assistant", "content": "still here"},
+        ]
+        engine._set_session_history(session_id, history)
+        engine._generate_session_checkpoint = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("api unavailable")
+        )
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/compact")
+        out = await engine.process(msg)
+
+        assert out is not None
+        assert out.content == "Session compact failed · history unchanged"
+        assert out.metadata.get("kind") == "session_compact_failed"
+        assert engine._get_session_history(session_id) == history
+        events = engine._session_store.read_events(session_id)
+        event_types = [event.type for event in events]
+        assert "session.compaction_failed" in event_types
+        assert "session.compacted" not in event_types
+        failure_event = next(event for event in events if event.type == "session.compaction_failed")
+        assert "api unavailable" in str(failure_event.payload.get("error"))
+
     async def test_compacts_history_when_token_budget_exceeded(self, engine):
         session_id = _create_session(engine)
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 80
-        engine._engine_config.session.compaction_recent_user_turns = 1
         engine._engine_config.session.compaction_checkpoint_tokens = 200
 
         history = [
@@ -503,10 +556,9 @@ class TestSessionCompaction:
         # Allow event publisher tasks to flush
         await asyncio.sleep(0)
 
-        assert len(compacted) < len(history)
+        assert len(compacted) == 1
         assert compacted[0]["role"] == "assistant"
         assert "[Session Checkpoint]" in str(compacted[0]["content"])
-        assert any(m.get("content") == "latest request" for m in compacted)
 
     async def test_skips_compaction_when_under_budget(self, engine):
         session_id = _create_session(engine)
@@ -530,7 +582,6 @@ class TestSessionCompaction:
         session_id = _create_session(engine)
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 120
-        engine._engine_config.session.compaction_recent_user_turns = 1
         engine._engine_config.session.compaction_checkpoint_tokens = 200
 
         history = [
@@ -566,7 +617,6 @@ class TestSessionCompaction:
         engine._engine_config.session.compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 10000
         engine._engine_config.session.compaction_request_bytes_threshold = 900
-        engine._engine_config.session.compaction_recent_user_turns = 1
         engine._engine_config.session.history_image_replay = "full"
         engine._engine_config.session.tool_result_replay_max_bytes = 0
 

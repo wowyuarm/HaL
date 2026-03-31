@@ -29,6 +29,7 @@ SESSION_CREATED = "session.created"
 SESSION_SCOPE_UPDATED = "session.scope_updated"
 SESSION_ENDED = "session.ended"
 SESSION_COMPACTED = "session.compacted"
+SESSION_COMPACTION_FAILED = "session.compaction_failed"
 
 # Turn lifecycle
 TURN_STARTED = "turn.started"

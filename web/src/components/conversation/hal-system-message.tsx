@@ -24,20 +24,28 @@ export function HalSystemMessage() {
       ? 'warning'
       : firstText.startsWith('Brief')
         ? 'success'
-        : 'muted')
+        : firstText.startsWith('Session compact failed')
+          ? 'danger'
+          : 'muted')
 
   const title = firstText.startsWith('Scope')
     ? 'Scope'
     : firstText.startsWith('Brief')
       ? 'Brief'
-      : 'System'
+      : firstText.startsWith('Session compact failed')
+        ? 'Compact'
+        : firstText.startsWith('Session compacted')
+          ? 'Compact'
+          : 'System'
 
   const titleClass =
     badgeState === 'warning'
       ? 'text-warning font-semibold'
       : badgeState === 'success'
         ? 'text-success font-semibold'
-        : 'text-hal-muted font-semibold'
+        : badgeState === 'danger'
+          ? 'text-danger font-semibold'
+          : 'text-hal-muted font-semibold'
 
   return (
     <MessagePrimitive.Root className={cn(halPaperObjectVariants(), 'flex items-center gap-2')}>

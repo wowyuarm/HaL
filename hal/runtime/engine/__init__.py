@@ -35,6 +35,7 @@ from hal.domain.session import SessionManifest, SessionRuntimeState, build_sessi
 from hal.runtime.brief import run_session_brief
 from hal.runtime.session import (
     build_session_snapshot_messages,
+    compact_full_session_history,
     generate_session_checkpoint,
     maybe_compact_session_history,
     tick_session_lifecycle,
@@ -587,17 +588,34 @@ class AgentEngine:
             token_model=token_model,
         )
 
+    async def _compact_full_session_history(
+        self,
+        *,
+        session_id: str,
+        history: list[dict[str, object]],
+        token_model: str | None,
+    ) -> object:
+        """Compact full in-memory history for explicit /compact command execution."""
+        return await compact_full_session_history(
+            self,
+            session_id=session_id,
+            history=history,
+            token_model=token_model,
+        )
+
     async def _generate_session_checkpoint(
         self,
         compactable_messages: list[dict[str, object]],
         *,
         token_model: str | None,
+        fallback_on_error: bool = True,
     ) -> str:
         """Generate one compaction checkpoint for a slice of older messages."""
         return await generate_session_checkpoint(
             self,
             compactable_messages=compactable_messages,
             token_model=token_model,
+            fallback_on_error=fallback_on_error,
         )
 
     def _get_session_history(self, session_id: str) -> list[dict[str, object]]:

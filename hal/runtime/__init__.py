@@ -11,6 +11,7 @@ from .brief import (
 from .loop import LoopHooks, LoopMetadata, run_tool_loop
 from .session import (
     build_session_snapshot_messages,
+    compact_full_session_history,
     generate_session_checkpoint,
     maybe_compact_session_history,
     tick_session_lifecycle,
@@ -22,6 +23,7 @@ __all__ = [
     "LoopMetadata",
     "SessionRuntimeState",
     "build_session_snapshot_messages",
+    "compact_full_session_history",
     "create_tools",
     "extract_touched_threads",
     "format_session_events_for_prompt",

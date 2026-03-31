@@ -15,9 +15,9 @@ from loguru import logger
 from hal.capabilities.tools.fs import FsTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.context.message_building import add_assistant_message, add_tool_result
-from hal.context.token_budget import estimate_text_tokens, trim_text_to_token_budget
 from hal.domain.events import BRIEF_COMPLETED, STATUS_CHANGED, SessionEvent
 from hal.runtime.loop import LoopMetadata, run_tool_loop
+from hal.runtime.worker_inputs import build_event_input_lines, render_worker_input_lines
 from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
 
@@ -85,53 +85,15 @@ def format_session_events_for_prompt(
     Each event is individually capped at *max_event_tokens*. The full
     rendered output is then trimmed to *max_tokens* as a safety net.
     """
-    lines: list[str] = []
-    for event in events:
-        payload = event.payload or {}
-        preview = _event_preview(payload, model=model, max_event_tokens=max_event_tokens)
-        lines.append(f"- [{event.ts}] {event.type}: {preview}")
-    rendered = "\n".join(lines) if lines else "- (no events)"
-    return trim_text_to_token_budget(rendered, max_tokens, model=model, suffix=_TRUNCATION_SUFFIX)
-
-
-def _event_preview(
-    payload: dict[str, Any],
-    *,
-    model: str | None = None,
-    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
-) -> str:
-    """Extract a concise preview from one event payload, token-capped."""
-    if not payload:
-        return "(empty)"
-
-    # Tool-call events: show "tool → result_preview" when available.
-    tool_name = payload.get("tool")
-    if isinstance(tool_name, str) and tool_name.strip():
-        result_preview = payload.get("result_preview", "")
-        if isinstance(result_preview, str) and result_preview.strip():
-            text = f"{tool_name} \u2192 {result_preview.strip()}".replace("\n", " ")
-            return _cap_text(text, model=model, max_event_tokens=max_event_tokens)
-        return tool_name.strip()
-
-    for key in ("content", "label", "status"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            text = value.strip().replace("\n", " ")
-            return _cap_text(text, model=model, max_event_tokens=max_event_tokens)
-    fallback = str(payload)
-    return _cap_text(fallback, model=model, max_event_tokens=max_event_tokens)
-
-
-def _cap_text(
-    text: str,
-    *,
-    model: str | None = None,
-    max_event_tokens: int = _DEFAULT_MAX_EVENT_TOKENS,
-) -> str:
-    """Trim text to max_event_tokens if it exceeds the budget."""
-    if estimate_text_tokens(text, model=model) <= max_event_tokens:
-        return text
-    return trim_text_to_token_budget(text, max_event_tokens, model=model, suffix="...[truncated]")
+    return render_worker_input_lines(
+        build_event_input_lines(events),
+        model=model,
+        max_line_tokens=max_event_tokens,
+        max_total_tokens=max_tokens,
+        empty_text="- (no events)",
+        line_suffix="...[truncated]",
+        total_suffix=_TRUNCATION_SUFFIX,
+    )
 
 
 # ---------------------------------------------------------------------------

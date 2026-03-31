@@ -83,6 +83,8 @@ export interface SessionMessage {
 const SESSION_ACTIVITY_EVENTS = new Set([
   'message.injected',
   'session.scope_updated',
+  'session.compacted',
+  'session.compaction_failed',
   'brief.completed',
   'status.changed',
 ])
@@ -358,6 +360,54 @@ function buildStandaloneMessage(event: SessionEvent): SessionMessage | null {
       }
     }
 
+    case 'session.compacted': {
+      const beforeTokens = getFiniteNumber(event.payload, 'before_tokens')
+      const afterTokens = getFiniteNumber(event.payload, 'after_tokens')
+      const beforeBytes = getFiniteNumber(event.payload, 'before_request_bytes')
+      const afterBytes = getFiniteNumber(event.payload, 'after_request_bytes')
+      const passes = getFiniteNumber(event.payload, 'passes')
+      const pieces: string[] = ['Session compacted']
+      if (
+        beforeTokens !== null &&
+        afterTokens !== null &&
+        beforeBytes !== null &&
+        afterBytes !== null
+      ) {
+        pieces.push(
+          `tokens ${formatCompactNumber(beforeTokens)} -> ${formatCompactNumber(afterTokens)}`,
+        )
+        pieces.push(
+          `bytes ${formatCompactNumber(beforeBytes)} -> ${formatCompactNumber(afterBytes)}`,
+        )
+      }
+      if (passes !== null) {
+        pieces.push(`${formatCompactNumber(passes)} pass${passes === 1 ? '' : 'es'}`)
+      }
+      return {
+        id: `evt_${event.seq}`,
+        role: 'system',
+        turnId: null,
+        createdAt: new Date(event.ts),
+        content: [{ type: 'text', text: pieces.join(' · ') }],
+        halMeta: { systemTone: 'muted' },
+      }
+    }
+
+    case 'session.compaction_failed': {
+      const error = getString(event.payload, 'error')
+      const text = error
+        ? `Session compact failed · history unchanged · ${compactStandaloneText(error)}`
+        : 'Session compact failed · history unchanged'
+      return {
+        id: `evt_${event.seq}`,
+        role: 'system',
+        turnId: null,
+        createdAt: new Date(event.ts),
+        content: [{ type: 'text', text }],
+        halMeta: { systemTone: 'danger' },
+      }
+    }
+
     case 'status.changed': {
       const kind = getString(event.payload, 'kind')
       const text =
@@ -489,6 +539,10 @@ function compactStandaloneText(text: string): string {
   const normalized = text.trim()
   if (normalized.length <= 160) return normalized
   return `${normalized.slice(0, 157)}...`
+}
+
+function formatCompactNumber(value: number): string {
+  return Math.round(value).toLocaleString('en-US')
 }
 
 // ---------------------------------------------------------------------------
