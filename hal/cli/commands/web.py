@@ -6,16 +6,13 @@ import asyncio
 import os
 import shutil
 import subprocess
-import webbrowser
 from pathlib import Path
 
 import typer
-from loguru import logger
 
 from .gateway import _configure_logging
 from .root import app, console
 
-_BROWSER_LOCAL_HOSTS = {"0.0.0.0", "::"}
 _FRONTEND_WORKSPACE_DIR = Path(__file__).resolve().parents[3] / "web"
 _FRONTEND_DIST_DIRNAME = "dist"
 _FRONTEND_IGNORED_DIRNAMES = {
@@ -29,29 +26,9 @@ _FRONTEND_DEV_DEFAULT_PORT = 3000
 _FRONTEND_DEV_STARTUP_MESSAGE = "Starting Vite dev server..."
 
 
-def _browser_url(host: str, port: int) -> str:
-    """Translate bind host/port into a browser-friendly local URL."""
-    browser_host = "127.0.0.1" if host in _BROWSER_LOCAL_HOSTS else host
-    return f"http://{browser_host}:{port}/"
-
-
-def _try_open_browser(host: str, port: int) -> None:
-    """Best-effort browser launch after the web server is listening."""
-    url = _browser_url(host, port)
-    try:
-        opened = webbrowser.open_new_tab(url)
-    except Exception as exc:  # pragma: no cover - platform-specific browser failures
-        logger.warning("failed to open browser for {}: {}", url, exc)
-        console.print(f"[yellow]Could not open browser automatically.[/yellow] Visit {url}")
-        return
-
-    if not opened:
-        console.print(f"[yellow]Browser did not open automatically.[/yellow] Visit {url}")
-
-
 def _backend_origin(host: str, port: int) -> str:
     """Translate backend bind host/port into a frontend-friendly origin."""
-    browser_host = "127.0.0.1" if host in _BROWSER_LOCAL_HOSTS else host
+    browser_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     return f"http://{browser_host}:{port}"
 
 
@@ -172,11 +149,6 @@ def web(
         "--dev-port",
         help="Vite dev server port used with --dev",
     ),
-    open_browser: bool = typer.Option(
-        True,
-        "--open/--no-open",
-        help="Open the HaL web UI in a local browser after startup",
-    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ) -> None:
     """Start HaL with the native web server and no IM channels."""
@@ -256,8 +228,6 @@ def web(
                 except RuntimeError as exc:
                     console.print(f"[red]{exc}[/red]")
                     raise typer.Exit(code=1) from exc
-            if open_browser:
-                await asyncio.to_thread(_try_open_browser, frontend_host, frontend_port)
             await agent.run()
         except KeyboardInterrupt:
             console.print("\nShutting down...")

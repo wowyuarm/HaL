@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import warnings
 from pathlib import Path
 
 import typer
 from loguru import logger
+
+# Suppress known-noise warnings from third-party libs.
+# LiteLLM passes usage as dict where Pydantic expects ResponseAPIUsage — harmless.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Pydantic serializer warnings:\s+PydanticSerializationUnexpectedValue\(Expected `ResponseAPIUsage`",
+    category=UserWarning,
+)
 
 from .root import app, console
 
