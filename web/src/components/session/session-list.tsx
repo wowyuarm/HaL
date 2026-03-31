@@ -221,7 +221,7 @@ export function SessionList({
                     <div className="flex min-w-0 items-center gap-2.5">
                       <ChevronRight
                         className={cn(
-                          'h-3.5 w-3.5 shrink-0 transition-transform duration-normal ease-standard motion-reduce:transition-none',
+                          'h-3.5 w-3.5 shrink-0 transition-transform duration-normal ease-standard',
                           isOpen ? 'rotate-90 text-hal-primary' : 'text-hal-muted',
                         )}
                       />

@@ -27,7 +27,7 @@ export function SideSheet({
   return (
     <aside
       className={cn(
-        'absolute inset-y-0 right-0 hidden overflow-hidden px-3 py-5 transition-[opacity,transform] duration-slow ease-standard motion-reduce:transition-none lg:block',
+        'absolute inset-y-0 right-0 hidden overflow-hidden px-3 py-5 transition-[opacity,transform] duration-slow ease-standard lg:block',
         widthClassName,
         zIndexClassName,
         open
@@ -38,7 +38,7 @@ export function SideSheet({
     >
       <div
         className={cn(
-          'hal-paper hal-sheet flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border shadow-popover transition-[opacity,transform,filter] duration-slow ease-standard motion-reduce:transition-none',
+          'hal-paper hal-sheet flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border shadow-popover transition-[opacity,transform,filter] duration-slow ease-standard',
           open ? 'translate-x-0 opacity-100 blur-0' : 'translate-x-3 opacity-0 blur-[2px]',
         )}
       >

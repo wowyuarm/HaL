@@ -15,8 +15,10 @@ import { HalSystemMessage } from '@/components/conversation/hal-system-message'
 import { HalUserMessage } from '@/components/conversation/hal-user-message'
 import { HAL_READING_COLUMN_CLASS } from '@/components/ui/hal-patterns'
 import { Panel } from '@/components/ui/panel'
+import { StatusDot } from '@/components/ui/status-dot'
 import { cn } from '@/lib/utils'
 import { isInteractiveSession } from '@/lib/runtime'
+import { useHalStore } from '@/lib/store'
 import type { SessionManifest, SocketState } from '@/lib/types'
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,8 @@ export function HalThread({
   onToggleBriefPanel,
 }: HalThreadProps) {
   const interactive = isInteractiveSession(session.status)
+  const loadingSessionId = useHalStore((s) => s.loadingSessionId)
+  const isLoadingEvents = loadingSessionId === session.session_id
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -68,9 +72,18 @@ export function HalThread({
 
       <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col">
         <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto px-3 py-6 md:px-5 md:py-7">
-          <ThreadPrimitive.Empty>
-            <EmptyState />
-          </ThreadPrimitive.Empty>
+          {isLoadingEvents ? (
+            <div className={HAL_READING_COLUMN_CLASS}>
+              <div className="flex items-center gap-2 py-1 text-meta text-hal-muted">
+                <StatusDot state="live" className="h-1.5 w-1.5" />
+                Loading events…
+              </div>
+            </div>
+          ) : (
+            <ThreadPrimitive.Empty>
+              <EmptyState />
+            </ThreadPrimitive.Empty>
+          )}
 
           <div className={cn(HAL_READING_COLUMN_CLASS, 'space-y-5')}>
             <ThreadPrimitive.Messages

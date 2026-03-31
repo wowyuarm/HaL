@@ -285,6 +285,22 @@ Composer may intentionally exceed the shared radius when treated as the primary 
 - **Slow**: major layout transitions
 - Motion is opacity- and translate-driven. No spring, bounce, or decorative animation.
 - A subtle pulse on live-state indicators is acceptable.
+- Always specify exact properties in `transition-*`. Never use `transition-all`.
+
+### 6.1 Loading and live-state motion
+
+- Session events loading: show a compact meta-line indicator, not an empty-state message.
+  Loading is a transient state; empty-state is a terminal state. Do not confuse them.
+- No skeleton screens. HaL's content is structured evidence, not generic card layouts.
+  Use compact text indicators for transient loading states.
+- Content appearance is instant. No slide-in, fade-in, or staggered reveal for messages
+  or process entries. The only allowed motion for live content is the pulse on status
+  indicators.
+- HaL does not currently support token-level streaming. If streaming is added in the
+  future, token appearance should remain instant — the reading surface is a record,
+  not a performance.
+- Respect `prefers-reduced-motion: reduce` globally. All transitions and animations
+  should collapse to near-zero duration when the user requests reduced motion.
 
 ## 7. Change policy
 

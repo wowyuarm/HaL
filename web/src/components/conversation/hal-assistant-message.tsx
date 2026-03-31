@@ -82,7 +82,7 @@ export function HalAssistantMessage() {
           onClick={() => openProcessPanel(custom.turnId!)}
           aria-label={`Turn process: ${processAriaLabel ?? processPreview.summaryText}`}
           className={cn(
-            "group relative isolate mb-1 flex w-full items-start gap-2 py-1.5 pr-1.5 text-left transition-all duration-fast ease-standard before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:transition-all before:duration-fast before:ease-standard before:content-['']",
+            "group relative isolate mb-1 flex w-full items-start gap-2 py-1.5 pr-1.5 text-left transition-[opacity] duration-fast ease-standard before:pointer-events-none before:absolute before:inset-0 before:rounded-lg before:transition-[background-color] before:duration-fast before:ease-standard before:content-['']",
             processOpen
               ? 'before:-inset-x-0.5 before:-inset-y-0.5 before:rounded-xl before:bg-hal-hover'
               : processHighlight
@@ -148,7 +148,7 @@ export function HalAssistantMessage() {
           {!directOnlyProcess && (
             <ChevronRight
               className={cn(
-                'relative z-10 h-3 w-3 shrink-0 self-center text-hal-muted transition-all duration-fast ease-standard',
+                'relative z-10 h-3 w-3 shrink-0 self-center text-hal-muted transition-[opacity,transform] duration-fast ease-standard',
                 processOpen ? 'rotate-90 opacity-60' : 'opacity-0 group-hover:opacity-50',
               )}
             />
