@@ -39,8 +39,17 @@ class Tool(ABC):
     @property
     @abstractmethod
     def description(self) -> str:
-        """Description of what the tool does."""
+        """Short description of what the tool does (used internally)."""
         pass
+
+    @property
+    def prompt(self) -> str:
+        """Model-facing guidance: when to use, when not to, defaults, output shape.
+
+        Override in subclasses to provide rich per-tool guidance.
+        Falls back to *description* when not overridden.
+        """
+        return self.description
 
     @property
     @abstractmethod
@@ -144,12 +153,16 @@ class Tool(ABC):
         return errors
 
     def to_schema(self) -> dict[str, Any]:
-        """Convert tool to OpenAI function schema format."""
+        """Convert tool to OpenAI function schema format.
+
+        Uses *prompt* (rich model-facing guidance) as the description sent
+        to the LLM, not the short *description* property.
+        """
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
+                "description": self.prompt,
                 "parameters": self.parameters,
             },
         }

@@ -35,8 +35,8 @@ cd web && npx prettier --write .   # Format frontend code
 
 HaL is a stateful collaboration system — see `DESIGN.md` for invariants and
 collaboration architecture, `docs/specs/message-injects.md` for prompt/replay
-inject semantics, and `docs/specs/design-system.md` plus its linked layer docs
-for frontend design.
+inject semantics, `docs/specs/tool-system.md` for tool design principles, and
+`docs/specs/design-system.md` plus its linked layer docs for frontend design.
 
 Session-first, async, event-driven: the engine uses `session_id` as its sole
 identity key. IM channels are adapters; the native web server bridges directly.

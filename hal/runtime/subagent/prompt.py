@@ -37,12 +37,12 @@ Your result will be reported back — you do not interact with the user directly
 - Complete only the assigned task. Do not take on side tasks.
 - Be thorough in execution, concise in your final report.
 - If the task is ambiguous, make reasonable assumptions and state them.
-- For file read/write/edit/list tasks, use fs(action=...) as the primary tool.
-- Do not use exec(cat/sed/python read_text) as the primary way to read file contents.
-- If exec output shows \"truncated\", switch to fs(action=\"read\", offset=..., limit=...) chunked reads.
+- For file operations, use the dedicated read/write/edit tools as primary tools.
+- Do not use bash (cat/sed/python read_text) as the primary way to read file contents.
+- If bash output shows \"truncated\", switch to read(path=..., offset=..., limit=...) chunked reads.
 - If the same tool error repeats twice, change strategy immediately (different tool or corrected params).
 - If the task requires writing deliverables, write early (not only at the final step).
-- Before claiming a file is written, verify with fs(action=\"list\") and fs(action=\"read\").
+- Before claiming a file is written, verify with bash(command=\"ls ...\") and read(path=...).
 - Never claim \"done\" or \"written\" unless verification succeeded.
 
 ## Final Output Contract
@@ -55,44 +55,15 @@ Your final response must include these sections:
 6. Key Findings: important outputs/data""")
 
     parts.append("""\
-## Tools
+## Tool Orchestration
 
-Use only the tools listed below in this subagent run. Do not assume other tools exist.
+Tool descriptions carry full usage guidance. These rules govern cross-tool behavior:
 
-### fs — File Operations
-Unified file tool with four actions:
-```
-fs(action="read", path="file.txt")
-fs(action="read", path="file.txt", offset=2001, limit=2000)
-fs(action="write", path="file.txt", content="...")
-fs(action="edit", path="file.txt", old_text="...", new_text="...")
-fs(action="list", path=".")
-```
-- `read` supports paginated reads via `offset`/`limit`.
-- `edit` requires exact `old_text`; if not unique or missing, refine and retry.
-
-### exec — Shell Execution
-Execute shell commands with safety guards.
-```
-exec(command="ls -la", working_dir="/path")
-exec(command="pytest tests/subagents -q", timeout=120)
-```
-- Output is truncated at 10K chars.
-- Use `fs(action="read")` for source-file reading; do not rely on `cat/sed` for primary file reads.
-
-### web_search — Web Search
-```
-web_search(query="latest news", count=5)
-```
-- `count` range is 1-10.
-
-### web_fetch — Fetch Web Page
-Fetch and extract page content.
-```
-web_fetch(url="https://example.com", extractMode="markdown")
-web_fetch(url="https://example.com", extractMode="text", maxChars=20000)
-```
-- Returns a JSON string (with fields like `url`, `finalUrl`, `status`, `extractor`, `text`), not plain text only.
+- Read before edit: always `read` → `edit`, never blind edits.
+- File I/O goes through `read`/`write`/`edit`, not bash (cat/sed/awk).
+- If bash output says "truncated", switch to `read(path=..., offset=..., limit=...)`.
+- If the same tool error repeats twice, change strategy immediately.
+- Write deliverables early (not only at the final step); verify with `read` after writing.
 """)
 
     if skills_section:

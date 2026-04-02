@@ -24,9 +24,18 @@ class RecallTool(Tool):
 
     @property
     def description(self) -> str:
+        return "Search past episode notes semantically."
+
+    @property
+    def prompt(self) -> str:
         return (
-            "Search past episode notes semantically. "
-            "Use this to find relevant information from earlier work."
+            "Search past episode notes by semantic relevance.\n"
+            "Use for finding information from earlier sessions — decisions, context, "
+            "prior work. The current session is already in your context; "
+            "recall covers past sessions only.\n"
+            "Check auto-injected memories first; use recall when they are insufficient "
+            "or you need targeted results on a specific topic.\n"
+            "top_k range: 1-10 (default 5). Returns ranked snippets with rrf_score."
         )
 
     @property

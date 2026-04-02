@@ -12,7 +12,7 @@ from typing import Any
 
 from loguru import logger
 
-from hal.capabilities.tools.fs import FsTool
+from hal.capabilities.tools.fs import EditFileTool, ReadFileTool, WriteFileTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.context.message_building import add_assistant_message, add_tool_result
 from hal.domain.events import BRIEF_COMPLETED, STATUS_CHANGED, SessionEvent
@@ -342,10 +342,12 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
 
 
 def _build_brief_tools(workspace: Path) -> ToolRegistry:
-    """Create restricted ToolRegistry with fs tool limited to work/ directory."""
+    """Create restricted ToolRegistry with file tools limited to work/ directory."""
     work_dir = workspace / "work"
     registry = ToolRegistry()
-    registry.register(FsTool(allowed_dir=work_dir, base_dir=work_dir))
+    registry.register(ReadFileTool(allowed_dir=work_dir, base_dir=work_dir))
+    registry.register(WriteFileTool(allowed_dir=work_dir, base_dir=work_dir))
+    registry.register(EditFileTool(allowed_dir=work_dir, base_dir=work_dir))
     return registry
 
 
@@ -449,9 +451,9 @@ Do not churn headings just to make the file look newly rewritten.
 If something worth preserving doesn't belong to any existing thread, \
 write a note to `inbox/<YYYY-MM-DD>-<title>.md` with a `# <title>` heading.
 
-## Available tool
+## Available tools
 
-You have one tool: `fs` with actions `read`, `write`, `edit`, `list`.
+You have three tools: `read`, `write`, and `edit`.
 All paths are relative to the `work/` directory (e.g. `threads/<slug>/BRIEF.md`).
 
 ## Workflow (only when writing is warranted)
@@ -666,7 +668,9 @@ def _format_completion_summary(final_content: str | None, meta: LoopMetadata) ->
 
 def _brief_result_failed(final_content: str | None, meta: LoopMetadata) -> bool:
     """Return True when the brief worker did not produce a usable result."""
-    if isinstance(final_content, str) and final_content.strip().startswith(_ERROR_CALLING_LLM_PREFIX):
+    if isinstance(final_content, str) and final_content.strip().startswith(
+        _ERROR_CALLING_LLM_PREFIX
+    ):
         return True
     if meta.files_modified:
         return False

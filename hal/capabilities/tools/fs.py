@@ -2,7 +2,6 @@
 
 import difflib
 from abc import abstractmethod
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +13,6 @@ _DIAG_MAX_CHARS = 800
 _DIAG_MIN_RATIO = 0.6
 # Fuzzy diagnostics are best-effort; avoid scanning huge line windows.
 _DIAG_MAX_WINDOWS = 5000
-_FS_UNKNOWN_ACTION_ERROR = "Error: Unknown action '{action}'. Use one of: read, write, edit, list."
-_FS_WRITE_MISSING_CONTENT_ERROR = "Error: 'content' parameter is required for write action."
-_FS_EDIT_MISSING_PARAMS_ERROR = (
-    "Error: 'old_text' and 'new_text' parameters are required for edit action."
-)
 
 
 def _resolve_path(
@@ -117,14 +111,20 @@ class ReadFileTool(_ExistingPathTool):
 
     @property
     def name(self) -> str:
-        return "read_file"
+        return "read"
 
     @property
     def description(self) -> str:
+        return "Read file contents with line numbers and pagination."
+
+    @property
+    def prompt(self) -> str:
         return (
-            "Read the contents of a file with line numbers. "
-            "Returns up to `limit` lines starting from `offset`. "
-            "If the file has more lines, a hint is appended to continue reading."
+            "Read file contents with line numbers and pagination.\n"
+            "Use when you need to inspect any file — code, config, briefs, notes, thread state.\n"
+            "Do NOT use bash (cat/head/tail) for file reading. "
+            "Use offset/limit for large files instead of reading everything.\n"
+            "Output includes line numbers. A continuation hint appears when more lines exist."
         )
 
     @property
@@ -179,7 +179,7 @@ class ReadFileTool(_ExistingPathTool):
                 size_kb = len(line.encode("utf-8", errors="replace")) / 1024
                 output_lines.append(
                     f"[Line {lineno} is {size_kb:.1f}KB, exceeds 50.0KB limit. "
-                    f"Use exec tool: head -c 51200 {request_path}]"
+                    f"Use bash: head -c 51200 {request_path}]"
                 )
             else:
                 output_lines.append(f"{lineno:>6}\t{line}")
@@ -204,11 +204,19 @@ class WriteFileTool(Tool):
 
     @property
     def name(self) -> str:
-        return "write_file"
+        return "write"
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
+        return "Create or overwrite a file."
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Create or overwrite a file. Creates parent directories if needed.\n"
+            "Use when producing new files or replacing entire file content.\n"
+            "Prefer edit when modifying part of an existing file."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -231,6 +239,10 @@ class WriteFileTool(Tool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error writing file: {str(e)}"
+
+    def get_side_effects(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        path = params.get("path", "")
+        return {"files_modified": [path]} if path else None
 
 
 def _fuzzy_diagnostic(content: str, old_text: str) -> str:
@@ -285,11 +297,22 @@ class EditFileTool(_ExistingPathTool):
 
     @property
     def name(self) -> str:
-        return "edit_file"
+        return "edit"
 
     @property
     def description(self) -> str:
-        return "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file."
+        return "Replace a specific text passage in an existing file."
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Replace a specific text passage in an existing file.\n"
+            "Use for precise changes that preserve surrounding content.\n"
+            "old_text must match exactly and uniquely. If match fails, re-read the file first.\n"
+            "Do NOT use bash (sed/awk) for file editing.\n"
+            "Always read the file first. For multiple changes, use a single edit with enough "
+            "context to cover the full region rather than many small line-by-line edits."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -334,132 +357,6 @@ class EditFileTool(_ExistingPathTool):
 
         return f"Successfully edited {request_path}"
 
-
-class ListDirTool(_ExistingPathTool):
-    """Tool to list directory contents."""
-
-    _EXPECTED_PATH_TYPE = "directory"
-    _ERROR_PREFIX = "Error listing directory: "
-
-    @property
-    def name(self) -> str:
-        return "list_dir"
-
-    @property
-    def description(self) -> str:
-        return "List the contents of a directory."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {"path": {"type": "string", "description": "The directory path to list"}},
-            "required": ["path"],
-        }
-
-    async def _execute_with_resolved_path(
-        self, *, request_path: str, resolved_path: Path, **kwargs: Any
-    ) -> str:
-        items = []
-        for item in sorted(resolved_path.iterdir()):
-            prefix = "📁 " if item.is_dir() else "📄 "
-            items.append(f"{prefix}{item.name}")
-
-        if not items:
-            return f"Directory {request_path} is empty"
-
-        return "\n".join(items)
-
-
-_FsActionHandler = Callable[[str, dict[str, Any]], Awaitable[str]]
-
-
-def _build_fs_action_handlers(
-    allowed_dir: Path | None, base_dir: Path | None
-) -> dict[str, _FsActionHandler]:
-    read_tool = ReadFileTool(allowed_dir=allowed_dir, base_dir=base_dir)
-    write_tool = WriteFileTool(allowed_dir=allowed_dir, base_dir=base_dir)
-    edit_tool = EditFileTool(allowed_dir=allowed_dir, base_dir=base_dir)
-    list_tool = ListDirTool(allowed_dir=allowed_dir, base_dir=base_dir)
-
-    async def run_read(path: str, kwargs: dict[str, Any]) -> str:
-        offset = kwargs.get("offset", 1)
-        limit = kwargs.get("limit", 2000)
-        return await read_tool.execute(path=path, offset=offset, limit=limit)
-
-    async def run_write(path: str, kwargs: dict[str, Any]) -> str:
-        content = kwargs.get("content")
-        if content is None:
-            return _FS_WRITE_MISSING_CONTENT_ERROR
-        return await write_tool.execute(path=path, content=content)
-
-    async def run_edit(path: str, kwargs: dict[str, Any]) -> str:
-        old_text = kwargs.get("old_text")
-        new_text = kwargs.get("new_text")
-        if old_text is None or new_text is None:
-            return _FS_EDIT_MISSING_PARAMS_ERROR
-        return await edit_tool.execute(path=path, old_text=old_text, new_text=new_text)
-
-    async def run_list(path: str, kwargs: dict[str, Any]) -> str:
-        return await list_tool.execute(path=path)
-
-    return {
-        "read": run_read,
-        "write": run_write,
-        "edit": run_edit,
-        "list": run_list,
-    }
-
-
-class FsTool(Tool):
-    """Unified file system tool that delegates to read/write/edit/list operations."""
-
-    def __init__(self, allowed_dir: Path | None = None, base_dir: Path | None = None):
-        self._handlers = _build_fs_action_handlers(allowed_dir, base_dir)
-
-    @property
-    def name(self) -> str:
-        return "fs"
-
-    @property
-    def description(self) -> str:
-        return "File system operations: read, write, edit, or list files."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["read", "write", "edit", "list"],
-                    "description": "The file operation to perform",
-                },
-                "path": {"type": "string", "description": "File or directory path"},
-                "offset": {
-                    "type": "integer",
-                    "description": "Line to start reading from, 1-based (read action, default 1)",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max lines to return (read action, default 2000)",
-                },
-                "content": {"type": "string", "description": "Content for write action"},
-                "old_text": {"type": "string", "description": "Text to find (edit action)"},
-                "new_text": {"type": "string", "description": "Replacement text (edit action)"},
-            },
-            "required": ["action", "path"],
-        }
-
-    async def execute(self, action: str, path: str, **kwargs: Any) -> str:
-        handler = self._handlers.get(action)
-        if handler is None:
-            return _FS_UNKNOWN_ACTION_ERROR.format(action=action)
-        return await handler(path, kwargs)
-
     def get_side_effects(self, params: dict[str, Any]) -> dict[str, Any] | None:
-        action = params.get("action", "")
-        if action in ("write", "edit"):
-            path = params.get("path", "")
-            return {"files_modified": [path]} if path else {}
-        return None
+        path = params.get("path", "")
+        return {"files_modified": [path]} if path else None

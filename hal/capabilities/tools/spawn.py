@@ -51,10 +51,24 @@ class SpawnTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Delegate a task to a subagent. The subagent has its own tools "
-            "(file, exec, web) and will complete the task independently. "
-            "By default it runs synchronously and returns the result directly. "
-            "Set background=true for long-running tasks."
+            "Delegate a task to a subagent with its own tools "
+            "(read, write, edit, bash, web_search, web_fetch)."
+        )
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Delegate a task to a subagent with its own tools "
+            "(read, write, edit, bash, web_search, web_fetch).\n"
+            "Default (sync): waits for completion and returns structured result. "
+            "Set background=true for long-running or exploratory work where "
+            "the main agent (YOU) should continue immediately.\n"
+            "Always set a short label for every spawn (used in status and result injection). "
+            "State expected deliverables explicitly in the task text "
+            "(file paths, acceptance criteria, completion conditions).\n"
+            "Use sync when downstream steps depend on the output immediately. "
+            "Use background for parallelizable or exploratory work — "
+            "do not block waiting in the same turn."
         )
 
     @property

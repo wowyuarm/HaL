@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hal.capabilities.tools.exec import ExecTool
-from hal.capabilities.tools.fs import FsTool
+from hal.capabilities.tools.bash import BashTool
+from hal.capabilities.tools.fs import EditFileTool, ReadFileTool, WriteFileTool
 from hal.capabilities.tools.registry import ToolRegistry
 from hal.capabilities.tools.web import WebFetchTool, WebSearchTool
 from hal.domain.ports import SubagentPort
@@ -31,20 +31,9 @@ def create_tools(
 ) -> ToolRegistry:
     """Build a ToolRegistry with the requested capabilities.
 
-    Core tools (fs, exec, web_search, web_fetch) are always registered.
-    Optional tools (message, spawn, recall) are registered only when
-    their dependencies are provided.
-
-    Args:
-        workspace: Agent workspace directory.
-        exec_config: Shell execution settings.
-        restrict_to_workspace: Sandbox file/exec to workspace.
-        web_search_api_key: Tavily API key for web search.
-        web_search_config: Web search tool settings (max_results, timeout).
-        web_fetch_config: Web fetch tool settings (max_chars, timeout, redirects).
-        bus: Message bus (enables message tool).
-        subagent_manager: Subagent manager (enables spawn tool).
-        recall_index: Episode recall index (enables recall tool).
+    Core tools (read, write, edit, bash, web_search, web_fetch) are always
+    registered.  Optional tools (message, spawn, recall) are registered only
+    when their dependencies are provided.
     """
     from hal.infra.config.schema import ExecToolConfig, WebFetchConfig, WebSearchConfig
 
@@ -55,16 +44,22 @@ def create_tools(
 
     tools = ToolRegistry()
 
-    # Core tools (always available)
-    tools.register(FsTool(allowed_dir=allowed_dir, base_dir=workspace))
+    # Durable-state primitives
+    tools.register(ReadFileTool(allowed_dir=allowed_dir, base_dir=workspace))
+    tools.register(WriteFileTool(allowed_dir=allowed_dir, base_dir=workspace))
+    tools.register(EditFileTool(allowed_dir=allowed_dir, base_dir=workspace))
+
+    # Execution
     tools.register(
-        ExecTool(
+        BashTool(
             working_dir=str(workspace),
             timeout=exec_config.timeout,
             kill_wait_s=exec_config.kill_wait_s,
             restrict_to_workspace=restrict_to_workspace,
         )
     )
+
+    # Network
     tools.register(
         WebSearchTool(
             api_key=web_search_api_key,
@@ -80,7 +75,7 @@ def create_tools(
         )
     )
 
-    # Optional tools (require external dependencies)
+    # Collaboration (optional — require external dependencies)
     if bus:
         from hal.capabilities.tools.message import MessageTool
 

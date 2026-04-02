@@ -218,11 +218,13 @@ def test_is_compact_command() -> None:
 
 def test_build_brief_tools_restricted(tmp_path: Path) -> None:
     tools = _build_brief_tools(tmp_path)
-    assert tools.has("fs")
-    assert not tools.has("exec")
+    assert tools.has("read")
+    assert tools.has("write")
+    assert tools.has("edit")
+    assert not tools.has("bash")
     assert not tools.has("web_search")
     assert not tools.has("spawn")
-    assert len(tools) == 1
+    assert len(tools) == 3
 
 
 def test_build_brief_system_prompt() -> None:
@@ -230,7 +232,9 @@ def test_build_brief_system_prompt() -> None:
     assert "brief maintainer" in prompt.lower()
     assert "episodes" in prompt.lower()
     assert "BRIEF.md" in prompt
-    assert "fs" in prompt
+    assert "read" in prompt
+    assert "write" in prompt
+    assert "edit" in prompt
 
 
 def test_build_brief_user_prompt() -> None:

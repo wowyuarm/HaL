@@ -47,7 +47,17 @@ class WebSearchTool(Tool):
     """Search the web using Tavily Search API."""
 
     name = "web_search"
-    description = "Search the web. Returns titles, URLs, and snippets."
+    description = "Search the web via Tavily API."
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Search the web via Tavily API. Returns titles, URLs, and snippets.\n"
+            "Use for factual lookups, current events, library docs, or anything "
+            "outside your training data. Keep queries concise and specific.\n"
+            "count range: 1-10 results."
+        )
+
     parameters = {
         "type": "object",
         "properties": {
@@ -113,7 +123,17 @@ class WebFetchTool(Tool):
     """Fetch and extract content from a URL using Readability."""
 
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    description = "Fetch URL and extract readable content."
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Fetch a URL and extract readable content (HTML → markdown or plain text).\n"
+            "Requires http/https URL. extractMode: 'markdown' (default) or 'text'.\n"
+            "Returns JSON with: url, finalUrl, status, extractor, truncated, length, text.\n"
+            "Use maxChars to limit output size when you only need a summary."
+        )
+
     parameters = {
         "type": "object",
         "properties": {

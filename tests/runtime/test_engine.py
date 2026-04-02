@@ -170,7 +170,7 @@ class TestAgentEngineInit:
 
 class TestRegisterDefaultTools:
     def test_expected_tools_registered(self, engine):
-        expected = {"fs", "exec", "web_search", "web_fetch", "message", "spawn"}
+        expected = {"read", "write", "edit", "bash", "web_search", "web_fetch", "message", "spawn"}
         registered = set(engine.tools.tool_names)
         assert expected.issubset(registered), f"Missing tools: {expected - registered}"
 
@@ -415,6 +415,7 @@ class TestDispatch:
             m.get("role") == "assistant" and m.get("content") == "reply-1"
             for m in second_turn_messages
         )
+
     async def test_turn_context_injects_are_replayed_each_turn(self, engine):
         engine.context.build_messages.side_effect = (  # type: ignore[method-assign]
             lambda *, history, current_message, **kwargs: [
@@ -884,7 +885,10 @@ class TestBriefWorker:
         engine.bus.publish_outbound = AsyncMock()  # type: ignore[method-assign]
 
         with patch("hal.runtime.brief.run_tool_loop", new_callable=AsyncMock) as mock_loop:
-            mock_loop.return_value = ("Error calling LLM: APIConnectionError: timeout", LoopMetadata())
+            mock_loop.return_value = (
+                "Error calling LLM: APIConnectionError: timeout",
+                LoopMetadata(),
+            )
             await run_session_brief(engine, state.session_id)
 
         manifest = engine._session_store.read_manifest(state.session_id)
@@ -1332,7 +1336,8 @@ class TestMidLoopInjection:
         injected_user_msgs = [
             m
             for m in second_call_msgs
-            if m.get("role") == "user" and "data/media/received/session-1/notes.md" in m.get("content", "")
+            if m.get("role") == "user"
+            and "data/media/received/session-1/notes.md" in m.get("content", "")
         ]
         assert len(injected_user_msgs) == 1
 
@@ -1340,10 +1345,12 @@ class TestMidLoopInjection:
         attachment_inject = next(
             event
             for event in events
-            if event.type == "message.injected"
-            and event.payload.get("kind") == "user_follow_up"
+            if event.type == "message.injected" and event.payload.get("kind") == "user_follow_up"
         )
-        assert attachment_inject.payload["attachments"][0]["path"] == "data/media/received/session-1/notes.md"
+        assert (
+            attachment_inject.payload["attachments"][0]["path"]
+            == "data/media/received/session-1/notes.md"
+        )
 
     async def test_pending_image_messages_preserve_image_payload_in_loop(
         self, engine, bus, mock_provider
@@ -1971,13 +1978,13 @@ class TestExecuteLoopMetadata:
         tool_calls = [
             ToolCallRequest(
                 id="t1",
-                name="fs",
-                arguments={"action": "write", "path": "/tmp/a.txt", "content": "x"},
+                name="write",
+                arguments={"path": "/tmp/a.txt", "content": "x"},
             ),
             ToolCallRequest(
                 id="t2",
-                name="fs",
-                arguments={"action": "edit", "path": "/tmp/b.txt", "old": "x", "new": "y"},
+                name="edit",
+                arguments={"path": "/tmp/b.txt", "old_text": "x", "new_text": "y"},
             ),
         ]
         mock_provider.chat.side_effect = [
@@ -1998,7 +2005,7 @@ class TestExecuteLoopMetadata:
         engine.tools.execute = AsyncMock(return_value="output")  # type: ignore[method-assign]
 
         tool_calls = [
-            ToolCallRequest(id="t1", name="exec", arguments={"command": "ls -la"}),
+            ToolCallRequest(id="t1", name="bash", arguments={"command": "ls -la"}),
         ]
         mock_provider.chat.side_effect = [
             LLMResponse(content="running", tool_calls=tool_calls),
@@ -2011,13 +2018,13 @@ class TestExecuteLoopMetadata:
         )
 
         assert meta.has_side_effects is True
-        assert "ls -la" in meta.commands_run
+        assert any("ls -la" in c for c in meta.commands_run)
 
     async def test_no_side_effects_for_read_only_tools(self, engine, mock_provider):
         engine.tools.execute = AsyncMock(return_value="ok")  # type: ignore[method-assign]
 
         tool_calls = [
-            ToolCallRequest(id="t1", name="fs", arguments={"action": "read", "path": "/tmp/a.txt"}),
+            ToolCallRequest(id="t1", name="read", arguments={"path": "/tmp/a.txt"}),
             ToolCallRequest(id="t2", name="web_search", arguments={"query": "test"}),
         ]
         mock_provider.chat.side_effect = [

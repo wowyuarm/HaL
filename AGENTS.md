@@ -58,7 +58,7 @@ Use a local virtual environment; do not install dependencies into system Python.
 Use Python 3.11+ with 4-space indentation, explicit type hints, and async-first APIs.  
 Ruff is the style authority (`E,F,I,N,W`, line length 100, `E501` ignored).  
 Naming conventions: `snake_case` for modules/functions/variables, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.  
-When adding tools or providers, register them in existing registries (for example `hal/core/runtime/tool_factory.py` and `hal/infra/providers/registry.py`).
+When adding tools or providers, register them in existing registries (for example `hal/runtime/tool_factory.py` and `hal/infra/providers/registry.py`).
 
 ## Configuration & Constants Policy
 

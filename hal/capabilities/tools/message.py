@@ -41,7 +41,20 @@ class MessageTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Send a message to the user. Use this when you want to communicate something."
+        return "Send a message to the user on a chat channel."
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Send a message to the user on a chat channel (Telegram etc.).\n"
+            "This tool is NOT available in web sessions — web sessions deliver responses "
+            "directly via WebSocket. Only use this in channel-based sessions.\n"
+            "Use ONLY for cross-channel delivery (e.g., sending to a different chat). "
+            "Do NOT use this to reply within the current conversation — that happens automatically.\n"
+            "Omit chat_id and channel in normal use; they are auto-filled from the current turn context. "
+            "Override chat_id only for cross-chat delivery (different group/DM).\n"
+            "Supports media attachments via file path list."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:

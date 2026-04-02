@@ -1,8 +1,9 @@
-"""Shell execution tool."""
+"""Shell execution tool with agent-friendly infrastructure."""
 
 import asyncio
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +17,62 @@ _ERR_BLOCKED_ALLOWLIST = "Error: Command blocked by safety guard (not in allowli
 _ERR_BLOCKED_TRAVERSAL = "Error: Command blocked by safety guard (path traversal detected)"
 _ERR_BLOCKED_OUTSIDE_CWD = "Error: Command blocked by safety guard (path outside working dir)"
 
+# Commands where rtk adds significant value (verbose output).
+_RTK_CANDIDATES = re.compile(
+    r"^(?:git\s+(?:diff|log|show)|pytest|python\s+-m\s+pytest|ruff\s+check|ruff\s+format"
+    r"|tsc|eslint|mypy|cargo\s+test|go\s+test)\b"
+)
 
-class ExecTool(Tool):
-    """Tool to execute shell commands."""
+# Sensible defaults for agent-friendly search commands.
+_RG_DEFAULTS: dict[str, str] = {
+    "--color": "--color never",
+    "--max-count": "--max-count 50",
+}
+_FD_DEFAULTS: dict[str, str] = {
+    "--max-results": "--max-results 100",
+}
+
+# Resolved once at import time to avoid repeated $PATH searches.
+_RTK_AVAILABLE: bool = shutil.which("rtk") is not None
+
+
+def _inject_defaults(command: str, defaults: dict[str, str]) -> str:
+    """Inject default flags into a command when not already present."""
+    for flag, default_fragment in defaults.items():
+        if flag not in command:
+            # Insert after the command name (first whitespace boundary).
+            parts = command.split(None, 1)
+            if len(parts) == 2:
+                command = f"{parts[0]} {default_fragment} {parts[1]}"
+            else:
+                command = f"{parts[0]} {default_fragment}"
+    return command
+
+
+def _prepare_command(command: str) -> tuple[str, str]:
+    """Apply agent-friendly transformations to a command.
+
+    Returns (actual_command, requested_command) where *requested_command* is
+    the original input and *actual_command* is what will actually execute.
+    """
+    requested = command
+    stripped = command.strip()
+
+    # Inject sensible defaults for rg/fd.
+    if re.match(r"^rg\b", stripped):
+        command = _inject_defaults(stripped, _RG_DEFAULTS)
+    elif re.match(r"^fd\b", stripped):
+        command = _inject_defaults(stripped, _FD_DEFAULTS)
+
+    # Transparent rtk proxy for known verbose commands.
+    if _RTK_CANDIDATES.match(stripped) and _RTK_AVAILABLE:
+        command = f"rtk {command}"
+
+    return command, requested
+
+
+class BashTool(Tool):
+    """Agent-friendly shell execution with infrastructure commands."""
 
     def __init__(
         self,
@@ -33,26 +87,39 @@ class ExecTool(Tool):
         self.kill_wait_s = kill_wait_s
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",  # del /f, del /q
-            r"\brmdir\s+/s\b",  # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",  # format command (not URL params)
-            r"\b(mkfs|diskpart)\b",  # other disk operations
-            r"\bdd\s+if=",  # dd
-            r">\s*/dev/sd",  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",  # fork bomb
+            r"\brm\s+-[rf]{1,2}\b",
+            r"\bdel\s+/[fq]\b",
+            r"\brmdir\s+/s\b",
+            r"(?:^|[;&|]\s*)format\b",
+            r"\b(mkfs|diskpart)\b",
+            r"\bdd\s+if=",
+            r">\s*/dev/sd",
+            r"\b(shutdown|reboot|poweroff)\b",
+            r":\(\)\s*\{.*\};\s*:",
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
 
     @property
     def name(self) -> str:
-        return "exec"
+        return "bash"
 
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
+        return "Execute shell commands in an equipped environment."
+
+    @property
+    def prompt(self) -> str:
+        return (
+            "Execute shell commands in an equipped environment.\n"
+            "Available infrastructure: rg (content search), fd (file discovery), "
+            "jq (JSON extraction), yq (YAML extraction), git, project build/test commands.\n"
+            "Do NOT use bash for reading file contents (use read) or modifying files "
+            "(use edit/write).\n"
+            "Prefer rg over grep, fd over find, jq over awk-based JSON parsing. "
+            "Keep output bounded — use result limits and avoid dumping large outputs.\n"
+            "Output may be automatically optimized for token efficiency."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -84,10 +151,12 @@ class ExecTool(Tool):
 
         actual_timeout = self._resolve_timeout(kwargs.get("timeout"))
 
-        try:
-            process = await self._create_process(command=command, cwd=cwd)
-            return await self._collect_output(process=process, timeout=actual_timeout)
+        # Apply agent-friendly transformations (rtk proxy, sensible defaults).
+        actual_command, _requested = _prepare_command(command)
 
+        try:
+            process = await self._create_process(command=actual_command, cwd=cwd)
+            return await self._collect_output(process=process, timeout=actual_timeout)
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
@@ -156,18 +225,12 @@ class ExecTool(Tool):
         return result[:_MAX_OUTPUT_CHARS] + f"\n... (truncated, {extra} more chars)"
 
     def _extract_git_commit_cmd_part(self, cmd: str) -> str:
-        """Extract command part of git commit, excluding -m/-F message content.
-
-        Examples:
-        - git commit -m "fix: kill process" -> returns "git commit"
-        - git commit -F file.txt -> returns "git commit"
-        """
+        """Extract command part of git commit, excluding -m/-F message content."""
         import shlex
 
         try:
             parts = shlex.split(cmd)
         except ValueError:
-            # Malformed command, return as-is for safety
             return cmd
 
         result_parts = []
@@ -177,20 +240,13 @@ class ExecTool(Tool):
             if skip_next:
                 skip_next = False
                 continue
-
-            # -m / --message / -f (lowered -F) / --file take the next token as value
             if part in ("-m", "--message", "-f", "--file"):
                 skip_next = True
                 continue
-
-            # --message=content or --file=content
             if part.startswith(("--message=", "--file=")):
                 continue
-
-            # -m<content> (shlex merges -m"msg" into one token like -mmsg)
             if len(part) > 2 and part.startswith("-m"):
                 continue
-
             result_parts.append(part)
 
         return " ".join(result_parts)
@@ -241,4 +297,10 @@ class ExecTool(Tool):
 
     def get_side_effects(self, params: dict[str, Any]) -> dict[str, Any] | None:
         cmd = params.get("command", "")
-        return {"commands_run": [cmd[:200]]} if cmd else {}
+        if not cmd:
+            return None
+        actual, requested = _prepare_command(cmd)
+        entry = actual[:200]
+        if actual != requested:
+            entry = f"{requested[:200]} -> {entry}"
+        return {"commands_run": [entry]}

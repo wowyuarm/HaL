@@ -170,9 +170,8 @@ async def test_run_with_details_tracks_side_effects_for_fs_write(tmp_path: Path)
                 tool_calls=[
                     ToolCallRequest(
                         id="1",
-                        name="fs",
+                        name="write",
                         arguments={
-                            "action": "write",
                             "path": str(out_file),
                             "content": "# Report\\n",
                         },
@@ -189,8 +188,8 @@ async def test_run_with_details_tracks_side_effects_for_fs_write(tmp_path: Path)
 
     assert details.status == "completed"
     assert details.has_side_effects is True
-    assert details.tools_used == ["fs"]
-    assert details.tool_call_counts == {"fs": 1}
+    assert details.tools_used == ["write"]
+    assert details.tool_call_counts == {"write": 1}
     assert details.files_modified == [str(out_file)]
     assert details.commands_run == []
     assert out_file.exists()
@@ -208,8 +207,8 @@ async def test_run_executes_tool_calls(tmp_path) -> None:
                 tool_calls=[
                     ToolCallRequest(
                         id="1",
-                        name="fs",
-                        arguments={"action": "list", "path": str(tmp_path)},
+                        name="bash",
+                        arguments={"command": "ls " + str(tmp_path)},
                     )
                 ],
                 finish_reason="tool_calls",
@@ -431,10 +430,9 @@ def test_build_system_prompt_includes_tool_guide(tmp_path) -> None:
     mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
     prompt = mgr._build_system_prompt()
-    assert "fs(action=" in prompt
-    assert "exec(command=" in prompt
-    assert "web_search(query=" in prompt
-    assert "web_fetch(url=" in prompt
+    assert "read(path=" in prompt
+    assert "bash(command=" in prompt
+    assert "Tool Orchestration" in prompt
 
 
 def test_build_system_prompt_includes_reliability_constraints(tmp_path) -> None:
@@ -443,8 +441,8 @@ def test_build_system_prompt_includes_reliability_constraints(tmp_path) -> None:
     mgr = SubagentManager(provider=provider, workspace=tmp_path)
 
     prompt = mgr._build_system_prompt()
-    assert "Do not use exec(cat/sed/python read_text)" in prompt
-    assert "Before claiming a file is written" in prompt
+    assert "Do not use bash (cat/sed/python read_text)" in prompt
+    assert "verify" in prompt.lower()
     assert "Final Output Contract" in prompt
 
 
