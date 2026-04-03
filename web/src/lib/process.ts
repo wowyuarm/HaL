@@ -1,13 +1,7 @@
 import { bySeq, getFiniteNumber, getString, getStringArray } from '@/lib/event-helpers'
 import type { SessionEvent } from '@/lib/types'
 
-export type ProcessTone =
-  | 'live'
-  | 'success'
-  | 'warning'
-  | 'danger'
-  | 'muted'
-  | 'human-authored'
+export type ProcessTone = 'live' | 'success' | 'warning' | 'danger' | 'muted' | 'human-authored'
 export type ProcessEntryStatus = 'running' | 'completed' | 'failed'
 export type ProcessCountKey =
   | 'search'
@@ -426,22 +420,21 @@ function buildProcessNote(event: SessionEvent): ProcessNote | null {
         tone: 'muted',
         rawEventSeqs: [event.seq],
       }
-    case 'user_follow_up':
-      {
-        const attachments = summarizeFollowUpAttachments(event)
-        const detail =
-          compactText(getString(event.payload, 'raw_content')) ??
-          summarizeAttachmentCount(attachments.length) ??
-          compactText(getString(event.payload, 'content'))
-        return {
-          id: `note_${event.seq}`,
-          label: 'input',
-          detail,
-          items: attachments.length > 0 ? attachments : undefined,
-          tone: 'human-authored',
-          rawEventSeqs: [event.seq],
-        }
+    case 'user_follow_up': {
+      const attachments = summarizeFollowUpAttachments(event)
+      const detail =
+        compactText(getString(event.payload, 'raw_content')) ??
+        summarizeAttachmentCount(attachments.length) ??
+        compactText(getString(event.payload, 'content'))
+      return {
+        id: `note_${event.seq}`,
+        label: 'input',
+        detail,
+        items: attachments.length > 0 ? attachments : undefined,
+        tone: 'human-authored',
+        rawEventSeqs: [event.seq],
       }
+    }
     case 'subagent_runtime':
       return null
     case 'context_hint':
@@ -572,9 +565,7 @@ function buildHintText(
   if (turnState === 'failed') return 'Stopped mid-turn.'
   if (turnState !== 'running') return null
 
-  const latestHumanNote = [...notes]
-    .reverse()
-    .find((entry) => entry.note.tone === 'human-authored')
+  const latestHumanNote = [...notes].reverse().find((entry) => entry.note.tone === 'human-authored')
   const liveStep = [...steps].reverse().find((entry) => entry.step.status === 'running')
   if (
     latestHumanNote &&
@@ -658,7 +649,22 @@ function resolveStepStatus(items: ProcessToolItem[], turnState: TurnState): Proc
 }
 
 function summarizeToolLabel(toolName: string, args: Record<string, unknown> | null): string {
+  // --- File primitives (new: read/write/edit, legacy: fs with action) ---
+  if (toolName === 'read') {
+    const path = displayPath(getString(args ?? {}, 'path'))
+    return `Read ${path ?? 'file'}`
+  }
+  if (toolName === 'write') {
+    const path = displayPath(getString(args ?? {}, 'path'))
+    return `Write ${path ?? 'file'}`
+  }
+  if (toolName === 'edit') {
+    const path = displayPath(getString(args ?? {}, 'path'))
+    const delta = formatEditDelta(args)
+    return `Edit ${path ?? 'file'}${delta ? ` · ${delta}` : ''}`
+  }
   if (toolName === 'fs') {
+    // Legacy unified fs tool — derive from action param
     const action = getString(args ?? {}, 'action') ?? 'read'
     const path = displayPath(getString(args ?? {}, 'path'))
     switch (action) {
@@ -675,10 +681,12 @@ function summarizeToolLabel(toolName: string, args: Record<string, unknown> | nu
     }
   }
 
-  if (toolName === 'exec') {
+  // --- Execution (new: bash, legacy: exec) ---
+  if (toolName === 'bash' || toolName === 'exec') {
     return `Run ${summarizeCommand(getString(args ?? {}, 'command'))}`
   }
 
+  // --- Collaboration & retrieval ---
   if (toolName === 'spawn') {
     const label = compactText(getString(args ?? {}, 'label') ?? getString(args ?? {}, 'task'))
     return label ? `Delegate subtask · ${label}` : 'Delegate subtask'
@@ -708,50 +716,58 @@ function summarizeToolDetail(
 ): string | null {
   if (!args) return null
 
+  // --- File primitives (new: read/write/edit, legacy: fs with action) ---
+  if (toolName === 'read') {
+    return summarizeReadDetail(args)
+  }
+  if (toolName === 'write') {
+    const content = getString(args, 'content')
+    return content ? `${countLines(content)} lines` : null
+  }
+  if (toolName === 'edit') {
+    return summarizeEditDetail(args)
+  }
   if (toolName === 'fs') {
     const action = getString(args, 'action') ?? 'read'
-    if (action === 'read') {
-      const fragments: string[] = []
-      const offset = getFiniteNumber(args, 'offset')
-      const limit = getFiniteNumber(args, 'limit')
-      if (offset != null) fragments.push(`from line ${offset}`)
-      if (limit != null) fragments.push(`up to ${limit} lines`)
-      return fragments.length > 0 ? joinSummary(fragments) : null
-    }
-    if (action === 'edit') {
-      const oldText = getString(args, 'old_text')
-      const newText = getString(args, 'new_text')
-      if (!oldText && !newText) return null
-      return `replace ${countLines(oldText)} line${countLines(oldText) === 1 ? '' : 's'} with ${countLines(newText)}`
-    }
+    if (action === 'read') return summarizeReadDetail(args)
+    if (action === 'edit') return summarizeEditDetail(args)
     if (action === 'write') {
       const content = getString(args, 'content')
-      return content ? `${countLines(content)} lines written` : null
+      return content ? `${countLines(content)} lines` : null
     }
     return null
   }
 
-  if (toolName === 'exec') {
+  // --- Execution (new: bash, legacy: exec) ---
+  if (toolName === 'bash' || toolName === 'exec') {
+    const command = getString(args, 'command')
+    // Show the full command in detail when the label truncated it
+    if (command && command.length > 64) return command.trim()
     return null
   }
 
-  if (toolName === 'spawn') {
-    return null
-  }
-
-  if (toolName === 'recall') {
-    return null
-  }
-
-  if (toolName === 'web_search') {
-    return null
-  }
-
-  if (toolName === 'web_fetch') {
-    return null
-  }
+  if (toolName === 'spawn') return null
+  if (toolName === 'recall') return null
+  if (toolName === 'web_search') return null
+  if (toolName === 'web_fetch') return null
 
   return compactText(JSON.stringify(args), 120)
+}
+
+function summarizeReadDetail(args: Record<string, unknown>): string | null {
+  const fragments: string[] = []
+  const offset = getFiniteNumber(args, 'offset')
+  const limit = getFiniteNumber(args, 'limit')
+  if (offset != null) fragments.push(`from line ${offset}`)
+  if (limit != null) fragments.push(`up to ${limit} lines`)
+  return fragments.length > 0 ? joinSummary(fragments) : null
+}
+
+function summarizeEditDetail(args: Record<string, unknown>): string | null {
+  const oldText = getString(args, 'old_text')
+  const newText = getString(args, 'new_text')
+  if (!oldText && !newText) return null
+  return `replace ${countLines(oldText)} line${countLines(oldText) === 1 ? '' : 's'} with ${countLines(newText)}`
 }
 
 function summarizeToolResult(
@@ -760,20 +776,26 @@ function summarizeToolResult(
   resultSize: number | null,
   exitCode: number | null,
 ): string | null {
-  if (toolName === 'exec') {
+  if (toolName === 'bash' || toolName === 'exec') {
     if (exitCode != null && exitCode !== 0) return `exit ${exitCode}`
   }
   return null
 }
 
 function allowInlineResultPreview(toolName: string, args: Record<string, unknown> | null): boolean {
-  if (toolName === 'fs') return false
-  if (toolName === 'exec') return false
-  if (toolName === 'spawn') return false
-  if (toolName === 'recall') return false
-  if (toolName === 'web_search') return false
-  if (toolName === 'web_fetch') return false
-  return true
+  const suppressed = new Set([
+    'fs',
+    'read',
+    'write',
+    'edit',
+    'exec',
+    'bash',
+    'spawn',
+    'recall',
+    'web_search',
+    'web_fetch',
+  ])
+  return !suppressed.has(toolName)
 }
 
 function createEmptyProcessCounts(): ProcessCounts {
@@ -814,15 +836,29 @@ function buildCountSummaryText(counts: ProcessCounts): string | null {
 }
 
 function classifyProcessItem(item: ProcessToolItem): ProcessCountKey | null {
-  if (item.toolName === 'fs') {
-    return item.label.startsWith('Read') || item.label.startsWith('Inspect') ? 'read' : 'edit'
+  switch (item.toolName) {
+    case 'read':
+      return 'read'
+    case 'write':
+    case 'edit':
+      return 'edit'
+    case 'fs':
+      // Legacy: classify by label
+      return item.label.startsWith('Read') || item.label.startsWith('Inspect') ? 'read' : 'edit'
+    case 'bash':
+    case 'exec':
+      return 'command'
+    case 'spawn':
+      return 'subtask'
+    case 'recall':
+      return 'recall'
+    case 'web_search':
+      return 'search'
+    case 'web_fetch':
+      return 'fetch'
+    default:
+      return null
   }
-  if (item.toolName === 'exec') return 'command'
-  if (item.toolName === 'spawn') return 'subtask'
-  if (item.toolName === 'recall') return 'recall'
-  if (item.toolName === 'web_search') return 'search'
-  if (item.toolName === 'web_fetch') return 'fetch'
-  return null
 }
 
 function formatCountFragment(key: ProcessCountKey, count: number): string {

@@ -224,13 +224,25 @@ function InlineStepMeta({
 }) {
   const showResult = shouldShowItemResult(item)
   if (!showLabel && !item.detail && !showResult) return null
+  const isFailed = item.status === 'failed'
 
   return (
     <div className="mt-1">
-      {showLabel ? <p className="text-caption font-medium text-hal-primary">{item.label}</p> : null}
+      {showLabel ? (
+        <p
+          className={cn('text-caption font-medium', isFailed ? 'text-danger' : 'text-hal-primary')}
+        >
+          {item.label}
+        </p>
+      ) : null}
       {item.detail ? <p className="text-caption leading-5 text-hal-muted">{item.detail}</p> : null}
       {showResult ? (
-        <p className="mt-0.5 text-caption leading-5 text-hal-muted">
+        <p
+          className={cn(
+            'mt-0.5 text-caption leading-5',
+            isFailed ? 'text-danger/80' : 'text-hal-muted',
+          )}
+        >
           {compactText(item.result, 160)}
         </p>
       ) : null}
@@ -245,17 +257,27 @@ type GroupedProcessItem = {
 
 function ProcessItemRow({ item }: { item: GroupedProcessItem }) {
   const showResult = shouldShowItemResult(item.item)
+  const isFailed = item.item.status === 'failed'
 
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2">
-        <p className="text-caption font-medium text-hal-primary">{item.item.label}</p>
+        <p
+          className={cn('text-caption font-medium', isFailed ? 'text-danger' : 'text-hal-primary')}
+        >
+          {item.item.label}
+        </p>
       </div>
       {item.item.detail ? (
         <p className="mt-0.5 text-caption leading-5 text-hal-muted">{item.item.detail}</p>
       ) : null}
       {showResult ? (
-        <p className="mt-0.5 text-caption leading-5 text-hal-muted">
+        <p
+          className={cn(
+            'mt-0.5 text-caption leading-5',
+            isFailed ? 'text-danger/80' : 'text-hal-muted',
+          )}
+        >
           {compactText(item.item.result, 160)}
         </p>
       ) : null}
@@ -300,11 +322,7 @@ function mergeItemStatus(
 function NoteEntry({ note }: { note: ProcessNote }) {
   const noteLabel = formatNoteLabel(note.label)
   const markerTone: 'hal' | 'human' | 'muted' | 'danger' =
-    note.tone === 'danger'
-      ? 'danger'
-      : note.tone === 'human-authored'
-        ? 'human'
-        : 'muted'
+    note.tone === 'danger' ? 'danger' : note.tone === 'human-authored' ? 'human' : 'muted'
 
   return (
     <article className={PROCESS_TIMELINE_GRID}>
@@ -355,9 +373,9 @@ function EntryMarker({
             ? 'bg-danger'
             : tone === 'human'
               ? 'bg-human'
-            : tone === 'hal'
-              ? 'bg-accent'
-              : 'bg-hal-muted opacity-60',
+              : tone === 'hal'
+                ? 'bg-accent'
+                : 'bg-hal-muted opacity-60',
         )}
       />
     </div>
