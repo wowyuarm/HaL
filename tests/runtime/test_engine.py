@@ -442,7 +442,7 @@ class TestDispatch:
         assert len(inject_messages) == 2
 
     async def test_brief_command_starts_background_worker(self, engine):
-        """Sending /brief starts briefing without writing a command turn."""
+        """Sending /brief records a command turn before starting briefing."""
         state = engine.create_session(channel="telegram", chat_id="c1")
         engine._run_session_brief = AsyncMock()  # type: ignore[method-assign]
 
@@ -456,11 +456,9 @@ class TestDispatch:
         manifest = engine._session_store.read_manifest(state.session_id)
         assert manifest is not None
         assert manifest.status == "briefing"
-        assert manifest.turn_count == 0
+        assert manifest.turn_count == 1
         event_types = [event.type for event in engine._session_store.read_events(state.session_id)]
-        assert "turn.started" not in event_types
-        assert "user.message" not in event_types
-        assert "brief.started" not in event_types
+        assert event_types == ["turn.started", "user.message", "brief.started", "turn.completed"]
 
     async def test_brief_command_with_prompt(self, engine):
         """Sending /brief with extra text passes the prompt to the worker."""
@@ -506,7 +504,7 @@ class TestSessionCompaction:
         assert compacted[0]["role"] == "assistant"
         assert "[Session Checkpoint]" in str(compacted[0]["content"])
         event_types = [event.type for event in engine._session_store.read_events(session_id)]
-        assert "session.compacted" in event_types
+        assert event_types == ["turn.started", "user.message", "session.compacted", "turn.completed"]
         assert "session.compaction_failed" not in event_types
 
     async def test_compact_command_failure_keeps_history_unchanged(self, engine):
@@ -531,12 +529,37 @@ class TestSessionCompaction:
         event_types = [event.type for event in events]
         assert "session.compaction_failed" in event_types
         assert "session.compacted" not in event_types
+        assert event_types == ["turn.started", "user.message", "session.compaction_failed", "turn.failed"]
         failure_event = next(event for event in events if event.type == "session.compaction_failed")
         assert "api unavailable" in str(failure_event.payload.get("error"))
 
+    async def test_compacts_history_when_tool_definitions_push_request_over_byte_budget(self, engine):
+        session_id = _create_session(engine)
+        engine._engine_config.session.auto_compaction_enabled = True
+        engine._engine_config.session.compaction_token_budget = 10000
+        engine._engine_config.session.compaction_request_bytes_threshold = 1000
+        engine._engine_config.session.compaction_checkpoint_tokens = 200
+        engine._generate_session_checkpoint = AsyncMock(  # type: ignore[method-assign]
+            return_value="[Session Checkpoint]\n\n- summary"
+        )
+
+        history = [
+            {"role": "user", "content": "short request"},
+            {"role": "assistant", "content": "short answer"},
+        ]
+
+        compacted = await engine._maybe_compact_session_history(
+            session_id=session_id,
+            history=history,
+            token_model="test-model",
+        )
+
+        assert compacted[0]["role"] == "assistant"
+        assert "[Session Checkpoint]" in str(compacted[0]["content"])
+
     async def test_compacts_history_when_token_budget_exceeded(self, engine):
         session_id = _create_session(engine)
-        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.auto_compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 80
         engine._engine_config.session.compaction_checkpoint_tokens = 200
 
@@ -563,7 +586,7 @@ class TestSessionCompaction:
 
     async def test_skips_compaction_when_under_budget(self, engine):
         session_id = _create_session(engine)
-        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.auto_compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 10000
 
         history = [
@@ -581,7 +604,7 @@ class TestSessionCompaction:
 
     async def test_compaction_counts_tool_call_payloads_in_budget(self, engine):
         session_id = _create_session(engine)
-        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.auto_compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 120
         engine._engine_config.session.compaction_checkpoint_tokens = 200
 
@@ -615,7 +638,7 @@ class TestSessionCompaction:
 
     async def test_compacts_history_when_request_bytes_threshold_exceeded(self, engine):
         session_id = _create_session(engine)
-        engine._engine_config.session.compaction_enabled = True
+        engine._engine_config.session.auto_compaction_enabled = True
         engine._engine_config.session.compaction_token_budget = 10000
         engine._engine_config.session.compaction_request_bytes_threshold = 900
         engine._engine_config.session.history_image_replay = "full"
@@ -789,6 +812,33 @@ class TestBackgroundResume:
         event_types = [event.type for event in engine._session_store.read_events(session_id)]
         assert event_types[-2:] == ["assistant.message_completed", "turn.completed"]
         engine.bus.publish_outbound.assert_awaited_once()
+
+    async def test_finalize_resumed_turn_marks_mounted_threads_touched_when_tools_used(self, engine):
+        state = engine.create_session(channel="telegram", chat_id="c1", primary_thread="alpha")
+        session_id = state.session_id
+        state.manifest.touched_threads = []
+
+        engine._background_resume.store_session_snapshot(
+            session_id=session_id,
+            channel="telegram",
+            chat_id="c1",
+            messages=[{"role": "system", "content": "sys"}],
+            final_content=None,
+        )
+
+        await engine._background_resume._finalize_resumed_turn(
+            session_id=session_id,
+            turn_id="t_0002",
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "work on it"},
+                {"role": "assistant", "content": "done"},
+            ],
+            final_content="background reply",
+            meta=LoopMetadata(tools_used=["fs"]),
+        )
+
+        assert state.touched_threads == {"alpha"}
 
     async def test_background_completion_does_not_resume_closed_session(self, engine):
         session_id = _create_session(engine)

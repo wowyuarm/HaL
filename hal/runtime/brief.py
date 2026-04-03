@@ -7,6 +7,7 @@ used by both the brief worker and other runtime components (e.g. engine hooks).
 from __future__ import annotations
 
 import re
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -281,7 +282,7 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
     indexed_chunks = await _index_written_episodes(engine, meta)
 
     # 6. Write thread-to-session references
-    _write_thread_session_refs(engine, state)
+    thread_refs = _write_thread_session_refs(engine, state, meta.files_modified)
 
     # 7. Send completion summary
     summary = _format_completion_summary(final_content, meta)
@@ -322,7 +323,7 @@ async def run_session_brief(engine: Any, session_id: str, *, user_prompt: str = 
             "iterations": meta.iterations,
             "files_modified": meta.files_modified,
             "indexed_chunks": indexed_chunks,
-            "threads_linked": sorted(_brief_target_threads(state)),
+            "threads_linked": sorted(thread_refs),
         },
     )
     await engine.end_session(
@@ -504,41 +505,42 @@ def _build_brief_user_prompt(
     mounted_threads: set[str] | None = None,
 ) -> str:
     """Build XML-structured user prompt for the brief worker."""
+    def esc(text: object, *, quote: bool = False) -> str:
+        return escape(str(text), quote=quote)
+
     parts: list[str] = []
     _mounted = mounted_threads or set()
 
     # Session events
-    parts.append(f'<session id="{session_id}">')
-    parts.append(f"<events>\n{rendered_events}\n</events>")
+    parts.append(f'<session id="{esc(session_id, quote=True)}">')
+    parts.append(f"<events>\n{esc(rendered_events)}\n</events>")
     parts.append("</session>")
 
-    # Thread metadata — use sub-elements instead of attributes to handle
-    # multi-line content (scope, core_question) without escaping issues.
     parts.append("<threads>")
     for slug in thread_order:
         meta = thread_meta.get(slug, {})
         role = _thread_role(slug, primary_thread, _mounted, touched_threads)
-        thread_lines = [f'  <thread slug="{slug}" role="{role}">']
-        thread_lines.append(f"    <name>{meta.get('name', slug)}</name>")
+        thread_lines = [f'  <thread slug="{esc(slug, quote=True)}" role="{esc(role, quote=True)}">']
+        thread_lines.append(f"    <name>{esc(meta.get('name', slug))}</name>")
         description = meta.get("description", "")
         if description:
-            thread_lines.append(f"    <goal>{description}</goal>")
+            thread_lines.append(f"    <goal>{esc(description)}</goal>")
         scope = meta.get("scope", "")
         if scope:
-            thread_lines.append(f"    <scope>{scope}</scope>")
+            thread_lines.append(f"    <scope>{esc(scope)}</scope>")
         core_question = meta.get("core_question", "")
         if core_question:
-            thread_lines.append(f"    <core_question>{core_question}</core_question>")
+            thread_lines.append(f"    <core_question>{esc(core_question)}</core_question>")
         brief_hints = meta.get("brief_hints", "")
         if brief_hints:
-            thread_lines.append(f"    <brief_hints>{brief_hints}</brief_hints>")
+            thread_lines.append(f"    <brief_hints>{esc(brief_hints)}</brief_hints>")
         thread_lines.append("  </thread>")
         parts.append("\n".join(thread_lines))
     parts.append("</threads>")
 
     # Optional user guidance
     if user_prompt.strip():
-        parts.append(f"<guidance>{user_prompt.strip()}</guidance>")
+        parts.append(f"<guidance>{esc(user_prompt.strip())}</guidance>")
 
     return "\n".join(parts)
 
@@ -629,7 +631,7 @@ def _collect_thread_meta(engine: Any) -> dict[str, dict[str, str]]:
     """
     meta: dict[str, dict[str, str]] = {}
     try:
-        entries = engine.thread_repository.collect_registry_entries(max_entries=100)
+        entries = engine.thread_repository.collect_all_registry_entries()
         for entry in entries:
             meta[entry.slug] = {
                 "name": entry.name,
@@ -696,31 +698,39 @@ def _format_failure_summary(reason: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _brief_target_threads(state: Any) -> list[str]:
-    """Return thread slugs that should receive session refs after briefing."""
-    selected: list[str] = []
-    primary = state.primary_thread
-    if primary:
-        selected.append(primary)
-    mounted_and_touched = sorted(state.mounted_threads & state.touched_threads)
-    for slug in mounted_and_touched:
-        if slug not in selected:
-            selected.append(slug)
-    return selected
+def _resolve_brief_thread_refs(
+    state: Any,
+    files_modified: list[str],
+) -> dict[str, str]:
+    """Resolve thread refs from files the brief worker actually modified."""
+    refs: dict[str, str] = {}
+    for path in files_modified:
+        slug = extract_thread_slug_from_value(path)
+        if not slug or slug in refs:
+            continue
+        if slug == state.primary_thread:
+            refs[slug] = "primary"
+        elif slug in state.mounted_threads:
+            refs[slug] = "mounted"
+        elif slug in state.touched_threads:
+            refs[slug] = "touched"
+        else:
+            refs[slug] = "related"
+    return refs
 
 
-def _write_thread_session_refs(engine: Any, state: Any) -> None:
+def _write_thread_session_refs(engine: Any, state: Any, files_modified: list[str]) -> dict[str, str]:
     """Append thread-to-session refs for the threads covered by this brief."""
-    targets = _brief_target_threads(state)
+    targets = _resolve_brief_thread_refs(state, files_modified)
     if not targets:
-        return
+        return {}
     refs_repo = ThreadRefsRepository(WorkspaceLayout(engine.workspace))
-    primary = state.primary_thread
-    for slug in targets:
+    for slug, role in sorted(targets.items()):
         refs_repo.append_ref(
             slug,
             ThreadSessionRef(
                 session_id=state.session_id,
-                role="primary" if slug == primary else "mounted",
+                role=role,
             ),
         )
+    return targets

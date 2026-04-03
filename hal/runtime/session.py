@@ -51,6 +51,30 @@ def _normalize_checkpoint(text: str) -> str:
     return normalize_checkpoint(text)
 
 
+def _request_tool_definitions(engine: Any) -> list[dict[str, Any]] | None:
+    try:
+        tools = getattr(engine, "tools", None)
+        if tools is None or not hasattr(tools, "get_definitions"):
+            return None
+        definitions = tools.get_definitions()
+        return definitions or None
+    except Exception:
+        return None
+
+
+def _estimate_request_bytes_for_replay(
+    engine: Any,
+    messages: list[dict[str, object]],
+    *,
+    model: str | None,
+) -> int:
+    return estimate_messages_request_bytes(
+        messages,
+        model=model or "",
+        tools=_request_tool_definitions(engine),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class SessionCompactionSettings:
     """Resolved runtime settings for in-session history compaction."""
@@ -128,8 +152,13 @@ async def maybe_compact_session_history(
         image_replay_mode=settings.history_image_replay,
         tool_result_max_bytes=settings.tool_result_replay_max_bytes,
     )
-    before_request_bytes = estimate_messages_request_bytes(replay_history)
+    before_request_bytes = _estimate_request_bytes_for_replay(
+        engine,
+        replay_history,
+        model=token_model,
+    )
     if _history_within_budget(
+        engine,
         history,
         replay_history=replay_history,
         token_model=token_model,
@@ -149,7 +178,11 @@ async def maybe_compact_session_history(
         image_replay_mode=settings.history_image_replay,
         tool_result_max_bytes=settings.tool_result_replay_max_bytes,
     )
-    after_request_bytes = estimate_messages_request_bytes(compacted_replay)
+    after_request_bytes = _estimate_request_bytes_for_replay(
+        engine,
+        compacted_replay,
+        model=token_model,
+    )
     if after_tokens >= before_tokens:
         if before_request_bytes <= 0 or after_request_bytes >= before_request_bytes:
             return history
@@ -197,7 +230,11 @@ async def compact_full_session_history(
         image_replay_mode=history_image_replay,
         tool_result_max_bytes=tool_result_replay_max_bytes,
     )
-    before_request_bytes = estimate_messages_request_bytes(replay_history)
+    before_request_bytes = _estimate_request_bytes_for_replay(
+        engine,
+        replay_history,
+        model=token_model,
+    )
 
     checkpoint = await engine._generate_session_checkpoint(
         list(history),
@@ -217,7 +254,11 @@ async def compact_full_session_history(
         tool_result_max_bytes=tool_result_replay_max_bytes,
     )
     after_tokens = _estimate_history_tokens(compacted, model=token_model)
-    after_request_bytes = estimate_messages_request_bytes(compacted_replay)
+    after_request_bytes = _estimate_request_bytes_for_replay(
+        engine,
+        compacted_replay,
+        model=token_model,
+    )
 
     await _record_session_compaction(
         engine,
@@ -266,6 +307,7 @@ async def _compact_history_recursively(
     completed_passes: int,
 ) -> tuple[list[dict[str, object]], int]:
     if remaining_passes <= 0 or _history_within_budget(
+        engine,
         compacted,
         replay_history=None,
         token_model=token_model,
@@ -316,6 +358,7 @@ async def _compact_history_pass(
 
 
 def _history_within_budget(
+    engine: Any,
     history: list[dict[str, object]],
     *,
     replay_history: list[dict[str, object]] | None,
@@ -337,7 +380,10 @@ def _history_within_budget(
                 image_replay_mode=settings.history_image_replay,
                 tool_result_max_bytes=settings.tool_result_replay_max_bytes,
             )
-        within_bytes = estimate_messages_request_bytes(replay) <= settings.request_bytes_threshold
+        within_bytes = (
+            _estimate_request_bytes_for_replay(engine, replay, model=token_model)
+            <= settings.request_bytes_threshold
+        )
 
     return within_tokens and within_bytes
 

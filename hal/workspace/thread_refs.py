@@ -1,7 +1,7 @@
 """Per-thread session reference index.
 
 Each thread maintains a ``refs/sessions.jsonl`` file listing sessions that
-were associated with it (as primary or mounted). This reverse index allows
+were associated with it (as primary, mounted, touched, or related). This reverse index allows
 the thread view to enumerate its sessions without scanning every session
 manifest on disk.
 """
@@ -26,7 +26,7 @@ class ThreadSessionRef(BaseModel):
 
     session_id: str
     ts: str = Field(default_factory=lambda: datetime.now().isoformat())
-    role: Literal["primary", "mounted", "created"]
+    role: Literal["primary", "mounted", "touched", "related", "created"]
 
 
 class ThreadRefsRepository:

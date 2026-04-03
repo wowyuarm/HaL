@@ -19,6 +19,7 @@ from hal.context.token_budget import rough_tokens_from_chars, trim_text_to_token
 from hal.context.token_counter import count_messages_tokens
 from hal.domain.events import (
     ASSISTANT_MESSAGE_COMPLETED,
+    BRIEF_STARTED,
     CONTEXT_COMPILED,
     LOOP_STARTED,
     MESSAGE_INJECTED,
@@ -264,6 +265,7 @@ async def _handle_brief_command(
     session_state: Any,
     channel: str,
     chat_id: str,
+    turn_id: str,
     user_prompt: str,
 ) -> OutboundMessage:
     """Handle /brief: mark session as briefing and start background worker."""
@@ -272,6 +274,12 @@ async def _handle_brief_command(
     session_state.manifest.status = "briefing"
     session_state.manifest.brief_prompt = user_prompt
     engine._session_store.write_manifest(session_state.session_id, session_state.manifest)
+    await session_state.event_publisher.emit(
+        BRIEF_STARTED,
+        turn_id=turn_id,
+        actor="user",
+        payload={"user_prompt": user_prompt},
+    )
     await session_state.event_publisher.emit(
         STATUS_CHANGED,
         actor="engine",
@@ -285,6 +293,12 @@ async def _handle_brief_command(
         engine._run_session_brief(session_state.session_id, user_prompt=user_prompt)
     )
     engine._background_resume.close_session(session_state.session_id)
+    await session_state.event_publisher.emit(
+        TURN_COMPLETED,
+        turn_id=turn_id,
+        actor="engine",
+        payload={"command": "brief"},
+    )
 
     return OutboundMessage(
         channel=channel,
@@ -325,6 +339,7 @@ async def _handle_compact_command(
     session_state: Any,
     channel: str,
     chat_id: str,
+    turn_id: str,
 ) -> OutboundMessage:
     """Handle /compact: replace full in-memory history with one checkpoint."""
     session_id = session_state.session_id
@@ -355,6 +370,12 @@ async def _handle_compact_command(
             actor="engine",
             payload={"error": str(e).strip() or "unknown_error"},
         )
+        await session_state.event_publisher.emit(
+            TURN_FAILED,
+            turn_id=turn_id,
+            actor="engine",
+            payload={"command": "compact", "error": str(e).strip() or "unknown_error"},
+        )
         engine._set_session_active(session_id, False)
         return OutboundMessage(
             channel=channel,
@@ -379,6 +400,12 @@ async def _handle_compact_command(
         f"Session compacted: tokens {result.before_tokens:,} -> {result.after_tokens:,}, "
         f"bytes {result.before_request_bytes:,} -> {result.after_request_bytes:,}, "
         f"{result.passes} pass(es)",
+    )
+    await session_state.event_publisher.emit(
+        TURN_COMPLETED,
+        turn_id=turn_id,
+        actor="engine",
+        payload={"command": "compact"},
     )
     engine._set_session_active(session_id, False)
 
@@ -642,11 +669,16 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
         # /brief command — start background brief worker and end session
         is_brief, brief_prompt = _parse_brief_command(msg.content)
         if is_brief:
+            _record_user_turn(
+                engine=engine, msg=msg, session_id=session_id, session_state=session_state
+            )
+            turn_id = await _start_turn(msg=msg, session_state=session_state, trigger="command")
             return await _handle_brief_command(
                 engine=engine,
                 session_state=session_state,
                 channel=channel,
                 chat_id=chat_id,
+                turn_id=turn_id,
                 user_prompt=brief_prompt,
             )
 
@@ -666,11 +698,16 @@ async def process_message(engine: Any, msg: Any, mode: str) -> OutboundMessage |
 
         # /compact command — compact full session history and keep session alive
         if _is_compact_command(msg.content):
+            _record_user_turn(
+                engine=engine, msg=msg, session_id=session_id, session_state=session_state
+            )
+            turn_id = await _start_turn(msg=msg, session_state=session_state, trigger="command")
             return await _handle_compact_command(
                 engine=engine,
                 session_state=session_state,
                 channel=channel,
                 chat_id=chat_id,
+                turn_id=turn_id,
             )
 
         _record_user_turn(

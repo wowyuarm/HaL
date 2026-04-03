@@ -9,12 +9,15 @@ from hal.runtime.brief import (
     _build_brief_system_prompt,
     _build_brief_tools,
     _build_brief_user_prompt,
+    _collect_thread_meta,
+    _resolve_brief_thread_refs,
     extract_touched_threads,
     format_session_events_for_prompt,
     resolve_brief_thread_order,
 )
 from hal.runtime.worker_inputs import build_event_input_lines, cap_text_to_tokens
 from hal.workspace import (
+    ThreadRepository,
     build_episode_file_name,
     ensure_recent_episodes_section,
 )
@@ -287,3 +290,66 @@ def test_build_brief_user_prompt_no_guidance() -> None:
         session_id="s_1",
     )
     assert "<guidance>" not in prompt
+
+
+def test_build_brief_user_prompt_escapes_xml_sensitive_text() -> None:
+    prompt = _build_brief_user_prompt(
+        rendered_events="- [ts] user_message: keep <this> & that",
+        touched_threads={"alpha"},
+        thread_order=["alpha"],
+        thread_meta={
+            "alpha": {
+                "name": "A <tag> & name",
+                "description": "goal <break>",
+                "scope": "scope & stuff",
+                "core_question": "q > a",
+                "brief_hints": "keep <this>",
+            }
+        },
+        user_prompt="focus on <xml> & avoid breakage",
+        session_id="s<1>",
+        primary_thread="alpha",
+        mounted_threads={"alpha"},
+    )
+    assert '<session id="s&lt;1&gt;">' in prompt
+    assert "&lt;this&gt; &amp; that" in prompt
+    assert "<name>A &lt;tag&gt; &amp; name</name>" in prompt
+    assert "<goal>goal &lt;break&gt;</goal>" in prompt
+    assert "<scope>scope &amp; stuff</scope>" in prompt
+    assert "<core_question>q &gt; a</core_question>" in prompt
+    assert "<brief_hints>keep &lt;this&gt;</brief_hints>" in prompt
+    assert "<guidance>focus on &lt;xml&gt; &amp; avoid breakage</guidance>" in prompt
+
+
+def test_collect_thread_meta_reads_all_threads(tmp_path: Path) -> None:
+    repo = ThreadRepository(tmp_path)
+    for index in range(105):
+        repo.write_state(f"thread-{index:03d}", f"# Thread {index}\nStatus: active\n")
+
+    engine = SimpleNamespace(thread_repository=repo)
+    meta = _collect_thread_meta(engine)
+
+    assert len(meta) == 105
+    assert "thread-104" in meta
+
+
+def test_resolve_brief_thread_refs_uses_written_thread_files() -> None:
+    state = SimpleNamespace(
+        primary_thread="alpha",
+        mounted_threads={"alpha", "beta"},
+        touched_threads={"alpha", "gamma"},
+        session_id="s_test",
+    )
+
+    refs = _resolve_brief_thread_refs(
+        state,
+        [
+            "/tmp/work/threads/gamma/BRIEF.md",
+            "/tmp/work/threads/delta/episodes/2026-04-03-delta-s_test.md",
+        ],
+    )
+
+    assert refs == {
+        "gamma": "touched",
+        "delta": "related",
+    }

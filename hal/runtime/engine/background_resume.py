@@ -13,8 +13,8 @@ from hal.domain.events import (
     ASSISTANT_MESSAGE_COMPLETED,
     LOOP_STARTED,
     MESSAGE_INJECTED,
-    TURN_FAILED,
     TURN_COMPLETED,
+    TURN_FAILED,
     TURN_STARTED,
 )
 from hal.domain.session import build_turn_id
@@ -24,7 +24,7 @@ from hal.workspace import SessionRepository
 from .processing import (
     _is_error_assistant_content,
     _normalize_final_content,
-    _should_record_assistant_history,
+    _persist_completed_turn,
     build_error_recovery_inject,
 )
 from .subagent_injection import _SUBAGENT_RUNTIME_MAX_TOKENS, _build_subagent_injection
@@ -345,30 +345,17 @@ class _EngineBackgroundResume:
         channel = transport.channel if transport else "unknown"
         chat_id = transport.chat_id if transport else "unknown"
 
-        record_assistant_history = _should_record_assistant_history(final_content)
-        session_history = build_persisted_session_history(
-            working_set_messages=messages,
-            final_content=final_content,
-            include_final_assistant=record_assistant_history,
-        )
-        session_history = await self._engine._maybe_compact_session_history(
+        resolved_model = self._engine.provider.resolve_model(self._engine.model)
+        await _persist_completed_turn(
+            engine=self._engine,
             session_id=session_id,
-            history=session_history,
-            token_model=self._engine.provider.resolve_model(self._engine.model),
-        )
-        self._engine._set_session_history(session_id, session_history)
-        self._engine._touch_session(session_id)
-
-        snapshot_messages = self._engine._build_session_snapshot_messages(
-            session_id=session_id,
-            token_model=self._engine.provider.resolve_model(self._engine.model),
-        )
-        self.store_session_snapshot(
-            session_id=session_id,
+            session_state=state,
             channel=channel,
             chat_id=chat_id,
-            messages=snapshot_messages,
-            final_content=None,
+            messages=messages,
+            final_content=final_content,
+            meta=meta,
+            resolved_model=resolved_model,
         )
 
         if _is_error_assistant_content(final_content):

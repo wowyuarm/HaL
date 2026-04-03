@@ -173,6 +173,19 @@ class ThreadRepository:
         ranked_entries = self._rank_registry_entries(entries)
         return ranked_entries[: max(1, max_entries)]
 
+    def collect_all_registry_entries(self) -> list[ThreadRegistryEntry]:
+        """Collect every ranked thread registry entry from the workspace."""
+        threads_dir = self.threads_dir()
+        if not threads_dir.is_dir():
+            return []
+
+        entries = [
+            entry
+            for thread_dir in self._iter_thread_dirs(threads_dir)
+            if (entry := self._load_registry_entry(thread_dir)) is not None
+        ]
+        return self._rank_registry_entries(entries)
+
     def collect_episode_paths(self) -> list[Path]:
         """Collect episode markdown paths from all thread directories."""
         return self.episodes.collect_episode_paths()
