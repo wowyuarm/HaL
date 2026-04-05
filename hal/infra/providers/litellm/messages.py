@@ -57,12 +57,26 @@ def should_preserve_reasoning_content(
     if gateway_name == "anyrouter":
         return True
     params = request_params or {}
-    return is_thinking_enabled(params.get("thinking"))
+    if is_thinking_enabled(params.get("thinking")):
+        return True
+    if bool(params.get("include_reasoning")):
+        return True
+    reasoning = params.get("reasoning")
+    if reasoning is None:
+        return False
+    if isinstance(reasoning, dict):
+        if bool(reasoning.get("enabled")):
+            return True
+        if reasoning.get("effort") not in (None, "", "none"):
+            return True
+        return bool(reasoning.get("max_tokens"))
+    return bool(reasoning)
 
 
 def sanitize_messages(
     messages: list[dict[str, Any]],
     preserve_reasoning_content: bool = False,
+    preserve_reasoning_details: bool = False,
 ) -> list[dict[str, Any]]:
     """Sanitize messages before LLM dispatch."""
     sanitized: list[dict[str, Any]] = []
@@ -78,6 +92,8 @@ def sanitize_messages(
         allowed_keys = set(allowed)
         if role == "assistant" and preserve_reasoning_content:
             allowed_keys.add("reasoning_content")
+        if role == "assistant" and preserve_reasoning_details:
+            allowed_keys.add("reasoning_details")
 
         cleaned: dict[str, Any] = {k: v for k, v in msg.items() if k in allowed_keys}
 
@@ -127,6 +143,12 @@ def trim_messages_to_request_budget(
     for index, message in enumerate(trimmed):
         if "reasoning_content" in message:
             message.pop("reasoning_content", None)
+            changed = True
+            payload["messages"] = trimmed
+            if estimate_request_payload_bytes(payload) <= max_bytes:
+                return trimmed, changed
+        if "reasoning_details" in message:
+            message.pop("reasoning_details", None)
             changed = True
             payload["messages"] = trimmed
             if estimate_request_payload_bytes(payload) <= max_bytes:

@@ -482,6 +482,9 @@ def _slim_message_for_replay(
     if "reasoning_content" in message:
         message.pop("reasoning_content", None)
         changed = True
+    if "reasoning_details" in message:
+        message.pop("reasoning_details", None)
+        changed = True
 
     content = message.get("content")
     if isinstance(content, list) and not preserve_user_content:

@@ -305,6 +305,7 @@ class _EngineLoopHooks:
             response.content,
             [],
             reasoning_content=response.reasoning_content,
+            reasoning_details=response.reasoning_details,
         )
         for injection in pending_injections:
             messages.append({"role": "user", "content": injection})

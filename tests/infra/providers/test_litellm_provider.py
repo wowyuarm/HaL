@@ -51,9 +51,19 @@ class _ToolCall:
 
 
 class _Msg:
-    def __init__(self, content: str | None, tool_calls=None):
+    def __init__(
+        self,
+        content: str | None,
+        tool_calls=None,
+        reasoning_content: str | None = None,
+        reasoning_details=None,
+        provider_specific_fields=None,
+    ):
         self.content = content
         self.tool_calls = tool_calls
+        self.reasoning_content = reasoning_content
+        self.reasoning_details = reasoning_details
+        self.provider_specific_fields = provider_specific_fields
 
 
 class _Choice:
@@ -95,6 +105,23 @@ class TestSanitizeMessages:
         ]
         result = LiteLLMProvider._sanitize_messages(messages, preserve_reasoning_content=True)
         assert result[0]["reasoning_content"] == "thinking..."
+
+    def test_preserves_reasoning_details_when_enabled(self) -> None:
+        messages = [
+            {
+                "role": "assistant",
+                "content": "hi",
+                "reasoning_details": [{"type": "reasoning.text", "text": "thinking..."}],
+            }
+        ]
+        result = LiteLLMProvider._sanitize_messages(
+            messages,
+            preserve_reasoning_content=True,
+            preserve_reasoning_details=True,
+        )
+        assert result[0]["reasoning_details"] == [
+            {"type": "reasoning.text", "text": "thinking..."}
+        ]
 
     def test_fills_missing_reasoning_content_for_assistant_tool_call_when_enabled(self) -> None:
         tool_calls = [{"id": "call_1", "type": "function", "function": {"name": "fs"}}]
@@ -242,6 +269,31 @@ def test_parse_response_usage_includes_cache_fields() -> None:
     assert parsed.usage["prompt_cache_miss_tokens"] == 24
 
 
+def test_parse_response_preserves_reasoning_details() -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="gpt-4o",
+        preserve_reasoning_details=True,
+    )
+    resp = _Resp(
+        _Choice(
+            _Msg(
+                "ok",
+                reasoning_content="thinking...",
+                provider_specific_fields={
+                    "reasoning_details": [{"type": "reasoning.text", "text": "step 1"}]
+                },
+            )
+        )
+    )
+
+    parsed = p._parse_response(resp)
+
+    assert parsed.reasoning_content == "thinking..."
+    assert parsed.reasoning_details == [{"type": "reasoning.text", "text": "step 1"}]
+
+
 def test_extract_usage_maps_anthropic_input_output_tokens() -> None:
     usage = SimpleNamespace(input_tokens=77, output_tokens=9)
 
@@ -368,6 +420,43 @@ async def test_chat_passes_provider_request_params(monkeypatch: pytest.MonkeyPat
 
     assert called["prompt_cache_key"] == "k1"
     assert called["prompt_cache_retention"] == "in_memory"
+
+
+@pytest.mark.asyncio
+async def test_chat_preserves_openrouter_reasoning_details_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p = LiteLLMProvider(
+        api_key=None,
+        api_base=None,
+        default_model="qwen/qwen3.6-plus:free",
+        provider_name="openrouter",
+        request_params={"reasoning": {"effort": "high"}, "include_reasoning": True},
+        preserve_reasoning_details=True,
+    )
+    called = {}
+
+    async def fake_acompletion(**kwargs):
+        called.update(kwargs)
+        return _Resp(_Choice(_Msg("ok")))
+
+    monkeypatch.setattr("hal.infra.providers.litellm.provider.acompletion", fake_acompletion)
+
+    await p.chat(
+        messages=[
+            {
+                "role": "assistant",
+                "content": "done",
+                "reasoning_content": "thinking...",
+                "reasoning_details": [{"type": "reasoning.text", "text": "step 1"}],
+            },
+            {"role": "user", "content": "continue"},
+        ]
+    )
+
+    assistant_msg = called["messages"][0]
+    assert assistant_msg["reasoning_content"] == "thinking..."
+    assert assistant_msg["reasoning_details"] == [{"type": "reasoning.text", "text": "step 1"}]
 
 
 @pytest.mark.asyncio

@@ -248,7 +248,7 @@ def test_defaults_match_original_hardcoded_values() -> None:
     assert cfg.engine.context_advisor_enabled is True
 
     # Engine → session
-    assert cfg.engine.session.compaction_enabled is False
+    assert cfg.engine.session.auto_compaction_enabled is False
     assert cfg.engine.session.compaction_token_budget == 150000
     assert cfg.engine.session.compaction_request_bytes_threshold == 900_000
     assert cfg.engine.session.compaction_checkpoint_tokens == 1800

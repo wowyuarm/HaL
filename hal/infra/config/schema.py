@@ -85,6 +85,7 @@ class ProviderConfig(_StrictModel):
     extra_headers: dict[str, str] | None = None  # Custom request headers for provider endpoints
     compat_mode: str = ""  # Protocol hint for compatible endpoints, e.g. "openai" or "anthropic"
     request_params: dict[str, Any] | None = None  # Optional per-request LiteLLM params
+    preserve_reasoning_details: bool = False  # Keep full reasoning detail blocks in replay/history when supported
     max_request_body_bytes: int = Field(
         default=950_000, ge=65_536
     )  # Last-resort ceiling for serialized chat request bodies before provider dispatch trimming

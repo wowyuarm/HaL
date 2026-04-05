@@ -285,6 +285,7 @@ def _append_assistant_tool_call_message(
             response.content,
             tool_call_dicts,
             reasoning_content=response.reasoning_content,
+            reasoning_details=response.reasoning_details,
         )
 
     return append_assistant_message(
@@ -292,6 +293,7 @@ def _append_assistant_tool_call_message(
         response.content,
         tool_call_dicts,
         reasoning_content=response.reasoning_content,
+        reasoning_details=response.reasoning_details,
     )
 
 

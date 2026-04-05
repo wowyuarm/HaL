@@ -35,6 +35,7 @@ class LiteLLMProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         compat_mode: str = "",
         request_params: dict[str, Any] | None = None,
+        preserve_reasoning_details: bool = False,
         max_request_body_bytes: int = 950_000,
         provider_name: str = "",
     ):
@@ -44,6 +45,7 @@ class LiteLLMProvider(LLMProvider):
         self.extra_headers = self._build_extra_headers(extra_headers, api_key)
         self._compat_mode = compat_mode
         self.request_params = request_params or {}
+        self.preserve_reasoning_details = preserve_reasoning_details
         self.max_request_body_bytes = max(1, int(max_request_body_bytes))
 
         # In compat_mode, skip gateway detection — the user explicitly declared
@@ -164,11 +166,13 @@ class LiteLLMProvider(LLMProvider):
     def _sanitize_messages(
         messages: list[dict[str, Any]],
         preserve_reasoning_content: bool = False,
+        preserve_reasoning_details: bool = False,
     ) -> list[dict[str, Any]]:
         """Sanitize messages before LLM dispatch."""
         return message_helpers.sanitize_messages(
             messages=messages,
             preserve_reasoning_content=preserve_reasoning_content,
+            preserve_reasoning_details=preserve_reasoning_details,
         )
 
     async def chat(
@@ -217,9 +221,13 @@ class LiteLLMProvider(LLMProvider):
     ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]] | None, int]:
         resolved_model = self.resolve_model(model)
         preserve_reasoning_content = self._should_preserve_reasoning_content(resolved_model)
+        preserve_reasoning_details = (
+            self.preserve_reasoning_details and preserve_reasoning_content
+        )
         prepared_messages = self._sanitize_messages(
             messages,
             preserve_reasoning_content=preserve_reasoning_content,
+            preserve_reasoning_details=preserve_reasoning_details,
         )
         prepared_max_tokens = max(self._MIN_MAX_TOKENS, max_tokens)
         prepared_tools = tools
@@ -322,11 +330,17 @@ class LiteLLMProvider(LLMProvider):
 
     async def _aggregate_stream(self, stream: Any) -> LLMResponse:
         """Aggregate a streaming response into a single LLMResponse."""
-        return await parse_helpers.aggregate_stream(stream, usage_extractor=self._extract_usage)
+        response = await parse_helpers.aggregate_stream(stream, usage_extractor=self._extract_usage)
+        if not self.preserve_reasoning_details:
+            response.reasoning_details = None
+        return response
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
-        return parse_helpers.parse_response(response, usage_extractor=self._extract_usage)
+        parsed = parse_helpers.parse_response(response, usage_extractor=self._extract_usage)
+        if not self.preserve_reasoning_details:
+            parsed.reasoning_details = None
+        return parsed
 
     def get_default_model(self) -> str:
         """Get the default model."""

@@ -708,6 +708,27 @@ class TestSessionCompaction:
 
 
 class TestRequestReplaySlimming:
+    def test_slim_messages_for_replay_drops_reasoning_details(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "done",
+                "reasoning_content": "thinking...",
+                "reasoning_details": [{"type": "reasoning.text", "text": "step 1"}],
+            },
+            {"role": "user", "content": "latest"},
+        ]
+
+        slimmed, changed = slim_messages_for_replay(
+            messages,
+            image_replay_mode="summary",
+            tool_result_max_bytes=500,
+        )
+
+        assert changed is True
+        assert "reasoning_content" not in slimmed[0]
+        assert "reasoning_details" not in slimmed[0]
+
     def test_slim_messages_for_replay_truncates_long_tool_results(self):
         messages = [
             {"role": "system", "content": "sys"},

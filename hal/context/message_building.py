@@ -133,6 +133,7 @@ def add_assistant_message(
     content: str | None,
     tool_calls: list[dict[str, Any]] | None = None,
     reasoning_content: str | None = None,
+    reasoning_details: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Append one assistant message payload and return the original list."""
     messages.append(
@@ -140,6 +141,7 @@ def add_assistant_message(
             content=content,
             tool_calls=tool_calls,
             reasoning_content=reasoning_content,
+            reasoning_details=reasoning_details,
         )
     )
     return messages

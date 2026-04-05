@@ -82,6 +82,7 @@ def make_provider(config):
         extra_headers=p.extra_headers if p else None,
         compat_mode=compat_mode,
         request_params=p.request_params if p else None,
+        preserve_reasoning_details=p.preserve_reasoning_details if p else False,
         max_request_body_bytes=p.max_request_body_bytes if p else 950_000,
         provider_name=provider_name,
     )
@@ -118,6 +119,7 @@ def _make_alternate_provider(config, model_name: str):
         extra_headers=sp.extra_headers if sp else None,
         compat_mode=compat_mode,
         request_params=sp.request_params if sp else None,
+        preserve_reasoning_details=sp.preserve_reasoning_details if sp else False,
         max_request_body_bytes=sp.max_request_body_bytes if sp else 950_000,
         provider_name=provider_name,
     )

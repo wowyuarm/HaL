@@ -23,6 +23,7 @@ class LLMResponse:
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_content: str | None = None
+    reasoning_details: list[dict[str, Any]] | None = None
     error_message: str | None = None
     retryable: bool = False
 

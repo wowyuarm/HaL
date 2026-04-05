@@ -102,6 +102,7 @@ def _append_delta_text(
     *,
     content_parts: list[str],
     reasoning_parts: list[str],
+    reasoning_details_parts: list[dict[str, Any]],
 ) -> None:
     """Collect streamed content/reasoning deltas."""
     content = getattr(delta, "content", None)
@@ -111,6 +112,12 @@ def _append_delta_text(
     reasoning = getattr(delta, "reasoning_content", None)
     if reasoning:
         reasoning_parts.append(reasoning)
+
+    reasoning_details = getattr(delta, "reasoning_details", None)
+    if isinstance(reasoning_details, list):
+        reasoning_details_parts.extend(
+            item for item in reasoning_details if isinstance(item, dict)
+        )
 
 
 def _resolve_tool_call_key(tc_delta: Any, state: _ToolCallAggregationState) -> str:
@@ -217,6 +224,7 @@ async def aggregate_stream(
     finish_reason = "stop"
     usage: dict[str, int] = {}
     reasoning_parts: list[str] = []
+    reasoning_details_parts: list[dict[str, Any]] = []
 
     async for chunk in stream:
         choice = _first_choice(chunk)
@@ -224,7 +232,12 @@ async def aggregate_stream(
             continue
 
         delta = choice.delta
-        _append_delta_text(delta, content_parts=content_parts, reasoning_parts=reasoning_parts)
+        _append_delta_text(
+            delta,
+            content_parts=content_parts,
+            reasoning_parts=reasoning_parts,
+            reasoning_details_parts=reasoning_details_parts,
+        )
         _accumulate_tool_calls(delta, state)
 
         if choice.finish_reason:
@@ -240,6 +253,7 @@ async def aggregate_stream(
         finish_reason=finish_reason,
         usage=usage,
         reasoning_content="".join(reasoning_parts) or None,
+        reasoning_details=reasoning_details_parts or None,
     )
 
 
@@ -273,6 +287,13 @@ def parse_response(
     # Capture reasoning_content from thinking/reasoning models (e.g. kimi-k2.5,
     # DeepSeek-R1). LiteLLM unifies this across providers.
     reasoning_content = getattr(message, "reasoning_content", None)
+    reasoning_details = getattr(message, "reasoning_details", None)
+    if reasoning_details is None:
+        provider_specific_fields = getattr(message, "provider_specific_fields", None)
+        if isinstance(provider_specific_fields, dict):
+            candidate = provider_specific_fields.get("reasoning_details")
+            if isinstance(candidate, list):
+                reasoning_details = candidate
 
     return LLMResponse(
         content=message.content,
@@ -280,4 +301,5 @@ def parse_response(
         finish_reason=choice.finish_reason or "stop",
         usage=usage,
         reasoning_content=reasoning_content,
+        reasoning_details=reasoning_details,
     )
