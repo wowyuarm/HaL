@@ -390,7 +390,7 @@ def test_ensure_frontend_bundle_current_runs_npm_build_for_stale_bundle(
     source_path.write_text("export default function App() { return null; }\n", encoding="utf-8")
     dist_path.write_text("<!doctype html>\n", encoding="utf-8")
 
-    os.utime(dist_path, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(dist_path, ns=(1_000_000_000, 1_000_000))
     os.utime(source_path, ns=(2_000_000_000, 2_000_000_000))
 
     called: dict[str, object] = {}
@@ -411,3 +411,24 @@ def test_ensure_frontend_bundle_current_runs_npm_build_for_stale_bundle(
     assert called["cmd"] == ["/usr/bin/npm", "run", "build"]
     assert called["cwd"] == web_dir
     assert called["check"] is True
+
+
+def test_thread_migrate_slug_command_rejects_missing_source(tmp_path: Path) -> None:
+    result = runner.invoke(
+        commands.app,
+        ["thread", "migrate-slug", "nonexistent", "new-slug"],
+    )
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
+
+
+def test_thread_migrate_slug_command_rejects_identical_slugs(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    (workspace / "work" / "threads" / "same-slug").mkdir(parents=True)
+
+    result = runner.invoke(
+        commands.app,
+        ["thread", "migrate-slug", "--workspace", str(workspace), "same-slug", "same-slug"],
+    )
+    assert result.exit_code == 1
+    assert "must differ" in result.output
