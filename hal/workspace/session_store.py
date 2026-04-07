@@ -12,6 +12,7 @@ from __future__ import annotations
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import TypeAlias
 
 from loguru import logger
 
@@ -21,12 +22,16 @@ from hal.domain.session import SessionManifest
 from .jsonl import append_jsonl_line, read_jsonl_lines
 from .layout import WorkspaceLayout
 
+FileState: TypeAlias = tuple[int | None, int | None]
+SessionEventsCacheEntry: TypeAlias = tuple[int | None, int | None, list[SessionEvent]]
+
 
 class SessionStore:
     """Filesystem-backed repository for session manifests and working logs."""
 
     def __init__(self, layout: WorkspaceLayout) -> None:
         self.layout = layout
+        self._events_cache: dict[str, SessionEventsCacheEntry] = {}
 
     @property
     def sessions_root(self) -> Path:
@@ -68,6 +73,7 @@ class SessionStore:
     def append_event(self, session_id: str, event: SessionEvent) -> None:
         """Append one event row to the per-session working log."""
         append_jsonl_line(self.log_path(session_id), event.model_dump_json())
+        self._events_cache.pop(session_id, None)
 
     def archive(self, session_id: str) -> SessionManifest | None:
         """Mark one terminal session archived and persist the manifest."""
@@ -100,6 +106,7 @@ class SessionStore:
         path = self.session_dir(session_id)
         if path.is_dir():
             shutil.rmtree(path)
+        self._events_cache.pop(session_id, None)
 
     # -- read operations ----------------------------------------------------
 
@@ -116,15 +123,28 @@ class SessionStore:
 
     def read_events(self, session_id: str, *, after_seq: int = 0) -> list[SessionEvent]:
         """Read session events, optionally starting after a given sequence number."""
+        events = self._read_cached_events(session_id)
+        if after_seq <= 0:
+            return list(events)
+        return [event for event in events if event.seq > after_seq]
+
+    def _read_cached_events(self, session_id: str) -> list[SessionEvent]:
+        path = self.log_path(session_id)
+        state = _file_state(path)
+        cached = self._events_cache.get(session_id)
+        if cached is not None and cached[:2] == state:
+            return cached[2]
+
         events: list[SessionEvent] = []
-        for raw in read_jsonl_lines(self.log_path(session_id)):
+        for raw in read_jsonl_lines(path):
             try:
                 event = SessionEvent.model_validate_json(raw)
             except Exception as exc:
                 logger.warning("malformed event row in session {}: {}", session_id, exc)
                 continue
-            if event.seq > after_seq:
-                events.append(event)
+            events.append(event)
+
+        self._events_cache[session_id] = (*state, events)
         return events
 
     def list_sessions(
@@ -164,3 +184,11 @@ def _matches_thread(manifest: SessionManifest, slug: str) -> bool:
     if manifest.primary_thread == slug:
         return True
     return slug in manifest.mounted_threads
+
+
+def _file_state(path: Path) -> FileState:
+    """Return the file state used to validate read caches."""
+    if not path.is_file():
+        return (None, None)
+    stat = path.stat()
+    return (stat.st_mtime_ns, stat.st_size)

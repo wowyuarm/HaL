@@ -28,6 +28,14 @@ def _create_thread(thread_repo, slug: str, title: str) -> None:
     )
 
 
+async def _next_event_of_type(subscription, event_type: str, *, limit: int = 8):
+    for _ in range(limit):
+        event = await asyncio.wait_for(subscription.next_event(), timeout=1)
+        if event.type == event_type:
+            return event
+    raise AssertionError(f"Did not receive event type {event_type!r} within {limit} events")
+
+
 @pytest.mark.asyncio
 async def test_create_session_emits_session_created(bridge, engine, thread_repo) -> None:
     _create_thread(thread_repo, "auth", "Auth")
@@ -129,7 +137,7 @@ async def test_brief_start_streams_transient_status_change(bridge, thread_repo) 
     with patch.object(bridge._engine, "_run_session_brief", new_callable=AsyncMock):
         try:
             updated = await bridge.end_session(manifest.session_id, reason="brief")
-            live_event = await asyncio.wait_for(subscription.next_event(), timeout=1)
+            live_event = await _next_event_of_type(subscription, STATUS_CHANGED)
         finally:
             await subscription.close()
 

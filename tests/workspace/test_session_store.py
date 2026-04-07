@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
+import hal.workspace.session_store as session_store_module
 from hal.domain.events import SESSION_CREATED, TURN_STARTED, SessionEvent
 from hal.domain.session import SessionManifest
 from hal.workspace.layout import WorkspaceLayout
 from hal.workspace.session_store import SessionStore
 from hal.workspace.thread_refs import ThreadRefsRepository, ThreadSessionRef
-
 
 # ---------------------------------------------------------------------------
 # SessionStore
@@ -74,6 +74,51 @@ class TestSessionStore:
 
     def test_read_events_empty(self, store: SessionStore) -> None:
         assert store.read_events("nonexistent") == []
+
+    def test_read_events_reuses_cache_when_log_unchanged(
+        self, store: SessionStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sid = "s_cached"
+        store.create(sid)
+        store.append_event(
+            sid,
+            SessionEvent(seq=1, session_id=sid, type=TURN_STARTED, actor="engine"),
+        )
+
+        calls = 0
+        original = session_store_module.read_jsonl_lines
+
+        def counting_read(path: Path) -> list[str]:
+            nonlocal calls
+            calls += 1
+            return original(path)
+
+        monkeypatch.setattr(session_store_module, "read_jsonl_lines", counting_read)
+
+        first = store.read_events(sid)
+        second = store.read_events(sid)
+
+        assert [event.seq for event in first] == [1]
+        assert [event.seq for event in second] == [1]
+        assert calls == 1
+
+    def test_read_events_refreshes_cache_after_append(self, store: SessionStore) -> None:
+        sid = "s_refresh"
+        store.create(sid)
+        store.append_event(
+            sid,
+            SessionEvent(seq=1, session_id=sid, type=TURN_STARTED, actor="engine"),
+        )
+
+        first = store.read_events(sid)
+        store.append_event(
+            sid,
+            SessionEvent(seq=2, session_id=sid, type=TURN_STARTED, actor="engine"),
+        )
+        second = store.read_events(sid)
+
+        assert [event.seq for event in first] == [1]
+        assert [event.seq for event in second] == [1, 2]
 
     def test_list_sessions_empty(self, store: SessionStore) -> None:
         assert store.list_sessions() == []
