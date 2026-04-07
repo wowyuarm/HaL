@@ -12,6 +12,7 @@ import { AssistantRuntimeProvider } from '@assistant-ui/react'
 
 import { HalThread } from '@/components/conversation/hal-thread'
 import { Sidebar } from '@/components/layout/sidebar'
+import { WorkspaceTabs } from '@/components/layout/workspace-tabs'
 import { ProcessRail } from '@/components/session/process-rail'
 import { ReviewPanel } from '@/components/session/review-panel'
 import { SessionMountedThreadsDialog } from '@/components/session/session-mounted-threads-dialog'
@@ -36,6 +37,8 @@ export default function App() {
   const threadDetails = useHalStore((s) => s.threadDetails)
   const sessionManifests = useHalStore((s) => s.sessionManifests)
   const sessionEvents = useHalStore((s) => s.sessionEvents)
+  const workspaceTabs = useHalStore((s) => s.workspaceTabs)
+  const activeWorkspaceTabId = useHalStore((s) => s.activeWorkspaceTabId)
   const activeThreadSlug = useHalStore((s) => s.activeThreadSlug)
   const selectedSessionId = useHalStore((s) => s.selectedSessionId)
   const socketState = useHalStore((s) => s.socketState)
@@ -51,6 +54,9 @@ export default function App() {
   const loadThread = useHalStore((s) => s.loadThread)
   const loadSessionEvents = useHalStore((s) => s.loadSessionEvents)
   const applySessionManifest = useHalStore((s) => s.applySessionManifest)
+  const openWorkspaceTab = useHalStore((s) => s.openWorkspaceTab)
+  const activateWorkspaceTab = useHalStore((s) => s.activateWorkspaceTab)
+  const closeWorkspaceTab = useHalStore((s) => s.closeWorkspaceTab)
   const selectThread = useHalStore((s) => s.selectThread)
   const selectSession = useHalStore((s) => s.selectSession)
   const createSessionForThread = useHalStore((s) => s.createSessionForThread)
@@ -73,6 +79,14 @@ export default function App() {
   const latestEventSeq = events.at(-1)?.seq ?? 0
   const hasSession = Boolean(selectedSession)
   const briefPanelOpen = reviewPanel?.kind === 'brief'
+  const workspaceTabViews = workspaceTabs.map((tab) => ({
+    id: tab.id,
+    title:
+      threadDetails[tab.activeThreadSlug ?? '']?.slug ??
+      threads.find((thread) => thread.slug === tab.activeThreadSlug)?.slug ??
+      'thread',
+    active: tab.id === activeWorkspaceTabId,
+  }))
 
   // WebSocket lifecycle
   useSessionSocket(selectedSession?.session_id ?? null, selectedSession?.status ?? null)
@@ -115,6 +129,21 @@ export default function App() {
   const handleSelectSession = (sessionId: string) => {
     setError(null)
     selectSession(sessionId)
+  }
+
+  const handleOpenWorkspaceTab = () => {
+    setError(null)
+    openWorkspaceTab(activeThreadSlug ?? threads[0]?.slug ?? null)
+  }
+
+  const handleActivateWorkspaceTab = (tabId: string) => {
+    setError(null)
+    activateWorkspaceTab(tabId)
+  }
+
+  const handleCloseWorkspaceTab = (tabId: string) => {
+    setError(null)
+    closeWorkspaceTab(tabId)
   }
 
   const handleBack = () => selectSession(null)
@@ -265,59 +294,70 @@ export default function App() {
           className="pointer-events-none absolute inset-0 opacity-60 [background-image:repeating-linear-gradient(180deg,transparent_0,transparent_31px,rgba(36,33,29,0.03)_32px)]"
         />
 
-        {/* Sidebar */}
-        <Sidebar
-          threads={threads}
-          activeThreadSlug={activeThreadSlug}
-          collapsed={sidebarCollapsed}
-          onSelectThread={handleSelectThread}
-          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-        />
-
         <div className="relative z-10 flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          {/* Main area */}
-          <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-            {lastError && (
-              <div className="mx-3 mt-3 rounded-xl border border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger md:mx-5 lg:mx-7">
-                {lastError}
-              </div>
-            )}
-            {hasSession && selectedSession ? (
-              <HalThread
-                key={selectedSession.session_id}
-                session={selectedSession}
-                threadName={activeThread?.name ?? null}
-                socketState={socketState}
-                briefPanelOpen={briefPanelOpen}
-                onBack={handleBack}
-                onEditScope={handleOpenScopeEditor}
-                onBrief={handleBrief}
-                onDrop={handleDrop}
-                onToggleBriefPanel={toggleBriefPanel}
-              />
-            ) : (
-              <div className="h-full px-3 py-4 md:px-5 md:py-5 lg:px-7 lg:py-7">
-                <ThreadDetailPanel
-                  thread={activeThread}
-                  selectedSessionId={selectedSessionId}
-                  showArchived={showArchived}
-                  onSelectSession={handleSelectSession}
-                  onCreateSession={handleCreateSession}
-                  onUpdateSessionTitle={handleUpdateSessionTitle}
-                  onEndSession={handleEndSessionFromThreadDetail}
-                  onArchiveSession={handleArchiveSession}
-                  onRestoreSession={handleRestoreSession}
-                  onPreviewEpisode={handlePreviewEpisode}
-                  creatingSession={creatingSession}
-                  mutatingArchiveSessionId={mutatingArchiveSessionId}
-                  onToggleBriefPanel={toggleBriefPanel}
-                  onToggleShowArchived={() => setShowArchived(!showArchived)}
-                />
-              </div>
-            )}
-          </main>
+          {/* Sidebar */}
+          <Sidebar
+            threads={threads}
+            activeThreadSlug={activeThreadSlug}
+            collapsed={sidebarCollapsed}
+            onSelectThread={handleSelectThread}
+            onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+          />
 
-          <ProcessRail />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <WorkspaceTabs
+              tabs={workspaceTabViews}
+              onAdd={handleOpenWorkspaceTab}
+              onActivate={handleActivateWorkspaceTab}
+              onClose={handleCloseWorkspaceTab}
+            />
+
+            <div className="relative z-10 flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              {/* Main area */}
+              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                {lastError && (
+                  <div className="mx-3 mt-3 rounded-xl border border-danger bg-hal-danger-subtle px-4 py-3 text-body text-danger md:mx-5 lg:mx-7">
+                    {lastError}
+                  </div>
+                )}
+                {hasSession && selectedSession ? (
+                  <HalThread
+                    key={selectedSession.session_id}
+                    session={selectedSession}
+                    threadName={activeThread?.name ?? null}
+                    socketState={socketState}
+                    briefPanelOpen={briefPanelOpen}
+                    onBack={handleBack}
+                    onEditScope={handleOpenScopeEditor}
+                    onBrief={handleBrief}
+                    onDrop={handleDrop}
+                    onToggleBriefPanel={toggleBriefPanel}
+                  />
+                ) : (
+                  <div className="h-full px-3 py-4 md:px-5 md:py-5 lg:px-7 lg:py-7">
+                    <ThreadDetailPanel
+                      thread={activeThread}
+                      selectedSessionId={selectedSessionId}
+                      showArchived={showArchived}
+                      onSelectSession={handleSelectSession}
+                      onCreateSession={handleCreateSession}
+                      onUpdateSessionTitle={handleUpdateSessionTitle}
+                      onEndSession={handleEndSessionFromThreadDetail}
+                      onArchiveSession={handleArchiveSession}
+                      onRestoreSession={handleRestoreSession}
+                      onPreviewEpisode={handlePreviewEpisode}
+                      creatingSession={creatingSession}
+                      mutatingArchiveSessionId={mutatingArchiveSessionId}
+                      onToggleBriefPanel={toggleBriefPanel}
+                      onToggleShowArchived={() => setShowArchived(!showArchived)}
+                    />
+                  </div>
+                )}
+              </main>
+
+              <ProcessRail />
+            </div>
+          </div>
         </div>
 
         {/* External review panel */}

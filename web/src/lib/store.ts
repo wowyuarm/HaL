@@ -37,11 +37,22 @@ export type ReviewPanelState =
     }
   | null
 
+export interface WorkspaceTabState {
+  id: string
+  activeThreadSlug: string | null
+  selectedSessionId: string | null
+  reviewPanel: ReviewPanelState
+  showArchived: boolean
+  activeThreadRequestId: number
+}
+
 interface HalStore {
   threads: ThreadSummary[]
   threadDetails: Record<string, ThreadDetail>
   sessionManifests: Record<string, SessionManifest>
   sessionEvents: Record<string, SessionEvent[]>
+  workspaceTabs: WorkspaceTabState[]
+  activeWorkspaceTabId: string | null
   activeThreadSlug: string | null
   selectedSessionId: string | null
   reviewPanel: ReviewPanelState
@@ -56,6 +67,9 @@ interface HalStore {
   activeThreadRequestId: number
   lastError: string | null
 
+  openWorkspaceTab: (threadSlug?: string | null) => void
+  activateWorkspaceTab: (tabId: string) => void
+  closeWorkspaceTab: (tabId: string) => void
   selectThread: (slug: string) => void
   selectSession: (sessionId: string | null) => void
   toggleBriefPanel: () => void
@@ -444,13 +458,90 @@ function mergeManifestIntoState(
   }
 }
 
+let nextWorkspaceTabId = 1
 let nextThreadLoadRequestId = 0
+
+function createWorkspaceTab(
+  input: Partial<Omit<WorkspaceTabState, 'id'>> = {},
+): WorkspaceTabState {
+  return {
+    id: `tab-${nextWorkspaceTabId++}`,
+    activeThreadSlug: input.activeThreadSlug ?? null,
+    selectedSessionId: input.selectedSessionId ?? null,
+    reviewPanel: input.reviewPanel ?? null,
+    showArchived: input.showArchived ?? false,
+    activeThreadRequestId: input.activeThreadRequestId ?? 0,
+  }
+}
+
+function getWorkspaceTab(
+  tabs: WorkspaceTabState[],
+  tabId: string | null,
+): WorkspaceTabState | undefined {
+  return tabId ? tabs.find((tab) => tab.id === tabId) : undefined
+}
+
+function syncActiveWorkspaceTabState(
+  tabs: WorkspaceTabState[],
+  activeTabId: string | null,
+): Pick<
+  HalStore,
+  | 'workspaceTabs'
+  | 'activeWorkspaceTabId'
+  | 'activeThreadSlug'
+  | 'selectedSessionId'
+  | 'reviewPanel'
+  | 'showArchived'
+  | 'activeThreadRequestId'
+> {
+  const activeTab = getWorkspaceTab(tabs, activeTabId) ?? tabs[0]
+  return {
+    workspaceTabs: tabs,
+    activeWorkspaceTabId: activeTab?.id ?? null,
+    activeThreadSlug: activeTab?.activeThreadSlug ?? null,
+    selectedSessionId: activeTab?.selectedSessionId ?? null,
+    reviewPanel: activeTab?.reviewPanel ?? null,
+    showArchived: activeTab?.showArchived ?? false,
+    activeThreadRequestId: activeTab?.activeThreadRequestId ?? 0,
+  }
+}
+
+function updateActiveWorkspaceTab(
+  state: Pick<
+    HalStore,
+    | 'workspaceTabs'
+    | 'activeWorkspaceTabId'
+    | 'activeThreadSlug'
+    | 'selectedSessionId'
+    | 'reviewPanel'
+    | 'showArchived'
+    | 'activeThreadRequestId'
+  >,
+  updater: (tab: WorkspaceTabState) => WorkspaceTabState,
+): Pick<
+  HalStore,
+  | 'workspaceTabs'
+  | 'activeWorkspaceTabId'
+  | 'activeThreadSlug'
+  | 'selectedSessionId'
+  | 'reviewPanel'
+  | 'showArchived'
+  | 'activeThreadRequestId'
+> {
+  const activeTabId = state.activeWorkspaceTabId
+  const tabs = state.workspaceTabs.map((tab) =>
+    tab.id === activeTabId ? updater(tab) : tab,
+  )
+  return syncActiveWorkspaceTabState(tabs, activeTabId)
+}
 
 export const useHalStore = create<HalStore>((set, get) => ({
   threads: [],
   threadDetails: {},
   sessionManifests: {},
   sessionEvents: {},
+  workspaceTabs: [createWorkspaceTab()],
+  activeWorkspaceTabId: 'tab-1',
   activeThreadSlug: null,
   selectedSessionId: null,
   reviewPanel: null,
@@ -465,50 +556,112 @@ export const useHalStore = create<HalStore>((set, get) => ({
   activeThreadRequestId: 0,
   lastError: null,
 
+  openWorkspaceTab: (threadSlug) =>
+    set((state) => {
+      const nextTab = createWorkspaceTab({
+        activeThreadSlug: threadSlug ?? state.activeThreadSlug,
+      })
+      return syncActiveWorkspaceTabState([...state.workspaceTabs, nextTab], nextTab.id)
+    }),
+  activateWorkspaceTab: (tabId) =>
+    set((state) => syncActiveWorkspaceTabState(state.workspaceTabs, tabId)),
+  closeWorkspaceTab: (tabId) =>
+    set((state) => {
+      if (state.workspaceTabs.length === 1) return state
+      const index = state.workspaceTabs.findIndex((tab) => tab.id === tabId)
+      if (index === -1) return state
+
+      const remainingTabs = state.workspaceTabs.filter((tab) => tab.id !== tabId)
+      const nextActiveTabId =
+        state.activeWorkspaceTabId === tabId
+          ? (remainingTabs[Math.max(0, index - 1)]?.id ?? remainingTabs[0]?.id ?? null)
+          : state.activeWorkspaceTabId
+      return syncActiveWorkspaceTabState(remainingTabs, nextActiveTabId)
+    }),
   selectThread: (slug) =>
-    set(() => ({
-      activeThreadSlug: slug,
-      selectedSessionId: null,
-      reviewPanel: null,
-    })),
-  selectSession: (sessionId) => set({ selectedSessionId: sessionId, reviewPanel: null }),
+    set((state) =>
+      updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        activeThreadSlug: slug,
+        selectedSessionId: null,
+        reviewPanel: null,
+        activeThreadRequestId: 0,
+      })),
+    ),
+  selectSession: (sessionId) =>
+    set((state) =>
+      updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        selectedSessionId: sessionId,
+        reviewPanel: null,
+      })),
+    ),
   toggleBriefPanel: () =>
     set((state) => ({
-      reviewPanel: state.reviewPanel?.kind === 'brief' ? null : { kind: 'brief' },
+      ...updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        reviewPanel: tab.reviewPanel?.kind === 'brief' ? null : { kind: 'brief' },
+      })),
     })),
-  closeReviewPanel: () => set({ reviewPanel: null }),
+  closeReviewPanel: () =>
+    set((state) =>
+      updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        reviewPanel: null,
+      })),
+    ),
   openProcessPanel: (turnId) =>
     set((state) => ({
-      reviewPanel:
-        state.reviewPanel?.kind === 'process' && state.reviewPanel.turnId === turnId
-          ? null
-          : { kind: 'process', turnId },
+      ...updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        reviewPanel:
+          tab.reviewPanel?.kind === 'process' && tab.reviewPanel.turnId === turnId
+            ? null
+            : { kind: 'process', turnId },
+      })),
     })),
   openEpisode: ({ threadSlug, episodePath, episodeTitle }) =>
-    set({
-      reviewPanel: {
-        kind: 'episode',
-        threadSlug,
-        episodePath,
-        episodeTitle,
-      },
-    }),
+    set((state) =>
+      updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        reviewPanel: {
+          kind: 'episode',
+          threadSlug,
+          episodePath,
+          episodeTitle,
+        },
+      })),
+    ),
   setSocketState: (state) => set({ socketState: state }),
   setError: (message) => set({ lastError: message }),
-  setShowArchived: (value) => set({ showArchived: value }),
+  setShowArchived: (value) =>
+    set((state) =>
+      updateActiveWorkspaceTab(state, (tab) => ({
+        ...tab,
+        showArchived: value,
+      })),
+    ),
 
   loadThreads: async () => {
     set({ loadingThreads: true, lastError: null })
     try {
       const threads = await listThreads()
-      set((state) => ({
-        threads: sortThreadSummaries(threads),
-        activeThreadSlug:
-          state.activeThreadSlug && threads.some((thread) => thread.slug === state.activeThreadSlug)
-            ? state.activeThreadSlug
-            : (threads[0]?.slug ?? null),
-        loadingThreads: false,
-      }))
+      set((state) => {
+        const activeTab = getWorkspaceTab(state.workspaceTabs, state.activeWorkspaceTabId)
+        const resolvedThreadSlug =
+          activeTab?.activeThreadSlug &&
+          threads.some((thread) => thread.slug === activeTab.activeThreadSlug)
+            ? activeTab.activeThreadSlug
+            : (threads[0]?.slug ?? null)
+        const tabs = state.workspaceTabs.map((tab) =>
+          tab.id === state.activeWorkspaceTabId ? { ...tab, activeThreadSlug: resolvedThreadSlug } : tab,
+        )
+        return {
+          threads: sortThreadSummaries(threads),
+          loadingThreads: false,
+          ...syncActiveWorkspaceTabState(tabs, state.activeWorkspaceTabId),
+        }
+      })
     } catch (error) {
       set({
         loadingThreads: false,
@@ -520,10 +673,19 @@ export const useHalStore = create<HalStore>((set, get) => ({
   loadThread: async (slug, options) => {
     const adoptSelection = options?.adoptSelection ?? true
     const focusSessionId = options?.focusSessionId ?? null
-    const includeArchived = get().showArchived
+    const activeTabId = get().activeWorkspaceTabId
+    const includeArchived =
+      getWorkspaceTab(get().workspaceTabs, activeTabId)?.showArchived ?? get().showArchived
     const requestId = adoptSelection ? ++nextThreadLoadRequestId : 0
     if (adoptSelection) {
-      set({ loadingThreadSlug: slug, activeThreadRequestId: requestId, lastError: null })
+      set((state) => ({
+        loadingThreadSlug: slug,
+        lastError: null,
+        ...updateActiveWorkspaceTab(state, (tab) => ({
+          ...tab,
+          activeThreadRequestId: requestId,
+        })),
+      }))
     }
     try {
       const detail = normalizeThreadDetail(await getThread(slug, { includeArchived }))
@@ -531,7 +693,9 @@ export const useHalStore = create<HalStore>((set, get) => ({
         const staleArchivedView = state.showArchived !== includeArchived
         const staleSelection =
           adoptSelection &&
-          (state.activeThreadSlug !== slug || state.activeThreadRequestId !== requestId)
+          (state.activeWorkspaceTabId !== activeTabId ||
+            state.activeThreadSlug !== slug ||
+            state.activeThreadRequestId !== requestId)
         if (staleArchivedView || staleSelection) {
           return {}
         }
@@ -550,6 +714,7 @@ export const useHalStore = create<HalStore>((set, get) => ({
         }
         if (
           adoptSelection &&
+          state.activeWorkspaceTabId === activeTabId &&
           state.activeThreadSlug === slug &&
           state.activeThreadRequestId === requestId
         ) {
@@ -570,6 +735,22 @@ export const useHalStore = create<HalStore>((set, get) => ({
             nextState.reviewPanel = null
           }
           nextState.loadingThreadSlug = null
+          const tabs = state.workspaceTabs.map((tab) =>
+            tab.id === state.activeWorkspaceTabId
+              ? {
+                  ...tab,
+                  activeThreadSlug: slug,
+                  selectedSessionId: nextState.selectedSessionId ?? null,
+                  reviewPanel:
+                    nextState.reviewPanel === undefined ? state.reviewPanel : nextState.reviewPanel,
+                  activeThreadRequestId: requestId,
+                }
+              : tab,
+          )
+          return {
+            ...(nextState as Partial<HalStore>),
+            ...syncActiveWorkspaceTabState(tabs, state.activeWorkspaceTabId),
+          }
         }
         return nextState as Partial<HalStore>
       })
@@ -578,7 +759,9 @@ export const useHalStore = create<HalStore>((set, get) => ({
         return
       }
       set((state) =>
-        state.activeThreadSlug === slug && state.activeThreadRequestId === requestId
+        state.activeWorkspaceTabId === activeTabId &&
+        state.activeThreadSlug === slug &&
+        state.activeThreadRequestId === requestId
           ? {
               loadingThreadSlug: null,
               lastError: error instanceof Error ? error.message : `Failed to load thread ${slug}.`,
@@ -731,11 +914,19 @@ export const useHalStore = create<HalStore>((set, get) => ({
         [manifest.session_id]: [...events].sort((a, b) => a.seq - b.seq),
       }
       const sessionChanged = state.selectedSessionId !== manifest.session_id
+      const tabs = state.workspaceTabs.map((tab) =>
+        tab.id === state.activeWorkspaceTabId
+          ? {
+              ...tab,
+              selectedSessionId: manifest.session_id,
+              reviewPanel: sessionChanged ? null : tab.reviewPanel,
+            }
+          : tab,
+      )
       return {
         sessionEvents,
         ...mergeManifestIntoState(state, manifest),
-        selectedSessionId: manifest.session_id,
-        reviewPanel: sessionChanged ? null : state.reviewPanel,
+        ...syncActiveWorkspaceTabState(tabs, state.activeWorkspaceTabId),
       }
     }),
 

@@ -79,15 +79,27 @@ function deferred<T>() {
 }
 
 function resetStore(overrides: Partial<ReturnType<typeof useHalStore.getState>> = {}): void {
+  const baseTab = INITIAL_STATE.workspaceTabs[0]
   useHalStore.setState({
     ...INITIAL_STATE,
     threads: [],
     threadDetails: {},
     sessionManifests: {},
     sessionEvents: {},
-    activeThreadSlug: null,
-    selectedSessionId: null,
-    reviewPanel: null,
+    workspaceTabs: [
+      {
+        ...baseTab,
+        activeThreadSlug: overrides.activeThreadSlug ?? null,
+        selectedSessionId: overrides.selectedSessionId ?? null,
+        reviewPanel: overrides.reviewPanel ?? null,
+        showArchived: overrides.showArchived ?? false,
+        activeThreadRequestId: overrides.activeThreadRequestId ?? 0,
+      },
+    ],
+    activeWorkspaceTabId: baseTab.id,
+    activeThreadSlug: overrides.activeThreadSlug ?? null,
+    selectedSessionId: overrides.selectedSessionId ?? null,
+    reviewPanel: overrides.reviewPanel ?? null,
     socketState: 'disconnected',
     loadingThreads: false,
     loadingThreadSlug: null,
@@ -95,8 +107,8 @@ function resetStore(overrides: Partial<ReturnType<typeof useHalStore.getState>> 
     creatingSession: false,
     updatingScopeSessionId: null,
     mutatingArchiveSessionId: null,
-    showArchived: false,
-    activeThreadRequestId: 0,
+    showArchived: overrides.showArchived ?? false,
+    activeThreadRequestId: overrides.activeThreadRequestId ?? 0,
     lastError: null,
     ...overrides,
   })
@@ -175,7 +187,7 @@ await runTest('loadThread ignores stale archived responses', async () => {
 
   const archivedLoad = useHalStore.getState().loadThread('alpha')
 
-  useHalStore.setState({ showArchived: false })
+  useHalStore.getState().setShowArchived(false)
   const liveLoad = useHalStore.getState().loadThread('alpha')
 
   liveResponse.resolve(jsonResponse({ thread: liveDetail }))
@@ -274,3 +286,42 @@ await runTest(
     assert.deepEqual(useHalStore.getState().threads[0]?.session_counts, { active: 2 })
   },
 )
+
+await runTest('workspace tabs preserve independent thread and session selections', () => {
+  resetStore({
+    threads: [
+      makeThreadSummary('alpha', { active: 1 }, '2026-03-26T09:00:00Z'),
+      makeThreadSummary('beta', { active: 1 }, '2026-03-26T10:00:00Z'),
+    ],
+    activeThreadSlug: 'alpha',
+    selectedSessionId: 'session-alpha',
+  })
+
+  const store = useHalStore.getState()
+  const initialTabId = store.activeWorkspaceTabId
+  assert.ok(initialTabId)
+
+  store.openWorkspaceTab('beta')
+  const secondTabId = useHalStore.getState().activeWorkspaceTabId
+  assert.notEqual(secondTabId, initialTabId)
+  assert.equal(useHalStore.getState().activeThreadSlug, 'beta')
+  assert.equal(useHalStore.getState().selectedSessionId, null)
+
+  useHalStore.getState().selectSession('session-beta')
+  useHalStore.getState().activateWorkspaceTab(initialTabId!)
+
+  assert.equal(useHalStore.getState().activeThreadSlug, 'alpha')
+  assert.equal(useHalStore.getState().selectedSessionId, 'session-alpha')
+
+  useHalStore.getState().selectThread('gamma')
+  assert.equal(useHalStore.getState().activeThreadSlug, 'gamma')
+
+  useHalStore.getState().activateWorkspaceTab(secondTabId!)
+  assert.equal(useHalStore.getState().activeThreadSlug, 'beta')
+  assert.equal(useHalStore.getState().selectedSessionId, 'session-beta')
+
+  useHalStore.getState().closeWorkspaceTab(secondTabId!)
+  assert.equal(useHalStore.getState().workspaceTabs.length, 1)
+  assert.equal(useHalStore.getState().activeWorkspaceTabId, initialTabId)
+  assert.equal(useHalStore.getState().activeThreadSlug, 'gamma')
+})

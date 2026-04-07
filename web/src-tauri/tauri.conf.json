@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HaL Desktop",
+  "version": "0.1.0",
+  "identifier": "arm.wowyu.hal.desktop",
+  "build": {
+    "beforeDevCommand": "bash ./scripts/tauri-dev.sh",
+    "devUrl": "http://127.0.0.1:3000",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "active": false
+  }
+}
