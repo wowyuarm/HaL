@@ -124,6 +124,10 @@ def test_anyrouter_bridge_invokes_node_process(
     )
     assert called["env"]["ANYROUTER_DEFAULT_THINKING_EFFORT"] == "high"
     assert called["env"]["ANYROUTER_VERBOSE"] == "true"
+    assert called["env"]["ANYROUTER_REQUEST_TIMEOUT_MS"] == "45000"
+    assert called["env"]["ANYROUTER_MAX_RETRIES"] == "2"
+    assert called["env"]["ANYROUTER_RETRY_BASE_DELAY_MS"] == "750"
+    assert called["env"]["ANYROUTER_STREAM_IDLE_TIMEOUT_MS"] == "30000"
 
 
 def test_anyrouter_bridge_uses_configured_header_and_effort_overrides(

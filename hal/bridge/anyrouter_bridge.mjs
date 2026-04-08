@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import { Readable } from "node:stream";
+
+import {
+  applyBridgeDefaults,
+  isRetryableUpstreamError,
+  normalizeThinkingEffort,
+  shouldRetryUpstreamStatus,
+} from "./anyrouter_bridge_core.mjs";
 
 const DEFAULT_UPSTREAM = "https://anyrouter.top";
 const DEFAULT_HOST = "127.0.0.1";
@@ -9,10 +17,12 @@ const DEFAULT_PORT = 3181;
 const DEFAULT_USER_AGENT = "claude-cli/2.1.2 (external, cli)";
 const DEFAULT_BETA =
   "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14";
-const DEFAULT_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
-const THINKING_ADAPTIVE_TYPE = "adaptive";
 const DEFAULT_THINKING_EFFORT = "high";
-const VALID_THINKING_EFFORTS = new Set(["low", "medium", "high", "max"]);
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 750;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 30_000;
+const CLIENT_REQUEST_ID_HEADER = "x-client-request-id";
 
 const HOP_HEADERS = new Set([
   "connection",
@@ -46,6 +56,18 @@ function envBool(name, fallback) {
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
 }
 
+function parsePositiveIntEnv(name, fallback) {
+  const value = process.env[name];
+  if (!value) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
 function getFirstHeaderValue(value) {
   if (Array.isArray(value)) {
     return value.join(", ");
@@ -57,104 +79,22 @@ function normalizeUpstreamUrl(url) {
   return (url || DEFAULT_UPSTREAM).replace(/\/+$/, "");
 }
 
-function toSystemBlocks(systemField) {
-  if (!systemField) {
-    return [];
-  }
-  if (typeof systemField === "string") {
-    return [{ type: "text", text: systemField }];
-  }
-  if (Array.isArray(systemField)) {
-    return systemField.map((item) => {
-      if (typeof item === "string") {
-        return { type: "text", text: item };
-      }
-      if (item && typeof item === "object") {
-        return { ...item };
-      }
-      return { type: "text", text: String(item) };
-    });
-  }
-  return [{ type: "text", text: String(systemField) }];
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function hasClaudeCodeSystem(systemBlocks) {
-  const lowered = DEFAULT_SYSTEM.toLowerCase();
-  return systemBlocks.some((block) => {
-    if (!block || typeof block !== "object") {
-      return false;
-    }
-    const text = typeof block.text === "string" ? block.text : "";
-    return text.toLowerCase().includes(lowered);
-  });
+function retryDelayMs(attemptNumber, baseDelayMs) {
+  return baseDelayMs * (2 ** Math.max(attemptNumber - 1, 0));
 }
 
-function ensureClaudeCodeSystem(body) {
-  const blocks = toSystemBlocks(body.system);
-  if (hasClaudeCodeSystem(blocks)) {
-    body.system = blocks;
-    return;
-  }
-
-  body.system = [
-    {
-      type: "text",
-      text: DEFAULT_SYSTEM,
-      cache_control: { type: "ephemeral" },
+function buildBridgeError(message, details = {}) {
+  return JSON.stringify({
+    error: {
+      type: "bridge_error",
+      message,
+      ...details,
     },
-    ...blocks,
-  ];
-}
-
-function normalizeThinkingEffort(value) {
-  if (typeof value !== "string") {
-    return DEFAULT_THINKING_EFFORT;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (!VALID_THINKING_EFFORTS.has(normalized)) {
-    return DEFAULT_THINKING_EFFORT;
-  }
-  return normalized;
-}
-
-function resolveThinkingType(thinking) {
-  if (!thinking) {
-    return "";
-  }
-  if (typeof thinking === "string") {
-    return thinking.trim().toLowerCase();
-  }
-  if (typeof thinking === "object") {
-    if (Array.isArray(thinking)) {
-      return "";
-    }
-    const value = thinking.type;
-    if (typeof value === "string") {
-      return value.trim().toLowerCase();
-    }
-  }
-  return "";
-}
-
-function ensureDefaultThinking(body) {
-  if (body.thinking !== undefined && body.thinking !== null) {
-    return;
-  }
-  body.thinking = { type: THINKING_ADAPTIVE_TYPE };
-}
-
-function ensureDefaultAdaptiveEffort(body, preferredEffort) {
-  if (resolveThinkingType(body.thinking) !== THINKING_ADAPTIVE_TYPE) {
-    return;
-  }
-  const outputConfig = body.output_config;
-  if (!outputConfig || typeof outputConfig !== "object" || Array.isArray(outputConfig)) {
-    body.output_config = { effort: preferredEffort };
-    return;
-  }
-  if (outputConfig.effort === undefined || outputConfig.effort === null || outputConfig.effort === "") {
-    outputConfig.effort = preferredEffort;
-  }
+  });
 }
 
 function copyResponseHeaders(source, target) {
@@ -175,6 +115,160 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
+async function fetchUpstreamWithRetries({
+  reqId,
+  method,
+  requestPath,
+  upstreamUrl,
+  headers,
+  body,
+  timeoutMs,
+  maxRetries,
+  retryBaseDelayMs,
+}) {
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    attempt += 1;
+    const abortController = new AbortController();
+    const timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(upstreamUrl, {
+        method,
+        headers,
+        body,
+        redirect: "manual",
+        signal: abortController.signal,
+      });
+      clearTimeout(timeoutHandle);
+
+      if (shouldRetryUpstreamStatus(response.status) && attempt <= maxRetries) {
+        response.body?.cancel?.();
+        const delayMs = retryDelayMs(attempt, retryBaseDelayMs);
+        logInfo(
+          `#${reqId} ${method} ${requestPath} upstream ${response.status}, retrying in ${delayMs}ms (attempt ${attempt}/${maxRetries + 1})`,
+        );
+        await sleep(delayMs);
+        continue;
+      }
+
+      return { response, abortController, attempt };
+    } catch (error) {
+      clearTimeout(timeoutHandle);
+      if (!isRetryableUpstreamError(error) || attempt > maxRetries) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const delayMs = retryDelayMs(attempt, retryBaseDelayMs);
+      logInfo(
+        `#${reqId} ${method} ${requestPath} transient error "${message}", retrying in ${delayMs}ms (attempt ${attempt}/${maxRetries + 1})`,
+      );
+      await sleep(delayMs);
+    }
+  }
+
+  throw new Error("unreachable");
+}
+
+async function forwardResponseBody({
+  reqId,
+  method,
+  requestPath,
+  upstreamResponse,
+  res,
+  abortController,
+  streamIdleTimeoutMs,
+}) {
+  if (!upstreamResponse.body) {
+    res.end();
+    return;
+  }
+
+  const upstreamStream = Readable.fromWeb(upstreamResponse.body);
+  let idleTimer = null;
+  let chunkCount = 0;
+  let settled = false;
+
+  const finish = () => {
+    if (settled) {
+      return false;
+    }
+    settled = true;
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    return true;
+  };
+
+  const resetIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+    }
+    idleTimer = setTimeout(() => {
+      const message = `upstream stream idle timeout after ${streamIdleTimeoutMs}ms`;
+      logInfo(`#${reqId} ${method} ${requestPath} ${message}`);
+      abortController.abort();
+      upstreamStream.destroy(new Error(message));
+      if (chunkCount === 0 && !res.headersSent && !res.writableEnded) {
+        res.writeHead(504, { "content-type": "application/json" });
+        res.end(buildBridgeError(message, { reason: "upstream_stream_idle_timeout" }));
+        finish();
+        return;
+      }
+      if (!res.writableEnded) {
+        res.destroy(new Error(message));
+      }
+      finish();
+    }, streamIdleTimeoutMs);
+  };
+
+  await new Promise((resolve) => {
+    const cleanupAndResolve = () => {
+      finish();
+      resolve();
+    };
+
+    res.on("close", () => {
+      abortController.abort();
+      upstreamStream.destroy();
+      cleanupAndResolve();
+    });
+
+    upstreamStream.on("data", (chunk) => {
+      chunkCount += 1;
+      resetIdleTimer();
+      if (!res.write(chunk)) {
+        upstreamStream.pause();
+        res.once("drain", () => {
+          if (!settled) {
+            upstreamStream.resume();
+          }
+        });
+      }
+    });
+
+    upstreamStream.on("end", () => {
+      if (!res.writableEnded) {
+        res.end();
+      }
+      cleanupAndResolve();
+    });
+
+    upstreamStream.on("error", (error) => {
+      if (!res.headersSent && !res.writableEnded) {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(buildBridgeError(error instanceof Error ? error.message : String(error)));
+      } else if (!res.writableEnded) {
+        res.destroy(error instanceof Error ? error : new Error(String(error)));
+      }
+      cleanupAndResolve();
+    });
+
+    resetIdleTimer();
+  });
+}
+
 const host = process.env.ANYROUTER_BRIDGE_HOST || DEFAULT_HOST;
 const port = Number.parseInt(process.env.ANYROUTER_BRIDGE_PORT || `${DEFAULT_PORT}`, 10);
 const upstream = normalizeUpstreamUrl(process.env.ANYROUTER_UPSTREAM);
@@ -186,7 +280,23 @@ const allowBrowserAccess = envBool("ANYROUTER_DIRECT_BROWSER_ACCESS", true);
 const forceStream = envBool("ANYROUTER_FORCE_STREAM", true);
 const injectClaudeCodeSystem = envBool("ANYROUTER_INJECT_CLAUDE_CODE_SYSTEM", true);
 const defaultThinking = envBool("ANYROUTER_DEFAULT_THINKING", true);
-const defaultThinkingEffort = normalizeThinkingEffort(process.env.ANYROUTER_DEFAULT_THINKING_EFFORT);
+const defaultThinkingEffort = normalizeThinkingEffort(
+  process.env.ANYROUTER_DEFAULT_THINKING_EFFORT,
+  DEFAULT_THINKING_EFFORT,
+);
+const requestTimeoutMs = parsePositiveIntEnv(
+  "ANYROUTER_REQUEST_TIMEOUT_MS",
+  DEFAULT_REQUEST_TIMEOUT_MS,
+);
+const maxRetries = parsePositiveIntEnv("ANYROUTER_MAX_RETRIES", DEFAULT_MAX_RETRIES);
+const retryBaseDelayMs = parsePositiveIntEnv(
+  "ANYROUTER_RETRY_BASE_DELAY_MS",
+  DEFAULT_RETRY_BASE_DELAY_MS,
+);
+const streamIdleTimeoutMs = parsePositiveIntEnv(
+  "ANYROUTER_STREAM_IDLE_TIMEOUT_MS",
+  DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+);
 const verboseLogs = envBool("ANYROUTER_VERBOSE", false);
 let requestCounter = 0;
 
@@ -247,17 +357,12 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      if (forceStream) {
-        payload.stream = true;
-      }
-      if (injectClaudeCodeSystem) {
-        ensureClaudeCodeSystem(payload);
-      }
-      if (defaultThinking) {
-        ensureDefaultThinking(payload);
-        ensureDefaultAdaptiveEffort(payload, defaultThinkingEffort);
-      }
-      payload.temperature = 1;
+      payload = applyBridgeDefaults(payload, {
+        forceStream,
+        injectClaudeCodeSystem,
+        defaultThinking,
+        defaultThinkingEffort,
+      });
       upstreamBody = Buffer.from(JSON.stringify(payload));
       logDebug(
         `#${reqId} payload model=${payload.model || "-"} messages=${
@@ -305,30 +410,43 @@ const server = http.createServer(async (req, res) => {
     if (!upstreamHeaders.has("content-type")) {
       upstreamHeaders.set("content-type", "application/json");
     }
+    if (!upstreamHeaders.has(CLIENT_REQUEST_ID_HEADER)) {
+      upstreamHeaders.set(CLIENT_REQUEST_ID_HEADER, randomUUID());
+    }
 
     const upstreamUrl = `${upstream}${requestUrl}`;
-    const upstreamResponse = await fetch(upstreamUrl, {
-      method,
-      headers: upstreamHeaders,
-      body: upstreamBody.length > 0 ? upstreamBody : undefined,
-      redirect: "manual",
-    });
+    const { response: upstreamResponse, abortController, attempt } =
+      await fetchUpstreamWithRetries({
+        reqId,
+        method,
+        requestPath,
+        upstreamUrl,
+        headers: upstreamHeaders,
+        body: upstreamBody.length > 0 ? upstreamBody : undefined,
+        timeoutMs: requestTimeoutMs,
+        maxRetries,
+        retryBaseDelayMs,
+      });
 
     const elapsed = Date.now() - startedAt;
     logInfo(
-      `#${reqId} ${method} ${requestPath} -> ${upstreamResponse.status} (${elapsed}ms)`,
+      `#${reqId} ${method} ${requestPath} -> ${upstreamResponse.status} (${elapsed}ms, attempt ${attempt})`,
     );
     logDebug(
-      `#${reqId} upstream content-type=${upstreamResponse.headers.get("content-type") || "-"}`,
+      `#${reqId} upstream content-type=${upstreamResponse.headers.get("content-type") || "-"} request-id=${upstreamHeaders.get(CLIENT_REQUEST_ID_HEADER) || "-"}`,
     );
     copyResponseHeaders(upstreamResponse.headers, res);
     res.statusCode = upstreamResponse.status;
 
-    if (upstreamResponse.body) {
-      Readable.fromWeb(upstreamResponse.body).pipe(res);
-    } else {
-      res.end();
-    }
+    await forwardResponseBody({
+      reqId,
+      method,
+      requestPath,
+      upstreamResponse,
+      res,
+      abortController,
+      streamIdleTimeoutMs,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const elapsed = Date.now() - startedAt;
@@ -339,14 +457,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(502, { "content-type": "application/json" });
     }
     if (!res.writableEnded) {
-      res.end(
-        JSON.stringify({
-          error: {
-            type: "bridge_error",
-            message,
-          },
-        }),
-      );
+      res.end(buildBridgeError(message));
     }
   }
 });
